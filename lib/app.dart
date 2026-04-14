@@ -1,6 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'providers/household_provider.dart';
+import 'providers/trakt_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/household/setup_screen.dart';
@@ -9,6 +12,7 @@ import 'screens/discover/discover_screen.dart';
 import 'screens/history/history_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/profile/profile_screen.dart';
+import 'screens/profile/trakt_link_screen.dart';
 
 final _router = GoRouter(
   initialLocation: '/login',
@@ -27,7 +31,13 @@ final _router = GoRouter(
         GoRoute(path: '/discover', builder: (_, __) => const DiscoverScreen()),
         GoRoute(path: '/history', builder: (_, __) => const HistoryScreen()),
         GoRoute(path: '/stats', builder: (_, __) => const StatsScreen()),
-        GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+        GoRoute(
+          path: '/profile',
+          builder: (_, __) => const ProfileScreen(),
+          routes: [
+            GoRoute(path: 'trakt', builder: (_, __) => const TraktLinkScreen()),
+          ],
+        ),
       ],
     ),
   ],
@@ -48,12 +58,53 @@ class WatchNextApp extends StatelessWidget {
   }
 }
 
-class ScaffoldWithNavBar extends ConsumerWidget {
+class ScaffoldWithNavBar extends ConsumerStatefulWidget {
   final Widget child;
   const ScaffoldWithNavBar({super.key, required this.child});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ScaffoldWithNavBar> createState() => _ScaffoldWithNavBarState();
+}
+
+class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeSyncTrakt());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _maybeSyncTrakt();
+  }
+
+  Future<void> _maybeSyncTrakt() async {
+    // Best-effort; surfaces nothing to the user unless this is slow on a
+    // metered network (it runs behind the UI). Errors are swallowed so a
+    // transient Trakt hiccup never blocks navigation.
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final householdId = await ref.read(householdIdProvider.future);
+      if (householdId == null) return;
+      await ref.read(traktSyncServiceProvider).syncIfStale(
+            householdId: householdId,
+            uid: user.uid,
+          );
+    } catch (_) {
+      // Intentional: silent failure — see comment above.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
     int selectedIndex = 0;
     if (location.startsWith('/discover')) selectedIndex = 1;
@@ -62,7 +113,7 @@ class ScaffoldWithNavBar extends ConsumerWidget {
     if (location.startsWith('/profile')) selectedIndex = 4;
 
     return Scaffold(
-      body: child,
+      body: widget.child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         destinations: const [

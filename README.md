@@ -2,7 +2,22 @@
 
 A shared movie & TV recommender for two-person households. Decide what to watch, together — backed by AI recommendations that learn from both partners' taste.
 
-See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation**.
+See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation** and **Phase 2: Trakt Integration**.
+
+## Phase 2 status
+
+| Layer | Status |
+|-------|--------|
+| Trakt OAuth 2.0 (browser flow, CSRF-protected state) | Done |
+| Token storage + automatic refresh | Done |
+| `TraktService` (history, ratings, trending, recommendations, push) | Done |
+| `TraktSyncService` — full sync + incremental sync | Done |
+| TMDB cross-ref for entry metadata | Done |
+| Per-episode watch timestamps for TV | Done |
+| App-open incremental sync (>1hr since last) | Done |
+| Unrated queue provider (show/movie level) | Done |
+| Trakt link/unlink UI in Profile | Done |
+| Trakt Client ID + Secret | **Needed — see below** |
 
 ## Phase 1 status
 
@@ -55,8 +70,22 @@ See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo current
    flutter run --dart-define=TMDB_API_KEY=your_tmdb_key_here
    ```
 
-Keys needed for later phases (document here when you get them):
-- Trakt Client ID + Secret (Phase 2)
+**Trakt Client ID + Secret** (Phase 2) — register an application at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications):
+
+1. **Name**: WatchNext (or anything)
+2. **Redirect URI**: `com.household.watchnext://trakt-callback`
+3. **Permissions**: `/scrobble` (needed for history + ratings)
+4. Copy the Client ID + Client Secret into `env.json`:
+   ```json
+   {
+     "TMDB_API_KEY": "…",
+     "TRAKT_CLIENT_ID": "…",
+     "TRAKT_CLIENT_SECRET": "…"
+   }
+   ```
+5. Run via `./run.sh` so the keys are injected via `--dart-define-from-file=env.json`.
+
+Keys needed for later phases:
 - Anthropic API key (Phase 7) — set as Cloud Functions secret: `firebase functions:secrets:set ANTHROPIC_API_KEY`
 
 ### Run locally

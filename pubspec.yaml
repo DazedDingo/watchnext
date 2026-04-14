@@ -31,6 +31,9 @@ dependencies:
   # Deep links (future: Share-to-Save Phase 4, invite links)
   app_links: ^6.3.3
 
+  # Trakt OAuth browser flow (Phase 2)
+  flutter_web_auth_2: ^4.1.0
+
   # Utilities
   intl: ^0.19.0
   package_info_plus: ^9.0.1

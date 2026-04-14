@@ -19,16 +19,17 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 
 ---
 
-## Phase 2 — Trakt Integration
+## Phase 2 — Trakt Integration ✅
 
-- Trakt OAuth 2.0 per user. Browser auth, token exchange, encrypted storage on member doc.
-- `TraktService` (Retrofit-equivalent in Dart = `http` + typed models).
-  Endpoints: `GET /users/me/history/movies`, `/history/shows` (includes per-episode data), `/ratings/movies`, `/ratings/shows`, `/ratings/episodes`, `POST /sync/ratings`, `/movies/trending`, `/shows/trending`, `/users/me/recommendations/movies`. Token refresh.
-- Full sync on first link: paginated pull of entire watch history. For each item: get TMDB metadata, create watchEntry. For TV: create `/episodes` sub-docs with per-episode watch timestamps. Map Trakt 1–10 → 1–5 stars.
-- Incremental sync on app open (>1hr since last). Push new WatchNext ratings to Trakt (show-level + episode-level).
-- **Unrated Queue** logic: after each sync, identify all watchEntries/episodes that have been watched but have no corresponding rating doc for the current user. Expose as a queryable list.
+- Trakt OAuth 2.0 per user. Browser auth (CSRF state-protected), token exchange, tokens on member doc.
+- `TraktService` — history, ratings, trending, recommendations, push ratings, token refresh.
+- Full sync on first link: paginated pull of entire watch history, TMDB cross-ref, per-episode sub-docs for TV.
+- Incremental sync on app open (>1hr since last `last_trakt_sync`).
+- Push WatchNext ratings to Trakt: wired in `TraktService.pushRating` — called from the rating flow in Phase 3.
+- **Unrated Queue** provider exposed in `lib/providers/watch_entries_provider.dart`.
+- Client-side sync (no Cloud Function dependency / Blaze plan) — the spec mentioned a `traktSync` Cloud Function; revisit if we need server-side push notifications on sync completion later.
 
-**Cloud Function:** `traktSync` — triggered on demand + app-open webhook.
+**Deferred to Phase 3:** the Unrated Queue UI and the per-episode unrated pass.
 
 ---
 

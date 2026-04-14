@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/trakt_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -13,6 +15,7 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final user = FirebaseAuth.instance.currentUser;
     final inviteCodeAsync = ref.watch(householdInviteCodeProvider);
+    final traktAsync = ref.watch(traktLinkStatusProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
@@ -49,8 +52,22 @@ class ProfileScreen extends ConsumerWidget {
             error: (e, _) => ListTile(title: Text('Error: $e')),
           ),
           const Divider(),
+          const _SectionHeader('Trakt'),
+          traktAsync.when(
+            data: (s) => ListTile(
+              leading: Icon(s.linked ? Icons.link : Icons.link_off),
+              title: Text(s.linked ? 'Trakt linked' : 'Link Trakt account'),
+              subtitle: s.linked && s.lastSync != null
+                  ? Text('Last sync: ${DateFormat.MMMd().add_jm().format(s.lastSync!.toLocal())}')
+                  : const Text('Import history and sync ratings'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push('/profile/trakt'),
+            ),
+            loading: () => const ListTile(title: Text('Loading…')),
+            error: (e, _) => ListTile(title: Text('Trakt error: $e')),
+          ),
+          const Divider(),
           const _SectionHeader('Coming soon'),
-          const ListTile(leading: Icon(Icons.link), title: Text('Link Trakt account'), subtitle: Text('Phase 2')),
           const ListTile(leading: Icon(Icons.tune), title: Text('Solo / Together default'), subtitle: Text('Phase 4')),
           const ListTile(leading: Icon(Icons.notifications_outlined), title: Text('Notification preferences'), subtitle: Text('Phase 10')),
           const ListTile(leading: Icon(Icons.emoji_events_outlined), title: Text('Badges & streaks'), subtitle: Text('Phase 9')),
