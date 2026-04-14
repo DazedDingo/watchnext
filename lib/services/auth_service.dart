@@ -8,12 +8,10 @@ class AuthService {
   Stream<User?> get authStateChanges => _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
 
-  // Web client ID from google-services.json (client_type: 3).
-  // Required by google_sign_in_android 6.x Credential Manager on Android 14+.
-  static const _webClientId =
-      '807890132871-n4f5aqe821dtil43vumf5fvd0gjqfo6g.apps.googleusercontent.com';
-
-  final _googleSignIn = GoogleSignIn(serverClientId: _webClientId);
+  // google_sign_in_android reads default_web_client_id from google-services.json
+  // automatically for requestIdToken(). Do NOT set serverClientId here — that
+  // triggers requestServerAuthCode() which requires extra OAuth backend setup.
+  final _googleSignIn = GoogleSignIn();
 
   Future<UserCredential> signInWithGoogle() async {
     final googleUser = await _googleSignIn.signIn();
