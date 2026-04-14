@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recommendation.dart';
@@ -18,6 +19,19 @@ final recommendationsProvider =
     return;
   }
   yield* service.stream(householdId);
+});
+
+/// Single recommendation doc — used by TitleDetail to show AI blurb.
+/// Auto-disposes when the screen is popped so there's no lingering listener.
+final singleRecProvider =
+    StreamProvider.autoDispose.family<Recommendation?, String>((ref, recId) async* {
+  final householdId = ref.watch(householdIdProvider).value;
+  if (householdId == null) { yield null; return; }
+  yield* FirebaseFirestore.instance
+      .collection('households/$householdId/recommendations')
+      .doc(recId)
+      .snapshots()
+      .map((snap) => snap.exists ? Recommendation.fromDoc(snap) : null);
 });
 
 /// One-shot trigger that refreshes taste profile then kicks off Claude

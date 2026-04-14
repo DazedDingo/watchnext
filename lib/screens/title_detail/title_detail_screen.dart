@@ -5,12 +5,17 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/rating.dart';
 import '../../models/watch_entry.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/mode_provider.dart';
 import '../../providers/ratings_provider.dart';
+import '../../providers/prediction_provider.dart';
+import '../../providers/recommendations_provider.dart';
 import '../../providers/tmdb_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../predict/prediction_sheet.dart';
 import '../rating/rating_sheet.dart';
 
 /// Self-loading title detail screen. Route: /title/{mediaType}/{tmdbId}
@@ -70,13 +75,34 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
   }
 
   Future<void> _openRatingSheet(Map<String, dynamic> d) async {
-    await RatingSheet.show(
+    final saved = await RatingSheet.show(
       context,
       level: _ratingLevel,
       targetId: _entryId,
       title: (d['title'] ?? d['name']) as String,
       posterPath: d['poster_path'] as String?,
-      traktId: null, // we don't have the Trakt id here unless we pulled it via /search/tmdb
+      traktId: null,
+    );
+    if (saved == true && mounted) {
+      // Check if a reveal is now ready for this title.
+      final prediction = ref.read(predictionProvider(_entryId)).value;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (prediction != null && uid != null) {
+        final myEntry = prediction.entryFor(uid);
+        if (myEntry != null && !myEntry.skipped && !prediction.revealSeenBy(uid)) {
+          context.push('/reveal/${widget.mediaType}/${widget.tmdbId}');
+        }
+      }
+    }
+  }
+
+  Future<void> _openPredictionSheet(Map<String, dynamic> d) async {
+    await PredictionSheet.show(
+      context,
+      mediaType: widget.mediaType,
+      tmdbId: widget.tmdbId,
+      title: (d['title'] ?? d['name']) as String,
+      posterPath: d['poster_path'] as String?,
     );
   }
 
@@ -104,6 +130,20 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     final ratings = ratingsByTarget[_entryId] ?? const <Rating>[];
     final watchlist = ref.watch(watchlistProvider).value ?? const [];
     final onWatchlist = watchlist.any((w) => w.id == '${widget.mediaType == 'movie' ? 'movie' : 'tv'}:${widget.tmdbId}');
+    final mode = ref.watch(viewModeProvider);
+    final uid = ref.watch(authStateProvider).value?.uid;
+    final rec = ref.watch(singleRecProvider(_entryId)).value;
+    final prediction = ref.watch(predictionProvider(_entryId)).value;
+    final myPredEntry = uid != null ? prediction?.entryFor(uid) : null;
+    final hasWatched = watchEntry != null;
+    // Show Predict button when: not yet watched AND no prediction submitted yet.
+    final canPredict = !hasWatched && myPredEntry == null;
+    // Show Reveal button when: user predicted (not skipped), has rated, hasn't seen reveal.
+    final myRatingLevel = ratings.where((r) => r.uid == uid && r.level == _ratingLevel);
+    final canReveal = myPredEntry != null &&
+        !myPredEntry.skipped &&
+        myRatingLevel.isNotEmpty &&
+        !(prediction?.revealSeenBy(uid ?? '') ?? true);
 
     return Scaffold(
       appBar: AppBar(
@@ -180,6 +220,19 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                     label: const Text('Rate'),
                     onPressed: () => _openRatingSheet(d),
                   ),
+                  if (canPredict)
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.psychology_outlined),
+                      label: const Text('Predict'),
+                      onPressed: () => _openPredictionSheet(d),
+                    ),
+                  if (canReveal)
+                    FilledButton.icon(
+                      icon: const Icon(Icons.emoji_events_outlined),
+                      label: const Text('See Reveal'),
+                      onPressed: () => context.push(
+                          '/reveal/${widget.mediaType}/${widget.tmdbId}'),
+                    ),
                 ]),
               ),
               if (overview != null && overview.isNotEmpty) ...[
@@ -189,6 +242,35 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                   child: Text(overview, style: Theme.of(context).textTheme.bodyMedium),
                 ),
               ],
+              // AI blurb from Phase 7 scoring — shown when available.
+              if (rec != null) ...() {
+                final blurb = mode == ViewMode.solo
+                    ? rec.blurbFor(uid)
+                    : rec.aiBlurb;
+                if (blurb.isEmpty) return const <Widget>[];
+                return [
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.auto_awesome, size: 14, color: Colors.white38),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            blurb,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: Colors.white54, fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ];
+              }(),
               if (ratings.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 const Padding(

@@ -84,6 +84,35 @@ class RecommendationsService {
       }
     }
 
+    // Pull top Reddit-mentioned titles from the global /redditMentions
+    // collection (written weekly by the redditScraper Cloud Function).
+    try {
+      final redditSnap = await _db
+          .collection('redditMentions')
+          .orderBy('mention_score', descending: true)
+          .limit(20)
+          .get();
+      for (final doc in redditSnap.docs) {
+        final m = doc.data();
+        final id = (m['tmdb_id'] as num?)?.toInt();
+        if (id == null) continue;
+        final mediaType = (m['media_type'] as String?) ?? 'movie';
+        final key = '$mediaType:$id';
+        if (!seen.add(key)) continue;
+        candidates.add({
+          'media_type': mediaType,
+          'tmdb_id': id,
+          'title': m['title'] as String? ?? 'Untitled',
+          'year': (m['year'] as num?)?.toInt(),
+          'poster_path': m['poster_path'] as String?,
+          'overview': m['overview'] as String?,
+          'source': 'reddit',
+        });
+      }
+    } catch (_) {
+      // Best-effort; no Reddit data is fine.
+    }
+
     try {
       final trending = await _tmdb.trendingMovies();
       final rows = (trending['results'] as List? ?? const [])

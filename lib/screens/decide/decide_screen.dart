@@ -9,6 +9,7 @@ import '../../providers/decide_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../predict/prediction_sheet.dart';
 
 /// Two-person Decide Together flow. Runs pass-and-play on one device.
 ///
@@ -506,6 +507,17 @@ class _DecidedState extends ConsumerState<_Decided> {
           else ...[
             const Center(child: Text('Saved!')),
             const SizedBox(height: 12),
+            FilledButton.tonal(
+              onPressed: () => PredictionSheet.show(
+                context,
+                mediaType: winner.mediaType,
+                tmdbId: winner.tmdbId,
+                title: winner.title,
+                posterPath: winner.posterPath,
+              ),
+              child: const Text('Predict your rating'),
+            ),
+            const SizedBox(height: 8),
             OutlinedButton(
               onPressed: () {
                 ref.read(decideSessionProvider.notifier).reset();

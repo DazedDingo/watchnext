@@ -11,6 +11,7 @@ admin.initializeApp();
 
 export { generateTasteProfile } from "./tasteProfile";
 export { scoreRecommendations } from "./scoreRecommendations";
+export { redditScraper } from "./redditScraper";
 
 /**
  * Trakt OAuth proxy.
