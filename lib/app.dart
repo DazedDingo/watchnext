@@ -13,6 +13,8 @@ import 'screens/history/history_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/trakt_link_screen.dart';
+import 'screens/title_detail/title_detail_screen.dart';
+import 'screens/watchlist/watchlist_screen.dart';
 
 final _router = GoRouter(
   initialLocation: '/login',
@@ -24,6 +26,14 @@ final _router = GoRouter(
         inviteCode: state.uri.queryParameters['code'],
       ),
     ),
+    GoRoute(
+      path: '/title/:mediaType/:tmdbId',
+      builder: (_, state) => TitleDetailScreen(
+        mediaType: state.pathParameters['mediaType']!,
+        tmdbId: int.parse(state.pathParameters['tmdbId']!),
+      ),
+    ),
+    GoRoute(path: '/watchlist', builder: (_, __) => const WatchlistScreen()),
     ShellRoute(
       builder: (_, __, child) => ScaffoldWithNavBar(child: child),
       routes: [

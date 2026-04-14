@@ -33,16 +33,21 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 
 ---
 
-## Phase 3 — Core UX
+## Phase 3 — Core UX ✅
 
-- History screen, 3 tabs:
-  - **Watched** — chronological list (posters, both ratings, prediction accuracy badge). Search + filters (genre, star, year, rated/unrated).
-  - **In Progress** — Trakt scrobble data, current season/episode, "Resume" nudge after 2 weeks, mark dropped/completed.
-  - **Unrated Queue** — two sections: **Shows** (unrated at show-level, expandable → unrated episodes) and **Episodes** (grouped by show, collapsible). Swipe-to-rate (quick stars) or tap for full flow. "Rate All" batch mode (poster → stars → next). Badge count on History tab.
-- **Rating flow** — supports `rating_level`: `movie` | `show` | `season` | `episode`. Show-level and episode-level are independent. 1–5 stars required + optional tags (funny, slow, beautiful, overhyped, intense, cozy, confusing, rewatchable) + optional note. Two-way Trakt sync on save.
-- Watchlist — shared queue, either person can add. Shows who added + source. Sort by date/match score. Swipe to mark watched → triggers rating flow.
-- Title detail screen — poster/backdrop, TMDB metadata, AI blurb placeholder, ratings section (show-level + expandable episode ratings for TV), actions (Add to Watchlist, Watch Now, Predict & Rate).
-- Real-time Firestore listeners for cross-device sync.
+- History screen with 3 tabs: Watched / In progress / Unrated. Poster rows, average household rating badge, tap → title detail, swipe-to-rate on Unrated.
+- Rating flow modal sheet — 1–5 stars + tag chips + note. Movie/show/season/episode levels. Pushes to Trakt on save when linked.
+- Watchlist screen — shared queue, swipe to remove, tap → title detail.
+- Title detail screen — backdrop, poster, metadata, add/remove watchlist, rate button, household ratings list.
+- Home — watchlist summary + recently-watched carousel (placeholder until Phase 7's Tonight's Pick).
+- Real-time Firestore listeners via Riverpod StreamProviders.
+
+**Deferred to later phases (as originally spec'd):**
+- Search + filters on Watched tab (cheap follow-up once history volume justifies it).
+- Per-episode Unrated Queue section with "Rate All" batch mode (Phase 3.1 follow-up — current pass exposes show-level only).
+- "Resume" nudge after 2 weeks of inactivity on In-Progress (Phase 10 notifications).
+- Prediction accuracy badge on Watched rows (Phase 6 Predict & Rate).
+- AI blurb on title detail (Phase 7).
 
 ---
 

@@ -1,43 +1,39 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
 /// Trakt.tv OAuth + REST client.
 ///
-/// Auth flow (per trakt.tv/docs/api/authentication#device-auth — using
-/// authorization code because we have a usable redirect scheme on Android):
-///   1. openBrowserAuth() → launches Trakt consent → returns auth code.
-///   2. exchangeCode(code) → posts to /oauth/token → stores access + refresh
-///      tokens on the member doc.
-///   3. refreshIfNeeded() → proactive refresh before API calls.
-///
-/// The access token is scoped to one user. Household member-doc storage means
-/// the partner's token is invisible to the other user (Firestore rules allow
-/// members to read siblings' docs by design for read-only fields, but tokens
-/// are only ever *written* by the owner — see callers).
+/// The client_secret lives only in Cloud Functions. The client_id is **not**
+/// a secret — Trakt requires it as the `trakt-api-key` header on every
+/// request, so it ships in the APK. Only the three calls that require the
+/// secret (token exchange, refresh, revoke) are proxied via callables.
 class TraktService {
-  TraktService({http.Client? client, FirebaseFirestore? db})
-      : _client = client ?? http.Client(),
-        _db = db ?? FirebaseFirestore.instance;
+  TraktService({
+    http.Client? client,
+    FirebaseFirestore? db,
+    FirebaseFunctions? functions,
+  })  : _client = client ?? http.Client(),
+        _db = db ?? FirebaseFirestore.instance,
+        _functions = functions ?? FirebaseFunctions.instance;
 
   final http.Client _client;
   final FirebaseFirestore _db;
+  final FirebaseFunctions _functions;
 
   static const _api = 'https://api.trakt.tv';
   static const _apiVersion = '2';
   static const _redirectUri = 'com.household.watchnext://trakt-callback';
   static const _callbackScheme = 'com.household.watchnext';
 
-  // Client ID + secret injected at build time. Both ship inside the APK — this
-  // is acceptable for a personal two-user app but should NOT be a pattern for
-  // public distribution. Trakt's public client flow is OAuth 2.0 code grant.
+  // Client ID only — public header value. Secret is server-side.
   static const String _clientId = String.fromEnvironment('TRAKT_CLIENT_ID');
-  static const String _clientSecret = String.fromEnvironment('TRAKT_CLIENT_SECRET');
 
-  static bool get isConfigured => _clientId.isNotEmpty && _clientSecret.isNotEmpty;
+  static bool get isConfigured => _clientId.isNotEmpty;
 
   String _randomState() {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -45,11 +41,9 @@ class TraktService {
     return List.generate(32, (_) => chars[rand.nextInt(chars.length)]).join();
   }
 
-  /// Step 1: launch Trakt authorize URL in a custom tab. Returns an auth code.
-  /// Throws on user cancel or CSRF state mismatch.
   Future<String> openBrowserAuth() async {
     if (!isConfigured) {
-      throw StateError('TRAKT_CLIENT_ID/SECRET missing. See env.example.json.');
+      throw StateError('TRAKT_CLIENT_ID missing. See env.example.json.');
     }
     final state = _randomState();
     final authUrl = Uri.https('trakt.tv', '/oauth/authorize', {
@@ -77,28 +71,17 @@ class TraktService {
     return code;
   }
 
-  /// Step 2: exchange auth code for tokens, persist onto the member doc.
+  /// Exchange auth code for tokens via Cloud Function, persist onto member doc.
   Future<void> exchangeCode({
     required String code,
     required String householdId,
     required String uid,
   }) async {
-    final res = await _client.post(
-      Uri.parse('$_api/oauth/token'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'code': code,
-        'client_id': _clientId,
-        'client_secret': _clientSecret,
-        'redirect_uri': _redirectUri,
-        'grant_type': 'authorization_code',
-      }),
-    );
-    if (res.statusCode != 200) {
-      throw Exception('Trakt token exchange ${res.statusCode}: ${res.body}');
-    }
-    final body = json.decode(res.body) as Map<String, dynamic>;
-    final tokens = _TraktTokens.fromJson(body);
+    final res = await _functions.httpsCallable('traktExchangeCode').call({
+      'code': code,
+      'redirectUri': _redirectUri,
+    });
+    final tokens = _TraktTokens.fromCallable(res.data as Map);
 
     // Fetch the Trakt user slug so we can attribute history rows correctly.
     final settings = await _getJson('/users/settings', tokens.accessToken);
@@ -113,24 +96,17 @@ class TraktService {
     }, SetOptions(merge: true));
   }
 
-  /// Unlink: revoke on Trakt's side, then clear our copy.
+  /// Unlink: revoke via Cloud Function, then clear our copy.
   Future<void> unlink({required String householdId, required String uid}) async {
     final memberRef = _db.doc('households/$householdId/members/$uid');
     final snap = await memberRef.get();
     final token = snap.data()?['trakt_access_token'] as String?;
     if (token != null && token.isNotEmpty) {
-      // Best-effort revoke; ignore failures (we'll still clear our copy).
       try {
-        await _client.post(
-          Uri.parse('$_api/oauth/revoke'),
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({
-            'token': token,
-            'client_id': _clientId,
-            'client_secret': _clientSecret,
-          }),
-        );
-      } catch (_) {}
+        await _functions.httpsCallable('traktRevoke').call({'token': token});
+      } catch (_) {
+        // Best-effort — still clear local state even if Trakt revoke fails.
+      }
     }
     await memberRef.set({
       'trakt_access_token': null,
@@ -142,8 +118,8 @@ class TraktService {
     }, SetOptions(merge: true));
   }
 
-  /// Returns a live access token, refreshing via stored refresh token if the
-  /// current one is within 5 minutes of expiry.
+  /// Returns a live access token, refreshing via Cloud Function if the current
+  /// one is within 5 minutes of expiry.
   Future<String> getLiveAccessToken({required String householdId, required String uid}) async {
     final memberRef = _db.doc('households/$householdId/members/$uid');
     final snap = await memberRef.get();
@@ -157,22 +133,11 @@ class TraktService {
     final soon = DateTime.now().add(const Duration(minutes: 5));
     if (expiresAt != null && expiresAt.isAfter(soon)) return token;
 
-    // Refresh.
-    final res = await _client.post(
-      Uri.parse('$_api/oauth/token'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'refresh_token': refresh,
-        'client_id': _clientId,
-        'client_secret': _clientSecret,
-        'redirect_uri': _redirectUri,
-        'grant_type': 'refresh_token',
-      }),
-    );
-    if (res.statusCode != 200) {
-      throw Exception('Trakt refresh ${res.statusCode}: ${res.body}');
-    }
-    final tokens = _TraktTokens.fromJson(json.decode(res.body) as Map<String, dynamic>);
+    final res = await _functions.httpsCallable('traktRefreshToken').call({
+      'refreshToken': refresh,
+      'redirectUri': _redirectUri,
+    });
+    final tokens = _TraktTokens.fromCallable(res.data as Map);
     await memberRef.set({
       'trakt_access_token': tokens.accessToken,
       'trakt_refresh_token': tokens.refreshToken,
@@ -200,11 +165,9 @@ class TraktService {
     return json.decode(res.body);
   }
 
-  /// Paginated history pull. `type` is 'movies' or 'shows' (shows returns
-  /// per-episode rows). Returns the accumulated list.
   Future<List<Map<String, dynamic>>> fetchHistory({
     required String token,
-    required String type, // 'movies' | 'shows'
+    required String type,
     DateTime? startAt,
     int pageLimit = 100,
   }) async {
@@ -234,17 +197,16 @@ class TraktService {
 
   Future<List<Map<String, dynamic>>> fetchRatings({
     required String token,
-    required String type, // 'movies' | 'shows' | 'seasons' | 'episodes'
+    required String type,
   }) async {
     final res = await _getJson('/sync/ratings/$type', token);
     return (res as List).cast<Map<String, dynamic>>();
   }
 
-  /// Push a single WatchNext rating to Trakt. Stars 1-5 map to 2-10 (×2).
   Future<void> pushRating({
     required String token,
-    required String level, // 'movie' | 'show' | 'season' | 'episode'
-    required Map<String, dynamic> traktRef, // {"ids": {"trakt": 1234}} or with season/number
+    required String level,
+    required Map<String, dynamic> traktRef,
     required int stars,
   }) async {
     final rating10 = (stars * 2).clamp(1, 10);
@@ -274,25 +236,21 @@ class TraktService {
     }
   }
 
-  /// Convenience for trending feeds (Phase 7 Discover surfaces).
   Future<List<Map<String, dynamic>>> fetchTrending(String token, {required String type}) async {
     final res = await _getJson('/$type/trending', token, query: {'limit': '30'});
     return (res as List).cast<Map<String, dynamic>>();
   }
 
-  /// Convenience for the current user's Trakt-curated recommendations.
   Future<List<Map<String, dynamic>>> fetchRecommendations(String token, {required String type}) async {
     final res = await _getJson('/recommendations/$type', token);
     return (res as List).cast<Map<String, dynamic>>();
   }
 
-  /// Trakt → WatchNext star mapping. Trakt is 1-10; we halve (ceiling).
   static int mapTraktToStars(int trakt) {
     if (trakt <= 0) return 0;
     return ((trakt + 1) ~/ 2).clamp(1, 5);
   }
 
-  /// Used by the account link UI to confirm we're talking to the right person.
   Future<User?> currentFirebaseUser() async => FirebaseAuth.instance.currentUser;
 
   void dispose() => _client.close();
@@ -305,13 +263,15 @@ class _TraktTokens {
 
   _TraktTokens({required this.accessToken, required this.refreshToken, required this.expiresAt});
 
-  factory _TraktTokens.fromJson(Map<String, dynamic> j) {
-    final createdAt = (j['created_at'] as num?)?.toInt() ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000);
-    final expiresIn = (j['expires_in'] as num?)?.toInt() ?? 7776000; // 90d default
+  factory _TraktTokens.fromCallable(Map data) {
+    final expiresAtSecs = (data['expires_at_seconds'] as num?)?.toInt();
+    final expiresAt = expiresAtSecs != null
+        ? DateTime.fromMillisecondsSinceEpoch(expiresAtSecs * 1000, isUtc: true)
+        : DateTime.now().toUtc().add(const Duration(days: 90));
     return _TraktTokens(
-      accessToken: j['access_token'] as String,
-      refreshToken: j['refresh_token'] as String,
-      expiresAt: DateTime.fromMillisecondsSinceEpoch((createdAt + expiresIn) * 1000, isUtc: true),
+      accessToken: data['access_token'] as String,
+      refreshToken: data['refresh_token'] as String,
+      expiresAt: expiresAt,
     );
   }
 }

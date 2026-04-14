@@ -2,7 +2,9 @@
 
 A shared movie & TV recommender for two-person households. Decide what to watch, together — backed by AI recommendations that learn from both partners' taste.
 
-See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation** and **Phase 2: Trakt Integration**.
+See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation**, **Phase 2: Trakt Integration**, and **Phase 3: Core UX**.
+
+Trakt's `client_secret` lives only in Firebase Secrets Manager (`TRAKT_CLIENT_SECRET`); the client calls Cloud Function proxies (`traktExchangeCode`, `traktRefreshToken`, `traktRevoke`) for secret-dependent operations.
 
 ## Phase 2 status
 
@@ -74,8 +76,9 @@ See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo current
 
 1. **Name**: WatchNext (or anything)
 2. **Redirect URI**: `com.household.watchnext://trakt-callback`
-3. **Permissions**: `/scrobble` (needed for history + ratings)
-4. Copy the Client ID + Client Secret into `env.json`:
+3. **JavaScript (CORS) origins**: leave blank — only used for browser/SPA apps
+4. **Permissions / scrobble**: leave unchecked — Phase 2 only reads history and pushes ratings, which standard OAuth tokens already cover. Enable later if/when we add live playback scrobbling.
+5. Copy the Client ID + Client Secret into `env.json`:
    ```json
    {
      "TMDB_API_KEY": "…",
@@ -83,7 +86,7 @@ See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo current
      "TRAKT_CLIENT_SECRET": "…"
    }
    ```
-5. Run via `./run.sh` so the keys are injected via `--dart-define-from-file=env.json`.
+6. Run via `./run.sh` so the keys are injected via `--dart-define-from-file=env.json`.
 
 Keys needed for later phases:
 - Anthropic API key (Phase 7) — set as Cloud Functions secret: `firebase functions:secrets:set ANTHROPIC_API_KEY`
