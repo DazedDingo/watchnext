@@ -301,7 +301,7 @@ class _RateAllSheetState extends ConsumerState<_RateAllSheet> {
           episode: ep.number,
         );
       }));
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) context.pop();
     } finally {
       if (mounted) setState(() => _saving = false);
     }

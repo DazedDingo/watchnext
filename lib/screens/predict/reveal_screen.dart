@@ -118,7 +118,13 @@ class _RevealScreenState extends ConsumerState<RevealScreen> {
         automaticallyImplyLeading: false,
         actions: [
           TextButton(
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/home');
+              }
+            },
             child: const Text('Close'),
           ),
         ],

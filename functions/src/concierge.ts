@@ -156,6 +156,9 @@ export const concierge = onCall(
     if (!householdId || !message || !sessionId) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
+    if (typeof message !== "string" || message.length > 1500) {
+      throw new HttpsError("invalid-argument", "Message too long (max 1500 chars).");
+    }
 
     const db = admin.firestore();
 

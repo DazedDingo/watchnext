@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
 import '../../providers/watchlist_provider.dart';
@@ -59,7 +60,7 @@ class _SheetState extends ConsumerState<_Sheet> {
                   style: const TextStyle(color: Colors.white60),
                 ),
                 const SizedBox(height: 16),
-                FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+                FilledButton(onPressed: () => context.pop(), child: const Text('Close')),
               ],
             ),
           );
@@ -87,7 +88,7 @@ class _SheetState extends ConsumerState<_Sheet> {
             addedSource: 'share_sheet',
           );
       if (!mounted) return;
-      Navigator.of(context).pop();
+      context.pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Added "${m.title}" to watchlist')),
       );

@@ -226,7 +226,12 @@ export const scoreRecommendations = onCall(
       );
       written += 1;
     }
-    await writer.close();
+    try {
+      await writer.close();
+    } catch (err) {
+      console.error("bulkWriter.close() failed", { householdId, err });
+      throw new HttpsError("internal", "Failed to persist recommendations.");
+    }
 
     return { ok: true, written, scored: allScores.size, model };
   },

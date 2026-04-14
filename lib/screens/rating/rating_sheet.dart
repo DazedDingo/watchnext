@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
 import '../../providers/ratings_provider.dart';
@@ -89,7 +90,8 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
     if (_stars == 0) return;
     setState(() => _saving = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) throw StateError('Not signed in.');
       final householdId = await ref.read(householdIdProvider.future);
       if (householdId == null) throw StateError('No household.');
       await ref.read(ratingServiceProvider).save(
@@ -104,7 +106,7 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
             season: widget.season,
             episode: widget.episode,
           );
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) context.pop(true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));

@@ -26,6 +26,14 @@ import 'services/notification_service.dart';
 
 final _router = GoRouter(
   initialLocation: '/login',
+  redirect: (_, state) {
+    final signedIn = FirebaseAuth.instance.currentUser != null;
+    final loc = state.matchedLocation;
+    final isPublic = loc == '/login' || loc.startsWith('/setup');
+    if (!signedIn && !isPublic) return '/login';
+    if (signedIn && loc == '/login') return '/home';
+    return null;
+  },
   routes: [
     GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
     GoRoute(
@@ -36,19 +44,27 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/title/:mediaType/:tmdbId',
-      builder: (_, state) => TitleDetailScreen(
-        mediaType: state.pathParameters['mediaType']!,
-        tmdbId: int.parse(state.pathParameters['tmdbId']!),
-      ),
+      builder: (_, state) {
+        final tmdbId = int.tryParse(state.pathParameters['tmdbId'] ?? '');
+        if (tmdbId == null) return const _ErrorScreen('Invalid title link.');
+        return TitleDetailScreen(
+          mediaType: state.pathParameters['mediaType']!,
+          tmdbId: tmdbId,
+        );
+      },
     ),
     GoRoute(path: '/watchlist', builder: (_, _) => const WatchlistScreen()),
     GoRoute(path: '/decide', builder: (_, _) => const DecideScreen()),
     GoRoute(
       path: '/reveal/:mediaType/:tmdbId',
-      builder: (_, state) => RevealScreen(
-        mediaType: state.pathParameters['mediaType']!,
-        tmdbId: int.parse(state.pathParameters['tmdbId']!),
-      ),
+      builder: (_, state) {
+        final tmdbId = int.tryParse(state.pathParameters['tmdbId'] ?? '');
+        if (tmdbId == null) return const _ErrorScreen('Invalid reveal link.');
+        return RevealScreen(
+          mediaType: state.pathParameters['mediaType']!,
+          tmdbId: tmdbId,
+        );
+      },
     ),
     ShellRoute(
       builder: (_, _, child) => ScaffoldWithNavBar(child: child),
@@ -90,6 +106,16 @@ class ScaffoldWithNavBar extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ScaffoldWithNavBar> createState() => _ScaffoldWithNavBarState();
+}
+
+class _ErrorScreen extends StatelessWidget {
+  final String message;
+  const _ErrorScreen(this.message);
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(),
+        body: Center(child: Text(message)),
+      );
 }
 
 class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with WidgetsBindingObserver {

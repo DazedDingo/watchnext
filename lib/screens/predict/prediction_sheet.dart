@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
 import '../../providers/prediction_provider.dart';
@@ -54,7 +55,8 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
     if (_stars == 0) return;
     setState(() => _saving = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) throw StateError('Not signed in.');
       final householdId = await ref.read(householdIdProvider.future);
       if (householdId == null) throw StateError('No household.');
       await ref.read(predictionServiceProvider).submitPrediction(
@@ -66,7 +68,7 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
             posterPath: widget.posterPath,
             stars: _stars,
           );
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) context.pop(true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -80,7 +82,8 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
   Future<void> _skip() async {
     setState(() => _saving = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) throw StateError('Not signed in.');
       final householdId = await ref.read(householdIdProvider.future);
       if (householdId == null) throw StateError('No household.');
       await ref.read(predictionServiceProvider).skipPrediction(
@@ -91,9 +94,9 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
             title: widget.title,
             posterPath: widget.posterPath,
           );
-      if (mounted) Navigator.of(context).pop(false);
+      if (mounted) context.pop(false);
     } catch (_) {
-      if (mounted) Navigator.of(context).pop(false);
+      if (mounted) context.pop(false);
     }
   }
 
