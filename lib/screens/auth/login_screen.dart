@@ -9,11 +9,12 @@ class LoginScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authStateProvider);
-    authState.whenData((user) {
-      if (user != null && context.mounted) {
-        _redirectAfterAuth(context, user.uid);
-      }
+    ref.listen(authStateProvider, (_, next) {
+      next.whenData((user) {
+        if (user != null && context.mounted) {
+          _redirectAfterAuth(context, user.uid);
+        }
+      });
     });
 
     return Scaffold(

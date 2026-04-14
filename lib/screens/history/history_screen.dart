@@ -212,7 +212,7 @@ class _EpisodeGroup extends ConsumerWidget {
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
         TextButton(
           child: const Text('Rate All'),
-          onPressed: () => _rateAll(context, showTitle),
+          onPressed: () => _rateAll(context, showTitle, entry),
         ),
         const Icon(Icons.chevron_right),
       ]),
@@ -241,7 +241,7 @@ class _EpisodeGroup extends ConsumerWidget {
     );
   }
 
-  void _rateAll(BuildContext context, String showTitle) {
+  void _rateAll(BuildContext context, String showTitle, WatchEntry? entry) {
     // Show a bottom sheet with all episodes stacked for quick rating.
     showModalBottomSheet(
       context: context,
@@ -251,7 +251,7 @@ class _EpisodeGroup extends ConsumerWidget {
         showTitle: showTitle,
         entryId: entryId,
         episodes: episodes,
-        posterPath: null,
+        posterPath: entry?.posterPath,
       ),
     );
   }

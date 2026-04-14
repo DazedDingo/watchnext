@@ -461,6 +461,12 @@ class _PosterImageState extends State<_PosterImage> {
     _loadPoster();
   }
 
+  @override
+  void dispose() {
+    _tmdb.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadPoster() async {
     try {
       final data = widget.mediaType == 'tv'

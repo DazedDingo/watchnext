@@ -31,6 +31,7 @@ class TitleDetailScreen extends ConsumerStatefulWidget {
 
 class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
   Future<Map<String, dynamic>>? _details;
+  String? _title;
 
   @override
   void initState() {
@@ -39,6 +40,9 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     _details = widget.mediaType == 'movie'
         ? tmdb.movieDetails(widget.tmdbId)
         : tmdb.tvDetails(widget.tmdbId);
+    _details!.then((d) {
+      if (mounted) setState(() => _title = (d['title'] ?? d['name']) as String);
+    });
   }
 
   String get _entryId => WatchEntry.buildId(widget.mediaType == 'movie' ? 'movie' : 'tv', widget.tmdbId);
@@ -148,7 +152,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
-        title: const Text('Title'),
+        title: Text(_title ?? (widget.mediaType == 'movie' ? 'Movie' : 'TV Show')),
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _details,
