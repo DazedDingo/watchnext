@@ -31,7 +31,7 @@ class WatchlistScreen extends ConsumerWidget {
           }
           return ListView.separated(
             itemCount: items.length,
-            separatorBuilder: (_, __) => const Divider(height: 0),
+            separatorBuilder: (_, _) => const Divider(height: 0),
             itemBuilder: (_, i) {
               final w = items[i];
               final poster = TmdbService.imageUrl(w.posterPath, size: 'w185');

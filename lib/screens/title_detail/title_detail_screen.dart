@@ -172,7 +172,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
               if (backdrop != null)
                 AspectRatio(
                   aspectRatio: 16 / 9,
-                  child: Image.network(backdrop, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
+                  child: Image.network(backdrop, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox()),
                 ),
               Padding(
                 padding: const EdgeInsets.all(16),

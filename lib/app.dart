@@ -27,7 +27,7 @@ import 'services/notification_service.dart';
 final _router = GoRouter(
   initialLocation: '/login',
   routes: [
-    GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+    GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
     GoRoute(
       path: '/setup',
       builder: (_, state) => SetupScreen(
@@ -41,8 +41,8 @@ final _router = GoRouter(
         tmdbId: int.parse(state.pathParameters['tmdbId']!),
       ),
     ),
-    GoRoute(path: '/watchlist', builder: (_, __) => const WatchlistScreen()),
-    GoRoute(path: '/decide', builder: (_, __) => const DecideScreen()),
+    GoRoute(path: '/watchlist', builder: (_, _) => const WatchlistScreen()),
+    GoRoute(path: '/decide', builder: (_, _) => const DecideScreen()),
     GoRoute(
       path: '/reveal/:mediaType/:tmdbId',
       builder: (_, state) => RevealScreen(
@@ -51,17 +51,17 @@ final _router = GoRouter(
       ),
     ),
     ShellRoute(
-      builder: (_, __, child) => ScaffoldWithNavBar(child: child),
+      builder: (_, _, child) => ScaffoldWithNavBar(child: child),
       routes: [
-        GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
-        GoRoute(path: '/discover', builder: (_, __) => const DiscoverScreen()),
-        GoRoute(path: '/history', builder: (_, __) => const HistoryScreen()),
-        GoRoute(path: '/stats', builder: (_, __) => const StatsScreen()),
+        GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
+        GoRoute(path: '/discover', builder: (_, _) => const DiscoverScreen()),
+        GoRoute(path: '/history', builder: (_, _) => const HistoryScreen()),
+        GoRoute(path: '/stats', builder: (_, _) => const StatsScreen()),
         GoRoute(
           path: '/profile',
-          builder: (_, __) => const ProfileScreen(),
+          builder: (_, _) => const ProfileScreen(),
           routes: [
-            GoRoute(path: 'trakt', builder: (_, __) => const TraktLinkScreen()),
+            GoRoute(path: 'trakt', builder: (_, _) => const TraktLinkScreen()),
           ],
         ),
       ],

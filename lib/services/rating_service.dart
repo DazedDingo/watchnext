@@ -46,8 +46,8 @@ class RatingService {
         final token = await trakt.getLiveAccessToken(householdId: householdId, uid: uid);
         final ref = <String, dynamic>{
           'ids': {'trakt': traktId},
-          if (season case final s?) 'season': s,
-          if (episode case final e?) 'number': e,
+          'season': ?season,
+          'number': ?episode,
         };
         await trakt.pushRating(token: token, level: level, traktRef: ref, stars: stars);
         await _db.doc('households/$householdId/ratings/$id').set(

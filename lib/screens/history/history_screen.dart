@@ -50,7 +50,7 @@ class _WatchedTab extends ConsumerWidget {
         if (watched.isEmpty) return const _Empty(text: 'No watched titles yet — link Trakt to import.');
         return ListView.separated(
           itemCount: watched.length,
-          separatorBuilder: (_, __) => const Divider(height: 0),
+          separatorBuilder: (_, _) => const Divider(height: 0),
           itemBuilder: (_, i) => _EntryTile(entry: watched[i]),
         );
       },
@@ -72,7 +72,7 @@ class _InProgressTab extends ConsumerWidget {
         if (wip.isEmpty) return const _Empty(text: 'Nothing in progress. Start a show and Trakt will put it here.');
         return ListView.separated(
           itemCount: wip.length,
-          separatorBuilder: (_, __) => const Divider(height: 0),
+          separatorBuilder: (_, _) => const Divider(height: 0),
           itemBuilder: (_, i) => _EntryTile(entry: wip[i]),
         );
       },

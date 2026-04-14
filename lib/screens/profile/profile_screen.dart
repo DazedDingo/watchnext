@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/mode_provider.dart';
 import '../../providers/trakt_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -16,6 +18,7 @@ class ProfileScreen extends ConsumerWidget {
     final user = FirebaseAuth.instance.currentUser;
     final inviteCodeAsync = ref.watch(householdInviteCodeProvider);
     final traktAsync = ref.watch(traktLinkStatusProvider);
+    final mode = ref.watch(viewModeProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
@@ -23,13 +26,19 @@ class ProfileScreen extends ConsumerWidget {
         children: [
           ListTile(
             leading: CircleAvatar(
-              backgroundImage: user?.photoURL != null ? NetworkImage(user!.photoURL!) : null,
-              child: user?.photoURL == null ? const Icon(Icons.person) : null,
+              backgroundImage: user?.photoURL != null
+                  ? NetworkImage(user!.photoURL!)
+                  : null,
+              child: user?.photoURL == null
+                  ? const Icon(Icons.person)
+                  : null,
             ),
             title: Text(user?.displayName ?? 'Member'),
             subtitle: Text(user?.email ?? ''),
           ),
           const Divider(),
+
+          // ── Household ──────────────────────────────────────────────────
           const _SectionHeader('Household'),
           inviteCodeAsync.when(
             data: (code) => code == null
@@ -37,13 +46,15 @@ class ProfileScreen extends ConsumerWidget {
                 : ListTile(
                     leading: const Icon(Icons.group_add),
                     title: const Text('Invite partner'),
-                    subtitle: Text(code, style: const TextStyle(fontFamily: 'monospace')),
+                    subtitle: Text(code,
+                        style: const TextStyle(fontFamily: 'monospace')),
                     trailing: IconButton(
                       icon: const Icon(Icons.copy),
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: code));
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Invite code copied')),
+                          const SnackBar(
+                              content: Text('Invite code copied')),
                         );
                       },
                     ),
@@ -52,11 +63,38 @@ class ProfileScreen extends ConsumerWidget {
             error: (e, _) => ListTile(title: Text('Error: $e')),
           ),
           const Divider(),
+
+          // ── Preferences ────────────────────────────────────────────────
+          const _SectionHeader('Preferences'),
+          ListTile(
+            leading: const Icon(Icons.people_outline),
+            title: const Text('Default mode'),
+            subtitle: Text(mode == ViewMode.solo
+                ? 'Solo — just my picks'
+                : 'Together — both members'),
+            trailing: SegmentedButton<ViewMode>(
+              selected: {mode},
+              segments: const [
+                ButtonSegment(value: ViewMode.solo, label: Text('Solo')),
+                ButtonSegment(
+                    value: ViewMode.together, label: Text('Together')),
+              ],
+              onSelectionChanged: (s) =>
+                  ref.read(viewModeProvider.notifier).set(s.first),
+              style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact),
+            ),
+          ),
+          const _NotificationToggle(),
+          const Divider(),
+
+          // ── Trakt ──────────────────────────────────────────────────────
           const _SectionHeader('Trakt'),
           traktAsync.when(
             data: (s) => ListTile(
               leading: Icon(s.linked ? Icons.link : Icons.link_off),
-              title: Text(s.linked ? 'Trakt linked' : 'Link Trakt account'),
+              title:
+                  Text(s.linked ? 'Trakt linked' : 'Link Trakt account'),
               subtitle: s.linked && s.lastSync != null
                   ? Text('Last sync: ${DateFormat.MMMd().add_jm().format(s.lastSync!.toLocal())}')
                   : const Text('Import history and sync ratings'),
@@ -67,11 +105,8 @@ class ProfileScreen extends ConsumerWidget {
             error: (e, _) => ListTile(title: Text('Trakt error: $e')),
           ),
           const Divider(),
-          const _SectionHeader('Coming soon'),
-          const ListTile(leading: Icon(Icons.tune), title: Text('Solo / Together default'), subtitle: Text('Phase 4')),
-          const ListTile(leading: Icon(Icons.notifications_outlined), title: Text('Notification preferences'), subtitle: Text('Phase 10')),
-          const ListTile(leading: Icon(Icons.emoji_events_outlined), title: Text('Badges & streaks'), subtitle: Text('Phase 9')),
-          const Divider(),
+
+          // ── Sign out ───────────────────────────────────────────────────
           ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Sign out'),
@@ -86,6 +121,75 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Notification toggle
+// ---------------------------------------------------------------------------
+
+class _NotificationToggle extends StatefulWidget {
+  const _NotificationToggle();
+
+  @override
+  State<_NotificationToggle> createState() => _NotificationToggleState();
+}
+
+class _NotificationToggleState extends State<_NotificationToggle> {
+  bool _enabled = false;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final settings =
+        await FirebaseMessaging.instance.getNotificationSettings();
+    if (mounted) {
+      setState(() {
+        _enabled = settings.authorizationStatus ==
+            AuthorizationStatus.authorized;
+        _loaded = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) return const SizedBox.shrink();
+    return SwitchListTile(
+      secondary: const Icon(Icons.notifications_outlined),
+      title: const Text('Reveal notifications'),
+      subtitle:
+          const Text('Get notified when your prediction reveal is ready'),
+      value: _enabled,
+      onChanged: (_) {
+        if (_enabled) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Disable notifications in Settings > Apps > WatchNext.'),
+            ),
+          );
+        } else {
+          FirebaseMessaging.instance
+              .requestPermission(alert: true, sound: true)
+              .then((s) {
+            if (mounted) {
+              setState(() => _enabled =
+                  s.authorizationStatus == AuthorizationStatus.authorized);
+            }
+          });
+        }
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Section header
+// ---------------------------------------------------------------------------
+
 class _SectionHeader extends StatelessWidget {
   final String text;
   const _SectionHeader(this.text);
@@ -95,7 +199,10 @@ class _SectionHeader extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
         child: Text(
           text.toUpperCase(),
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.2),
+          style: Theme.of(context)
+              .textTheme
+              .labelMedium
+              ?.copyWith(letterSpacing: 1.2),
         ),
       );
 }

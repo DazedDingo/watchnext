@@ -81,7 +81,7 @@ class _DecideScreenState extends ConsumerState<DecideScreen> {
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(decideSessionProvider);
-    ref.listen(watchlistProvider, (_, __) => _ensureStarted());
+    ref.listen(watchlistProvider, (_, _) => _ensureStarted());
     _ensureStarted();
 
     final members = _members;
@@ -163,7 +163,7 @@ class _Negotiate extends ConsumerWidget {
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             itemCount: session.candidates.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (_, i) {
               final c = session.candidates[i];
               return _CandidateTile(
@@ -236,7 +236,7 @@ class _PickState extends ConsumerState<_Pick> {
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             itemCount: session.candidates.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (_, i) {
               final c = session.candidates[i];
               return _CandidateTile(
