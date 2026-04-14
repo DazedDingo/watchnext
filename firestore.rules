@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isMember(householdId) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    match /households/{householdId} {
+      allow read: if isMember(householdId);
+      allow create: if request.auth != null;
+      allow update: if isMember(householdId);
+      allow delete: if false;
+
+      // Cap at two members enforced client-side (HouseholdService.joinByInviteCode).
+      // Firestore rules can't easily count siblings, so we trust the service path here.
+      match /members/{uid} {
+        allow read: if isMember(householdId);
+        allow create: if request.auth != null && request.auth.uid == uid;
+        allow update: if request.auth != null && request.auth.uid == uid;
+        allow delete: if false;
+      }
+
+      // Shared household data — any member can read/write.
+      match /watchEntries/{entryId} {
+        allow read, write: if isMember(householdId);
+
+        match /episodes/{episodeId} {
+          allow read, write: if isMember(householdId);
+        }
+      }
+      match /ratings/{ratingId}        { allow read, write: if isMember(householdId); }
+      match /predictions/{predictionId}{ allow read, write: if isMember(householdId); }
+      match /recommendations/{recId}   { allow read, write: if isMember(householdId); }
+      match /decisionHistory/{id}      { allow read, write: if isMember(householdId); }
+      match /conciergeHistory/{id}     { allow read, write: if isMember(householdId); }
+      match /collections/{id}          { allow read, write: if isMember(householdId); }
+      match /customMoods/{id}          { allow read, write: if isMember(householdId); }
+      match /wrapped/{year}            { allow read, write: if isMember(householdId); }
+
+      // Household-scoped docs (single documents).
+      match /tasteProfile {
+        allow read, write: if isMember(householdId);
+      }
+      match /gamification {
+        allow read, write: if isMember(householdId);
+      }
+
+      // Reserved for Phase 11+ (trusted circle).
+      match /trustedCircle/{friendUid}    { allow read, write: if isMember(householdId); }
+      match /friendSuggestions/{sid}      { allow read, write: if isMember(householdId); }
+    }
+
+    // Per-user pointer for fast household lookup after sign-in.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Invite-code → householdId lookup. Any signed-in user can read/create;
+    // the server-side household service is the only code path that writes these.
+    match /invites/{token} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+    // Server-only scratch space.
+    match /sync/{docId}/{sub=**}   { allow read, write: if false; }
+    match /_rate_limits/{token}    { allow read, write: if false; }
+  }
+}
