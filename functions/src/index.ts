@@ -13,6 +13,7 @@ export { generateTasteProfile } from "./tasteProfile";
 export { scoreRecommendations } from "./scoreRecommendations";
 export { redditScraper } from "./redditScraper";
 export { concierge } from "./concierge";
+export { onRatingCreated } from "./notifications";
 
 /**
  * Trakt OAuth proxy.

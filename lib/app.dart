@@ -22,6 +22,7 @@ import 'screens/predict/reveal_screen.dart';
 import 'screens/share/share_confirm_sheet.dart';
 import 'screens/title_detail/title_detail_screen.dart';
 import 'screens/watchlist/watchlist_screen.dart';
+import 'services/notification_service.dart';
 
 final _router = GoRouter(
   initialLocation: '/login',
@@ -101,6 +102,7 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeSyncTrakt();
       _wireShareListeners();
+      _initNotifications();
     });
   }
 
@@ -140,6 +142,22 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
     if (payload == null || payload.trim().isEmpty) return;
     final future = ref.read(shareParserProvider).parse(payload);
     ShareConfirmSheet.show(context, future: future);
+  }
+
+  Future<void> _initNotifications() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final householdId = await ref.read(householdIdProvider.future);
+      if (householdId == null || !mounted) return;
+      await NotificationService.init(
+        householdId: householdId,
+        uid: user.uid,
+        context: context,
+      );
+    } catch (_) {
+      // Best-effort — notification failures must not block the app.
+    }
   }
 
   Future<void> _maybeSyncTrakt() async {
