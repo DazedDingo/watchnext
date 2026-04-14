@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Get version from pubspec
+        id: version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "name=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.name }}
+          files: build/app/outputs/flutter-apk/app-release.apk
+          fail_on_unmatched_files: true
