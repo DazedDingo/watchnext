@@ -1,8 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/recommendation.dart';
 import '../models/watchlist_item.dart';
 import '../services/decide_service.dart';
+import '../services/recommendations_service.dart';
 import '../services/tmdb_service.dart';
+import 'household_provider.dart';
+import 'recommendations_provider.dart';
 import 'tmdb_provider.dart';
 
 final decideServiceProvider = Provider<DecideService>((_) => DecideService());
@@ -41,6 +45,16 @@ class DecideCandidate {
         year: w.year,
         genres: w.genres,
         source: 'watchlist',
+      );
+
+  factory DecideCandidate.fromRecommendation(Recommendation r) => DecideCandidate(
+        mediaType: r.mediaType,
+        tmdbId: r.tmdbId,
+        title: r.title,
+        posterPath: r.posterPath,
+        year: r.year,
+        genres: r.genres,
+        source: r.source,
       );
 
   factory DecideCandidate.fromTmdb(Map<String, dynamic> m,
@@ -126,9 +140,12 @@ class DecideSessionState {
 }
 
 class DecideController extends StateNotifier<DecideSessionState> {
-  DecideController(this._tmdb) : super(const DecideSessionState());
+  DecideController(this._tmdb, this._recs, this._householdId)
+      : super(const DecideSessionState());
 
   final TmdbService _tmdb;
+  final RecommendationsService _recs;
+  final String? _householdId;
 
   /// Builds the negotiate candidate pool from the shared watchlist, topped up
   /// with TMDB trending if the watchlist has fewer than 5 items.
@@ -198,9 +215,11 @@ class DecideController extends StateNotifier<DecideSessionState> {
     }
   }
 
-  /// Heuristic compromise: fetch TMDB "similar" for both users' picks, take
-  /// the intersection (or highest-ranked overlap), excluding anything already
-  /// seen. When Phase 7 ships this gets replaced with Claude API scoring.
+  /// Compromise picker. Preference order:
+  ///   1. Top-scored title in `/recommendations` (Claude-ranked, Phase 7a).
+  ///   2. Intersection of TMDB "similar" for both picks.
+  ///   3. Highest-ranked TMDB-similar for either side.
+  /// Each step excludes picks + anything already vetoed.
   Future<void> _buildCompromise() async {
     state = state.copyWith(phase: DecidePhase.compromise, clearCompromise: true);
     try {
@@ -208,24 +227,24 @@ class DecideController extends StateNotifier<DecideSessionState> {
       final b = state.pickB!;
       final exclude = {...state.excluded, a.key, b.key};
 
-      final aSimilar = await _similar(a);
-      final bSimilar = await _similar(b);
+      DecideCandidate? chosen = await _chooseFromRecommendations(exclude);
 
-      final aIds = aSimilar.map((c) => c.key).toSet();
-      final overlap = bSimilar
-          .where((c) => aIds.contains(c.key))
-          .where((c) => !exclude.contains(c.key))
-          .toList();
-
-      DecideCandidate? chosen;
-      if (overlap.isNotEmpty) {
-        chosen = overlap.first;
-      } else {
-        // Fall back to highest-ranked similar-to-A, then B, that's not excluded.
-        chosen = [...aSimilar, ...bSimilar]
-            .cast<DecideCandidate?>()
-            .firstWhere((c) => c != null && !exclude.contains(c.key),
-                orElse: () => null);
+      if (chosen == null) {
+        final aSimilar = await _similar(a);
+        final bSimilar = await _similar(b);
+        final aIds = aSimilar.map((c) => c.key).toSet();
+        final overlap = bSimilar
+            .where((c) => aIds.contains(c.key))
+            .where((c) => !exclude.contains(c.key))
+            .toList();
+        if (overlap.isNotEmpty) {
+          chosen = overlap.first;
+        } else {
+          chosen = [...aSimilar, ...bSimilar]
+              .cast<DecideCandidate?>()
+              .firstWhere((c) => c != null && !exclude.contains(c.key),
+                  orElse: () => null);
+        }
       }
 
       if (chosen == null) {
@@ -248,6 +267,21 @@ class DecideController extends StateNotifier<DecideSessionState> {
         error: 'Could not load similar titles.',
         phase: DecidePhase.tiebreak,
       );
+    }
+  }
+
+  Future<DecideCandidate?> _chooseFromRecommendations(Set<String> exclude) async {
+    final hh = _householdId;
+    if (hh == null) return null;
+    try {
+      final recs = await _recs.fetchTopForDecide(hh, limit: 10, exclude: exclude);
+      final best = recs.where((r) => r.scored).cast<Recommendation?>().firstWhere(
+            (_) => true,
+            orElse: () => null,
+          );
+      return best == null ? null : DecideCandidate.fromRecommendation(best);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -317,5 +351,9 @@ class DecideController extends StateNotifier<DecideSessionState> {
 
 final decideSessionProvider =
     StateNotifierProvider<DecideController, DecideSessionState>((ref) {
-  return DecideController(ref.read(tmdbServiceProvider));
+  return DecideController(
+    ref.read(tmdbServiceProvider),
+    ref.read(recommendationsServiceProvider),
+    ref.watch(householdIdProvider).value,
+  );
 });

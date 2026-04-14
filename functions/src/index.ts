@@ -4,6 +4,9 @@ import { defineSecret } from "firebase-functions/params";
 
 admin.initializeApp();
 
+export { generateTasteProfile } from "./tasteProfile";
+export { scoreRecommendations } from "./scoreRecommendations";
+
 /**
  * Trakt OAuth proxy.
  *
