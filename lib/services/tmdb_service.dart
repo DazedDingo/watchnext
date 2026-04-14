@@ -67,6 +67,12 @@ class TmdbService {
   Future<Map<String, dynamic>> listDetails(int listId) =>
       _get(_uri('/list/$listId'));
 
+  Future<Map<String, dynamic>> discoverMovies(Map<String, String> params) =>
+      _get(_uri('/discover/movie', params));
+
+  Future<Map<String, dynamic>> discoverTv(Map<String, String> params) =>
+      _get(_uri('/discover/tv', params));
+
   /// Cross-reference an external ID (IMDb `tt…`, TVDB id, etc.) to TMDB ids.
   /// Used by the share-sheet flow to resolve IMDb/Letterboxd/generic links.
   Future<Map<String, dynamic>> findByExternalId(String externalId, {String source = 'imdb_id'}) =>

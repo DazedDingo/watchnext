@@ -1,6 +1,11 @@
 import * as admin from "firebase-admin";
+import { setGlobalOptions } from "firebase-functions/v2";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
+
+// Firestore lives in europe-west2 (London). Co-locate all CFs so the
+// client round-trip and CF→Firestore hops stay intra-region.
+setGlobalOptions({ region: "europe-west2" });
 
 admin.initializeApp();
 

@@ -168,7 +168,7 @@ function compatibility(ratings: Rating[], uids: string[]): {
   };
 }
 
-export const generateTasteProfile = onCall(async (request) => {
+export const generateTasteProfile = onCall({ region: "europe-west2" }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
   const householdId = request.data?.householdId;

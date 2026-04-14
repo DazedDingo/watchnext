@@ -136,7 +136,7 @@ function parseScores(text: string): Score[] {
 }
 
 export const scoreRecommendations = onCall(
-  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 540 },
+  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 540, region: "europe-west2" },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
