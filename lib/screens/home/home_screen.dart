@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../providers/mode_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
@@ -17,6 +18,7 @@ class HomeScreen extends ConsumerWidget {
     final watchlist = ref.watch(watchlistProvider).value ?? const [];
     final entries = ref.watch(watchEntriesProvider).value ?? const [];
     final recent = entries.take(10).toList();
+    final mode = ref.watch(viewModeProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -26,6 +28,15 @@ class HomeScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 12),
         children: [
+          if (mode == ViewMode.together)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: FilledButton.icon(
+                icon: const Icon(Icons.groups),
+                label: const Text('Decide Together'),
+                onPressed: () => context.push('/decide'),
+              ),
+            ),
           ListTile(
             leading: const Icon(Icons.bookmark_outline),
             title: Text('Watchlist (${watchlist.length})'),

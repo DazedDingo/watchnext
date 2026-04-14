@@ -17,6 +17,7 @@ import 'screens/history/history_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/trakt_link_screen.dart';
+import 'screens/decide/decide_screen.dart';
 import 'screens/share/share_confirm_sheet.dart';
 import 'screens/title_detail/title_detail_screen.dart';
 import 'screens/watchlist/watchlist_screen.dart';
@@ -39,6 +40,7 @@ final _router = GoRouter(
       ),
     ),
     GoRoute(path: '/watchlist', builder: (_, __) => const WatchlistScreen()),
+    GoRoute(path: '/decide', builder: (_, __) => const DecideScreen()),
     ShellRoute(
       builder: (_, __, child) => ScaffoldWithNavBar(child: child),
       routes: [
