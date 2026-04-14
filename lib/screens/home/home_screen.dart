@@ -7,6 +7,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
 import '../../providers/recommendations_provider.dart';
+import '../../screens/concierge/concierge_sheet.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/mode_toggle.dart';
 
@@ -52,6 +53,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Center(child: ModeToggle()),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => ConciergeSheet.show(context),
+        icon: const Icon(Icons.auto_awesome),
+        label: const Text('Ask AI'),
       ),
       body: RefreshIndicator(
         onRefresh: () =>
