@@ -33,10 +33,13 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "name=v$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/WatchNext-${{ steps.version.outputs.tag }}.apk
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.name }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/WatchNext-${{ steps.version.outputs.tag }}.apk
           fail_on_unmatched_files: true
