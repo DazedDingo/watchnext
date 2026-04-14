@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/mode_toggle.dart';
 
 /// Minimal Home surface until Phase 7 wires Tonight's Pick + mood engine.
 /// For now: watchlist summary + recently watched.
@@ -18,7 +19,10 @@ class HomeScreen extends ConsumerWidget {
     final recent = entries.take(10).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('WatchNext')),
+      appBar: AppBar(
+        title: const Text('WatchNext'),
+        actions: const [Padding(padding: EdgeInsets.only(right: 12), child: Center(child: ModeToggle()))],
+      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 12),
         children: [

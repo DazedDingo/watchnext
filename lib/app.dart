@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'providers/household_provider.dart';
+import 'providers/mode_provider.dart';
 import 'providers/trakt_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
@@ -13,6 +17,7 @@ import 'screens/history/history_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/trakt_link_screen.dart';
+import 'screens/share/share_confirm_sheet.dart';
 import 'screens/title_detail/title_detail_screen.dart';
 import 'screens/watchlist/watchlist_screen.dart';
 
@@ -77,15 +82,21 @@ class ScaffoldWithNavBar extends ConsumerStatefulWidget {
 }
 
 class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with WidgetsBindingObserver {
+  StreamSubscription<List<SharedMediaFile>>? _shareSub;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeSyncTrakt());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeSyncTrakt();
+      _wireShareListeners();
+    });
   }
 
   @override
   void dispose() {
+    _shareSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -93,6 +104,32 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) _maybeSyncTrakt();
+  }
+
+  void _wireShareListeners() {
+    // Warm-start: app already running when user hits Share.
+    _shareSub = ReceiveSharingIntent.instance.getMediaStream().listen(
+          _handleShared,
+          onError: (_) {},
+        );
+    // Cold-start: app launched by the share intent. Consume once.
+    ReceiveSharingIntent.instance.getInitialMedia().then((files) {
+      _handleShared(files);
+      ReceiveSharingIntent.instance.reset();
+    }).catchError((_) {});
+  }
+
+  void _handleShared(List<SharedMediaFile> files) {
+    if (files.isEmpty || !mounted) return;
+    // Android SEND/text arrives with type == SharedMediaType.text and the
+    // URL/text payload on `path`.
+    final payload = files
+        .where((f) => f.type == SharedMediaType.text || f.type == SharedMediaType.url)
+        .map((f) => f.path)
+        .firstOrNull;
+    if (payload == null || payload.trim().isEmpty) return;
+    final future = ref.read(shareParserProvider).parse(payload);
+    ShareConfirmSheet.show(context, future: future);
   }
 
   Future<void> _maybeSyncTrakt() async {

@@ -67,6 +67,11 @@ class TmdbService {
   Future<Map<String, dynamic>> listDetails(int listId) =>
       _get(_uri('/list/$listId'));
 
+  /// Cross-reference an external ID (IMDb `tt…`, TVDB id, etc.) to TMDB ids.
+  /// Used by the share-sheet flow to resolve IMDb/Letterboxd/generic links.
+  Future<Map<String, dynamic>> findByExternalId(String externalId, {String source = 'imdb_id'}) =>
+      _get(_uri('/find/$externalId', {'external_source': source}));
+
   /// Builds poster/backdrop URLs. `size` examples: 'w185', 'w342', 'w500', 'original'.
   static String? imageUrl(String? path, {String size = 'w500'}) =>
       path == null || path.isEmpty ? null : '$_imageBase/$size$path';

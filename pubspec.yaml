@@ -1,7 +1,7 @@
 name: watchnext
 description: "Shared movie & TV recommender for two-person households."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.4.0+4
 
 environment:
   sdk: ^3.11.4
@@ -28,8 +28,11 @@ dependencies:
   # Storage
   shared_preferences: ^2.5.5
 
-  # Deep links (future: Share-to-Save Phase 4, invite links)
+  # Deep links (future: invite links)
   app_links: ^6.3.3
+
+  # Share-to-Save (Phase 4) — receives SEND/text intents from Android share sheet
+  receive_sharing_intent: ^1.8.1
 
   # Trakt OAuth browser flow (Phase 2)
   flutter_web_auth_2: ^4.1.0

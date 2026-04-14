@@ -51,18 +51,21 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 
 ---
 
-## Phase 4 — Solo / Together mode + Share-to-Save
+## Phase 4 — Solo / Together mode + Share-to-Save ✅
 
-- Segmented control at top of Home and Discover: Solo | Together. Solo filters to individual taste; Together optimizes overlap. Persists per session, default from profile.
-- Recommendation docs store both `match_score` (together) and `match_score_solo` per-user, plus `ai_blurb` and `ai_blurb_solo` per-user. Home reads the appropriate field by active mode.
-- **Android share sheet intent filter** — register WatchNext to receive `text/plain` + URLs.
-  Parse incoming URLs:
-  - `imdb.com/title/tt*` → extract IMDb ID → look up on TMDB
-  - `letterboxd.com/film/*` → extract slug → search TMDB by title
-  - `themoviedb.org/movie/*` or `/tv/*` → extract ID directly
-  - Google search URL → extract title → search TMDB
-  - Fallback: extract page title, search TMDB, confirm match
-- Confirmation bottom sheet with poster + metadata + "Add to Watchlist". Store `added_source` as `"share_sheet"`.
+- Segmented control at top of Home and Discover: Solo | Together. Solo filters to individual taste; Together optimizes overlap. Persists per-device in SharedPreferences (`wn_view_mode`).
+- Recommendation doc contract reserved: `match_score` + `match_score_solo` per-user, `ai_blurb` + `ai_blurb_solo` per-user. The write path (Claude batch scoring) lands in Phase 7.
+- Android share-sheet intent filter wired (`SEND` + `text/plain`). `ShareParser` resolves incoming URLs in this order:
+  - `themoviedb.org/movie/ID` or `/tv/ID` → direct TMDB details
+  - `imdb.com/title/ttXXXXXXX` → TMDB `/find?external_source=imdb_id`
+  - `letterboxd.com/film/slug` → slug → TMDB multi-search
+  - `google.*?q=...` → query → TMDB multi-search
+  - Unknown host → last path segment as title hint → TMDB search
+  - No URL → full text → TMDB search
+- Confirmation bottom sheet (poster + metadata + "Add to Watchlist") stores the item with `added_source: "share_sheet"`.
+- Listeners wired in `ScaffoldWithNavBar` for both warm (getMediaStream) and cold (getInitialMedia) starts via `receive_sharing_intent`.
+
+**Deferred to Phase 7/11:** default-mode per-user (read from `members/{uid}.default_mode` during onboarding) and the actual Solo/Together scoring pipeline.
 
 ---
 

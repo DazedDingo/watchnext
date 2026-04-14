@@ -2,9 +2,21 @@
 
 A shared movie & TV recommender for two-person households. Decide what to watch, together — backed by AI recommendations that learn from both partners' taste.
 
-See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation**, **Phase 2: Trakt Integration**, and **Phase 3: Core UX**.
+See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation**, **Phase 2: Trakt Integration**, **Phase 3: Core UX**, and **Phase 4: Solo/Together + Share-to-Save**.
 
 Trakt's `client_secret` lives only in Firebase Secrets Manager (`TRAKT_CLIENT_SECRET`); the client calls Cloud Function proxies (`traktExchangeCode`, `traktRefreshToken`, `traktRevoke`) for secret-dependent operations.
+
+## Phase 4 status
+
+| Layer | Status |
+|-------|--------|
+| Solo \| Together segmented control in Home + Discover AppBars | Done |
+| Mode persisted per-device via SharedPreferences (`wn_view_mode`) | Done |
+| Recommendation doc contract (`match_score` + `match_score_solo`, `ai_blurb` + `ai_blurb_solo`) | Reserved for Phase 7 engine |
+| Android `SEND` + `text/plain` intent-filter on MainActivity | Done |
+| Share-sheet URL parser (IMDb, TMDB, Letterboxd, Google, fallback) | Done |
+| Share confirm bottom sheet → "Add to Watchlist" with `added_source: share_sheet` | Done |
+| Warm- and cold-start share listeners in `ScaffoldWithNavBar` | Done |
 
 ## Phase 2 status
 
