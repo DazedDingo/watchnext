@@ -53,6 +53,9 @@ firestore-debug.log
 functions/node_modules/
 functions/lib/
 
+# Rules tests
+test-rules/node_modules/
+
 # Secrets — never commit
 google-services.json
 *.env

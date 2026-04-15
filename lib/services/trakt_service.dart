@@ -6,24 +6,31 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
+import 'rating_pusher.dart';
+
 /// Trakt.tv OAuth + REST client.
 ///
 /// The client_secret lives only in Cloud Functions. The client_id is **not**
 /// a secret — Trakt requires it as the `trakt-api-key` header on every
 /// request, so it ships in the APK. Only the three calls that require the
 /// secret (token exchange, refresh, revoke) are proxied via callables.
-class TraktService {
+class TraktService implements RatingPusher {
   TraktService({
     http.Client? client,
     FirebaseFirestore? db,
     FirebaseFunctions? functions,
   })  : _client = client ?? http.Client(),
         _db = db ?? FirebaseFirestore.instance,
-        _functions = functions ?? FirebaseFunctions.instance;
+        _functionsField = functions;
 
   final http.Client _client;
   final FirebaseFirestore _db;
-  final FirebaseFunctions _functions;
+
+  // Lazily resolved so unit tests that only exercise the HTTP surface don't
+  // need a real Firebase app behind FirebaseFunctions.instance.
+  FirebaseFunctions? _functionsField;
+  FirebaseFunctions get _functions =>
+      _functionsField ??= FirebaseFunctions.instance;
 
   static const _api = 'https://api.trakt.tv';
   static const _apiVersion = '2';
@@ -120,6 +127,7 @@ class TraktService {
 
   /// Returns a live access token, refreshing via Cloud Function if the current
   /// one is within 5 minutes of expiry.
+  @override
   Future<String> getLiveAccessToken({required String householdId, required String uid}) async {
     final memberRef = _db.doc('households/$householdId/members/$uid');
     final snap = await memberRef.get();
@@ -203,6 +211,7 @@ class TraktService {
     return (res as List).cast<Map<String, dynamic>>();
   }
 
+  @override
   Future<void> pushRating({
     required String token,
     required String level,

@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/rating.dart';
-import 'trakt_service.dart';
+import 'rating_pusher.dart';
 
 /// Writes a Rating doc and (if Trakt is linked) pushes it to Trakt.
 /// Partner-level privacy isn't a concern: both members can read all ratings
@@ -12,7 +12,7 @@ class RatingService {
       : _db = db ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
-  final TraktService trakt;
+  final RatingPusher trakt;
 
   Future<void> save({
     required String householdId,
