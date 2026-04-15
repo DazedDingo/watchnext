@@ -31,6 +31,7 @@ service cloud.firestore {
         }
       }
       match /ratings/{ratingId}        { allow read, write: if isMember(householdId); }
+      match /watchlist/{itemId}        { allow read, write: if isMember(householdId); }
       match /predictions/{predictionId}{ allow read, write: if isMember(householdId); }
       match /recommendations/{recId}   { allow read, write: if isMember(householdId); }
       match /decisionHistory/{id}      { allow read, write: if isMember(householdId); }
@@ -63,6 +64,13 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update, delete: if false;
+    }
+
+    // Global Reddit-mention snapshots — written by Cloud Function, read
+    // by any authed client to seed recommendations.
+    match /redditMentions/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
     }
 
     // Server-only scratch space.

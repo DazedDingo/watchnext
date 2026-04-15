@@ -189,7 +189,14 @@ class _TonightsPick extends StatelessWidget {
                   height: 240,
                   child: poster != null
                       ? Image.network(poster,
-                          width: double.infinity, fit: BoxFit.cover)
+                          width: double.infinity, fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => Container(
+                            color: Colors.grey.shade900,
+                            child: const Center(
+                              child: Icon(Icons.movie,
+                                  size: 64, color: Colors.white24),
+                            ),
+                          ))
                       : Container(
                           color: Colors.grey.shade900,
                           child: const Center(
@@ -306,7 +313,13 @@ class _RecCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: poster != null
             ? Image.network(poster,
-                width: 52, height: 78, fit: BoxFit.cover)
+                width: 52, height: 78, fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                  width: 52,
+                  height: 78,
+                  color: Colors.grey.shade900,
+                  child: const Icon(Icons.movie, color: Colors.white24),
+                ))
             : Container(
                 width: 52,
                 height: 78,

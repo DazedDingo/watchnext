@@ -115,7 +115,10 @@ class _UnratedTab extends ConsumerWidget {
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: Image.network(poster,
-                            width: 48, height: 72, fit: BoxFit.cover))
+                            width: 48, height: 72, fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const SizedBox(
+                              width: 48, height: 72, child: Icon(Icons.movie)),
+                        ))
                     : const SizedBox(
                         width: 48,
                         height: 72,
@@ -204,7 +207,10 @@ class _EpisodeGroup extends ConsumerWidget {
           ? ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: Image.network(poster,
-                  width: 40, height: 60, fit: BoxFit.cover))
+                  width: 40, height: 60, fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                    width: 40, height: 60, child: Icon(Icons.tv)),
+              ))
           : const SizedBox(width: 40, height: 60, child: Icon(Icons.tv)),
       title: Text(showTitle,
           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -398,7 +404,8 @@ class _EntryTile extends ConsumerWidget {
     return ListTile(
       leading: poster != null
           ? ClipRRect(borderRadius: BorderRadius.circular(4),
-              child: Image.network(poster, width: 48, height: 72, fit: BoxFit.cover))
+              child: Image.network(poster, width: 48, height: 72, fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox(width: 48, height: 72, child: Icon(Icons.movie))))
           : const SizedBox(width: 48, height: 72, child: Icon(Icons.movie)),
       title: Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text([

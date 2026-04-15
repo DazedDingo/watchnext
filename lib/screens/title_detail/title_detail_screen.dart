@@ -48,34 +48,56 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
   String get _entryId => WatchEntry.buildId(widget.mediaType == 'movie' ? 'movie' : 'tv', widget.tmdbId);
   String get _ratingLevel => widget.mediaType == 'movie' ? 'movie' : 'show';
 
+  bool _watchlistBusy = false;
+
   Future<void> _addToWatchlist(Map<String, dynamic> d) async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final householdId = await ref.read(householdIdProvider.future);
-    if (householdId == null) return;
-    await ref.read(watchlistServiceProvider).add(
-          householdId: householdId,
-          uid: uid,
-          mediaType: widget.mediaType == 'movie' ? 'movie' : 'tv',
-          tmdbId: widget.tmdbId,
-          title: (d['title'] ?? d['name']) as String,
-          year: _parseYear(d),
-          posterPath: d['poster_path'] as String?,
-          genres: ((d['genres'] as List?) ?? const []).map((g) => (g as Map)['name'] as String).toList(),
-          runtime: _parseRuntime(d),
-          overview: d['overview'] as String?,
-        );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Added to watchlist')));
+    if (_watchlistBusy) return;
+    setState(() => _watchlistBusy = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final householdId = await ref.read(householdIdProvider.future);
+      if (!mounted || householdId == null) return;
+      await ref.read(watchlistServiceProvider).add(
+            householdId: householdId,
+            uid: uid,
+            mediaType: widget.mediaType == 'movie' ? 'movie' : 'tv',
+            tmdbId: widget.tmdbId,
+            title: (d['title'] ?? d['name']) as String,
+            year: _parseYear(d),
+            posterPath: d['poster_path'] as String?,
+            genres: ((d['genres'] as List?) ?? const []).map((g) => (g as Map)['name'] as String).toList(),
+            runtime: _parseRuntime(d),
+            overview: d['overview'] as String?,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Added to watchlist')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _watchlistBusy = false);
     }
   }
 
   Future<void> _removeFromWatchlist() async {
-    final householdId = await ref.read(householdIdProvider.future);
-    if (householdId == null) return;
-    await ref.read(watchlistServiceProvider).remove(
-          householdId: householdId,
-          id: '${widget.mediaType == 'movie' ? 'movie' : 'tv'}:${widget.tmdbId}',
-        );
+    if (_watchlistBusy) return;
+    setState(() => _watchlistBusy = true);
+    try {
+      final householdId = await ref.read(householdIdProvider.future);
+      if (!mounted || householdId == null) return;
+      await ref.read(watchlistServiceProvider).remove(
+            householdId: householdId,
+            id: '${widget.mediaType == 'movie' ? 'movie' : 'tv'}:${widget.tmdbId}',
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Remove failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _watchlistBusy = false);
+    }
   }
 
   Future<void> _openRatingSheet(Map<String, dynamic> d) async {
@@ -184,7 +206,12 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                   if (poster != null)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(poster, width: 100, height: 150, fit: BoxFit.cover),
+                      child: Image.network(poster, width: 100, height: 150, fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Container(
+                          width: 100, height: 150,
+                          color: const Color(0xFF1A1A1A),
+                          child: const Icon(Icons.movie_outlined, color: Colors.white24),
+                        )),
                     ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -211,13 +238,13 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                     OutlinedButton.icon(
                       icon: const Icon(Icons.bookmark_remove),
                       label: const Text('On watchlist'),
-                      onPressed: _removeFromWatchlist,
+                      onPressed: _watchlistBusy ? null : _removeFromWatchlist,
                     )
                   else
                     FilledButton.icon(
                       icon: const Icon(Icons.bookmark_add),
                       label: const Text('Add to watchlist'),
-                      onPressed: () => _addToWatchlist(d),
+                      onPressed: _watchlistBusy ? null : () => _addToWatchlist(d),
                     ),
                   FilledButton.tonalIcon(
                     icon: const Icon(Icons.star_outline),

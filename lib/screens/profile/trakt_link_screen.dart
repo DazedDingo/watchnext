@@ -39,8 +39,11 @@ class _TraktLinkScreenState extends ConsumerState<TraktLinkScreen> {
       final code = await trakt.openBrowserAuth();
       await trakt.exchangeCode(code: code, householdId: householdId, uid: user.uid);
       // Fire-and-forget full sync — progresses in background. UI will show
-      // activity via traktLinkStatusProvider.lastSync updating.
-      unawaited(sync.runSync(householdId: householdId, uid: user.uid));
+      // activity via traktLinkStatusProvider.lastSync updating. Log any
+      // failure so it surfaces in logcat instead of silently vanishing.
+      unawaited(sync
+          .runSync(householdId: householdId, uid: user.uid)
+          .catchError((e, st) => debugPrint('Trakt initial sync failed: $e\n$st')));
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {

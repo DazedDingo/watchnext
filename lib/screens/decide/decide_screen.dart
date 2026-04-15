@@ -614,7 +614,9 @@ class _CandidateTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: ListTile(
         leading: poster != null
-            ? Image.network(poster, width: 48, height: 72, fit: BoxFit.cover)
+            ? Image.network(poster, width: 48, height: 72, fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox(
+                  width: 48, height: 72, child: Icon(Icons.movie)))
             : const SizedBox(
                 width: 48, height: 72, child: Icon(Icons.movie)),
         title:
@@ -644,7 +646,8 @@ class _CandidateCard extends StatelessWidget {
           if (poster != null)
             AspectRatio(
                 aspectRatio: 2 / 3,
-                child: Image.network(poster, fit: BoxFit.cover))
+                child: Image.network(poster, fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(height: 240, child: Icon(Icons.movie, size: 96))))
           else
             const SizedBox(height: 240, child: Icon(Icons.movie, size: 96)),
           Padding(

@@ -119,7 +119,8 @@ class _ResolvedBody extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: poster != null
-                  ? Image.network(poster, width: 92, height: 138, fit: BoxFit.cover)
+                  ? Image.network(poster, width: 92, height: 138, fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(width: 92, height: 138, color: Colors.grey.shade800, child: const Icon(Icons.movie)))
                   : Container(width: 92, height: 138, color: Colors.grey.shade800, child: const Icon(Icons.movie)),
             ),
             const SizedBox(width: 14),

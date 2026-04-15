@@ -49,7 +49,8 @@ class WatchlistScreen extends ConsumerWidget {
                   leading: poster != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(4),
-                          child: Image.network(poster, width: 48, height: 72, fit: BoxFit.cover),
+                          child: Image.network(poster, width: 48, height: 72, fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const SizedBox(width: 48, height: 72, child: Icon(Icons.movie))),
                         )
                       : const SizedBox(width: 48, height: 72, child: Icon(Icons.movie)),
                   title: Text(w.title, maxLines: 1, overflow: TextOverflow.ellipsis),

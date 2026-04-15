@@ -216,7 +216,12 @@ class _PosterTile extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: poster != null
-            ? Image.network(poster!, width: 107, height: 160, fit: BoxFit.cover)
+            ? Image.network(poster!, width: 107, height: 160, fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                  width: 107, height: 160,
+                  color: Colors.grey.shade900,
+                  child: const Icon(Icons.movie, color: Colors.white24),
+                ))
             : Container(
                 width: 107,
                 height: 160,

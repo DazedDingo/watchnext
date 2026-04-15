@@ -39,7 +39,7 @@ class _RevealScreenState extends ConsumerState<RevealScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final householdId = await ref.read(householdIdProvider.future);
-    if (householdId == null) return;
+    if (!mounted || householdId == null) return;
 
     // Determine if this user won (closer prediction to actual).
     final myEntry = prediction.entryFor(uid);
@@ -140,7 +140,12 @@ class _RevealScreenState extends ConsumerState<RevealScreen> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.network(poster,
-                      width: 80, height: 120, fit: BoxFit.cover),
+                      width: 80, height: 120, fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        width: 80, height: 120,
+                        color: const Color(0xFF1A1A1A),
+                        child: const Icon(Icons.movie_outlined, color: Colors.white24),
+                      )),
                 ),
               const SizedBox(width: 12),
               Expanded(
