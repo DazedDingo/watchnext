@@ -57,7 +57,7 @@ type ConciergeResponse = {
   titles: TitleSuggestion[];
 };
 
-function trimProfile(
+export function trimProfile(
   profile: admin.firestore.DocumentData | undefined,
   uid: string,
   mode: string,
@@ -100,7 +100,7 @@ function trimProfile(
   return lines.join("\n") || "No taste profile yet.";
 }
 
-function buildContextBlock(
+export function buildContextBlock(
   profile: string,
   recentWatched: string[],
   inProgress: string[],
@@ -125,7 +125,7 @@ function buildContextBlock(
   return parts.filter(Boolean).join("\n");
 }
 
-function parseResponse(text: string): ConciergeResponse {
+export function parseResponse(text: string): ConciergeResponse {
   const cleaned = text.trim()
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/, "")

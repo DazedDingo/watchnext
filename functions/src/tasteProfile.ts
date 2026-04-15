@@ -53,13 +53,13 @@ type UserProfile = {
   median_runtime: number | null;
 };
 
-function decadeBucket(year: number | undefined): string | null {
+export function decadeBucket(year: number | undefined): string | null {
   if (!year) return null;
   const d = Math.floor(year / 10) * 10;
   return `${d}s`;
 }
 
-function buildUserProfile(
+export function buildUserProfile(
   uid: string,
   ratings: Rating[],
   entriesById: Map<string, WatchEntry>,
@@ -140,7 +140,7 @@ function buildUserProfile(
   };
 }
 
-function compatibility(ratings: Rating[], uids: string[]): {
+export function compatibility(ratings: Rating[], uids: string[]): {
   within_1_star_pct: number;
   rated_both_count: number;
 } {

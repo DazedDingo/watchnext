@@ -47,14 +47,14 @@ type Score = {
   blurb_solo: Record<string, string>;
 };
 
-function isCandidate(x: unknown): x is Candidate {
+export function isCandidate(x: unknown): x is Candidate {
   if (typeof x !== "object" || x === null) return false;
   const c = x as Record<string, unknown>;
   return typeof c.media_type === "string" && typeof c.tmdb_id === "number" &&
     typeof c.title === "string";
 }
 
-function trimProfileForPrompt(
+export function trimProfileForPrompt(
   profile: admin.firestore.DocumentData | undefined,
 ): {
   member_uids: string[];
@@ -88,7 +88,7 @@ function trimProfileForPrompt(
   return { member_uids, combined_top_genres, per_user_summary };
 }
 
-function buildPrompt(
+export function buildPrompt(
   batch: Candidate[],
   profile: ReturnType<typeof trimProfileForPrompt>,
 ): string {
@@ -127,7 +127,7 @@ For each candidate, return a JSON object with:
 Return ONLY a JSON array of these objects, no prose, no markdown fences. Output must parse as valid JSON.`;
 }
 
-function parseScores(text: string): Score[] {
+export function parseScores(text: string): Score[] {
   // Strip ```json ... ``` if the model adds fences despite instructions.
   const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   const parsed = JSON.parse(cleaned);

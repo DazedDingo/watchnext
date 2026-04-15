@@ -57,7 +57,7 @@ type TmdbResult = {
  *   "[DISCUSSION] Oppenheimer - was it worth the hype?" → "Oppenheimer"
  *   "Just finished Severance, absolutely loved it" → "Severance"
  */
-function extractTitle(postTitle: string): string | null {
+export function extractTitle(postTitle: string): string | null {
   // Strip leading [TAG] markers.
   const cleaned = postTitle.replace(/^\[.*?\]\s*/, "").trim();
 

@@ -56,6 +56,9 @@ functions/lib/
 # Rules tests
 test-rules/node_modules/
 
+# Dart coverage output
+coverage/
+
 # Secrets — never commit
 google-services.json
 *.env

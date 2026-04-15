@@ -14,10 +14,14 @@ class ConciergeService {
     FirebaseFirestore? db,
     FirebaseFunctions? fns,
   })  : _db = db ?? FirebaseFirestore.instance,
-        _fns = fns ?? FirebaseFunctions.instance;
+        _fnsField = fns;
 
   final FirebaseFirestore _db;
-  final FirebaseFunctions _fns;
+
+  // Lazy so historyStream (Firestore only) can be unit-tested without a
+  // live FirebaseFunctions instance.
+  FirebaseFunctions? _fnsField;
+  FirebaseFunctions get _fns => _fnsField ??= FirebaseFunctions.instance;
 
   CollectionReference<Map<String, dynamic>> _col(String householdId) =>
       _db.collection('households/$householdId/conciergeHistory');
