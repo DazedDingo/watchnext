@@ -18,44 +18,101 @@ class LoginScreen extends ConsumerWidget {
     });
 
     return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'WatchNext',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 40, fontWeight: FontWeight.w800),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Deep red curtain-to-black radial, evoking a dimmed theater.
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0, -0.4),
+                radius: 1.2,
+                colors: [
+                  Color(0xFF2B0608), // warm stage glow
+                  Color(0xFF12090A),
+                  Color(0xFF050506), // far-edge black
+                ],
+                stops: [0.0, 0.55, 1.0],
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Decide what to watch. Together.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.white.withValues(alpha: 0.7)),
-              ),
-              const SizedBox(height: 48),
-              FilledButton.icon(
-                icon: const Icon(Icons.login),
-                label: const Text('Sign in with Google'),
-                onPressed: () async {
-                  try {
-                    final cred = await ref.read(authServiceProvider).signInWithGoogle();
-                    if (context.mounted && cred.user != null) {
-                      await _redirectAfterAuth(context, cred.user!.uid);
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      _showErrorDialog(context, e.toString());
-                    }
-                  }
-                },
-              ),
-            ],
+            ),
           ),
-        ),
+          // Vertical curtain-fold streaks on the sides.
+          const IgnorePointer(
+            child: _CurtainFolds(),
+          ),
+          // Film-strip frames at top and bottom to frame the "screen".
+          const Positioned(top: 0, left: 0, right: 0, child: _FilmStrip()),
+          const Positioned(bottom: 0, left: 0, right: 0, child: _FilmStrip()),
+          // Heavy dark scrim so text stays high-contrast.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.55),
+                  Colors.black.withValues(alpha: 0.35),
+                  Colors.black.withValues(alpha: 0.65),
+                ],
+                stops: const [0.0, 0.5, 1.0],
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'WatchNext',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 44,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                        shadows: [
+                          Shadow(color: Colors.black87, blurRadius: 12, offset: Offset(0, 2)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Decide what to watch. Together.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.white.withValues(alpha: 0.78),
+                        shadows: const [
+                          Shadow(color: Colors.black87, blurRadius: 8),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 56),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.login),
+                      label: const Text('Sign in with Google'),
+                      onPressed: () async {
+                        try {
+                          final cred = await ref.read(authServiceProvider).signInWithGoogle();
+                          if (context.mounted && cred.user != null) {
+                            await _redirectAfterAuth(context, cred.user!.uid);
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            _showErrorDialog(context, e.toString());
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -85,5 +142,83 @@ class LoginScreen extends ConsumerWidget {
     } else {
       context.go('/setup');
     }
+  }
+}
+
+class _CurtainFolds extends StatelessWidget {
+  const _CurtainFolds();
+
+  @override
+  Widget build(BuildContext context) {
+    // Left and right curtain gradients — dark burgundy folds fading inward.
+    return Row(
+      children: [
+        Expanded(
+          flex: 2,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  const Color(0xFF3A0A10).withValues(alpha: 0.9),
+                  const Color(0xFF1A0608).withValues(alpha: 0.4),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
+        const Expanded(flex: 3, child: SizedBox.shrink()),
+        Expanded(
+          flex: 2,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerRight,
+                end: Alignment.centerLeft,
+                colors: [
+                  const Color(0xFF3A0A10).withValues(alpha: 0.9),
+                  const Color(0xFF1A0608).withValues(alpha: 0.4),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FilmStrip extends StatelessWidget {
+  const _FilmStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 28,
+      color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          const holeWidth = 10.0;
+          const gap = 12.0;
+          final count = (c.maxWidth / (holeWidth + gap)).floor();
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: List.generate(count, (_) {
+              return Container(
+                width: holeWidth,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              );
+            }),
+          );
+        },
+      ),
+    );
   }
 }
