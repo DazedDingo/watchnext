@@ -40,11 +40,12 @@ service cloud.firestore {
       match /customMoods/{id}          { allow read, write: if isMember(householdId); }
       match /wrapped/{year}            { allow read, write: if isMember(householdId); }
 
-      // Household-scoped docs (single documents).
-      match /tasteProfile {
+      // Household-scoped docs (single documents per household, addressed via
+      // "default" so paths remain even-segmented as Firestore requires).
+      match /tasteProfile/{id} {
         allow read, write: if isMember(householdId);
       }
-      match /gamification {
+      match /gamification/{id} {
         allow read, write: if isMember(householdId);
       }
 

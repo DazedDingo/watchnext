@@ -258,7 +258,7 @@ export const generateTasteProfile = onCall({ region: "europe-west2" }, async (re
     per_user,
   };
 
-  await db.doc(`households/${householdId}/tasteProfile`).set(profile);
+  await db.doc(`households/${householdId}/tasteProfile/default`).set(profile);
 
   return {
     ok: true,

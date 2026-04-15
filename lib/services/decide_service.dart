@@ -24,7 +24,7 @@ class DecideService {
         .collection('households/$householdId/decisionHistory')
         .add(decision.toFirestore());
 
-    final gamificationRef = _db.doc('households/$householdId/gamification');
+    final gamificationRef = _db.doc('households/$householdId/gamification/default');
     await _db.runTransaction((tx) async {
       final snap = await tx.get(gamificationRef);
       final current = (snap.data()?['whose_turn'] as Map?)
@@ -49,7 +49,7 @@ class DecideService {
   /// an empty map if gamification hasn't been seeded yet.
   Future<Map<String, int>> readWhoseTurn(String householdId) async {
     final snap =
-        await _db.doc('households/$householdId/gamification').get();
+        await _db.doc('households/$householdId/gamification/default').get();
     final raw = (snap.data()?['whose_turn'] as Map?)?.cast<String, dynamic>();
     if (raw == null) return {};
     return {for (final e in raw.entries) e.key: (e.value as num).toInt()};

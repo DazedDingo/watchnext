@@ -103,7 +103,7 @@ final tasteProfileProvider =
     return;
   }
   yield* FirebaseFirestore.instance
-      .doc('households/$householdId/tasteProfile')
+      .doc('households/$householdId/tasteProfile/default')
       .snapshots()
       .map((s) => s.data());
 });

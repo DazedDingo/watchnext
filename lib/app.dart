@@ -24,16 +24,21 @@ import 'screens/title_detail/title_detail_screen.dart';
 import 'screens/watchlist/watchlist_screen.dart';
 import 'services/notification_service.dart';
 
+/// Pure redirect rule for the app router. Extracted so it can be unit-tested
+/// without Firebase init. Called on every navigation attempt.
+String? computeRouterRedirect({required bool signedIn, required String loc}) {
+  final isPublic = loc == '/login' || loc.startsWith('/setup');
+  if (!signedIn && !isPublic) return '/login';
+  if (signedIn && loc == '/login') return '/home';
+  return null;
+}
+
 final _router = GoRouter(
   initialLocation: '/login',
-  redirect: (_, state) {
-    final signedIn = FirebaseAuth.instance.currentUser != null;
-    final loc = state.matchedLocation;
-    final isPublic = loc == '/login' || loc.startsWith('/setup');
-    if (!signedIn && !isPublic) return '/login';
-    if (signedIn && loc == '/login') return '/home';
-    return null;
-  },
+  redirect: (_, state) => computeRouterRedirect(
+    signedIn: FirebaseAuth.instance.currentUser != null,
+    loc: state.matchedLocation,
+  ),
   routes: [
     GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
     GoRoute(

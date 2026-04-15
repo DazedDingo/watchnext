@@ -170,7 +170,7 @@ export const concierge = onCall(
 
     // Load context data in parallel.
     const [profileSnap, entriesSnap, watchlistSnap] = await Promise.all([
-      db.doc(`households/${householdId}/tasteProfile`).get(),
+      db.doc(`households/${householdId}/tasteProfile/default`).get(),
       db.collection(`households/${householdId}/watchEntries`)
         .orderBy("last_watched_at", "desc")
         .limit(50)

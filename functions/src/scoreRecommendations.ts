@@ -165,7 +165,7 @@ export const scoreRecommendations = onCall(
     }
 
     const profileSnap = await db
-      .doc(`households/${householdId}/tasteProfile`)
+      .doc(`households/${householdId}/tasteProfile/default`)
       .get();
     const profileSummary = trimProfileForPrompt(profileSnap.data());
 
