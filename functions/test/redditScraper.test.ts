@@ -1,4 +1,4 @@
-import { extractTitle } from "../src/redditScraper";
+import { extractTitle, resolveGenres } from "../src/redditScraper";
 
 describe("extractTitle", () => {
   describe("Pattern 1: Title (year)", () => {
@@ -72,5 +72,49 @@ describe("extractTitle", () => {
       const r = extractTitle("Dune, the best sci-fi ever made in decades");
       expect(r).toBe("Dune");
     });
+  });
+});
+
+describe("resolveGenres", () => {
+  test("movie ids → names (Documentary, Drama)", () => {
+    expect(resolveGenres([99, 18], "movie")).toEqual(["Documentary", "Drama"]);
+  });
+
+  test("tv ids → names (Action & Adventure, Documentary)", () => {
+    expect(resolveGenres([10759, 99], "tv")).toEqual([
+      "Action & Adventure",
+      "Documentary",
+    ]);
+  });
+
+  test("unknown ids are silently dropped", () => {
+    expect(resolveGenres([99999, 28], "movie")).toEqual(["Action"]);
+  });
+
+  test("undefined ids → empty list", () => {
+    expect(resolveGenres(undefined, "movie")).toEqual([]);
+  });
+
+  test("empty ids → empty list", () => {
+    expect(resolveGenres([], "tv")).toEqual([]);
+  });
+
+  test("movie-only id (37 Western) resolves under movie but also under tv (shared)", () => {
+    expect(resolveGenres([37], "movie")).toEqual(["Western"]);
+    expect(resolveGenres([37], "tv")).toEqual(["Western"]);
+  });
+
+  test("movie domain does not use tv-only id (10759)", () => {
+    expect(resolveGenres([10759], "movie")).toEqual([]);
+  });
+
+  test("tv domain does not use movie-only id (28 Action)", () => {
+    // 28 is movie-only; on tv you would see 10759 Action & Adventure.
+    expect(resolveGenres([28], "tv")).toEqual([]);
+  });
+
+  test("Documentary (99) resolves in both domains — needed for mood match", () => {
+    expect(resolveGenres([99], "movie")).toEqual(["Documentary"]);
+    expect(resolveGenres([99], "tv")).toEqual(["Documentary"]);
   });
 });

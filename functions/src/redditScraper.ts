@@ -21,7 +21,33 @@ const SUBREDDITS = [
   "movies",
   "television",
   "Letterboxd",
+  "Documentaries",
 ];
+
+/**
+ * TMDB genre id → name. Duplicated from the Flutter client (tmdb_genres.dart)
+ * because Cloud Functions can't import Dart code. Keep in sync with
+ * lib/utils/tmdb_genres.dart.
+ */
+const TMDB_MOVIE_GENRES: Record<number, string> = {
+  28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+  99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+  27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance",
+  878: "Science Fiction", 10770: "TV Movie", 53: "Thriller", 10752: "War",
+  37: "Western",
+};
+const TMDB_TV_GENRES: Record<number, string> = {
+  10759: "Action & Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+  99: "Documentary", 18: "Drama", 10751: "Family", 10762: "Kids",
+  9648: "Mystery", 10763: "News", 10764: "Reality",
+  10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
+  10768: "War & Politics", 37: "Western",
+};
+
+export function resolveGenres(ids: number[] | undefined, mediaType: "movie" | "tv"): string[] {
+  const lookup = mediaType === "tv" ? TMDB_TV_GENRES : TMDB_MOVIE_GENRES;
+  return (ids ?? []).map((id) => lookup[id]).filter((name): name is string => !!name);
+}
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY ?? "";
 const TMDB_BASE = "https://api.themoviedb.org/3";
@@ -189,6 +215,7 @@ export const redditScraper = onSchedule(
           year,
           poster_path: result.poster_path ?? null,
           overview: result.overview ?? null,
+          genres: resolveGenres(result.genre_ids, result.media_type),
           mention_score: mentionScore,
           last_updated: now,
         },

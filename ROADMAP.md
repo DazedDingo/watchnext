@@ -99,7 +99,7 @@ For the authoritative design spec (screens, data model, flows, gamification, all
   - Top bar: Solo | Together toggle.
   - Hero: Tonight's Pick (poster card, match score, AI blurb, "Let's watch this" / "Not tonight").
   - "Decide Together" button (Together mode only).
-  - Mood selector pills: Date Night | Chill | Intense | Laugh | Mind-Bending | Feel-Good | Custom.
+  - Mood selector pills: Date Night | Chill | Intense | Laugh | Mind-Bending | Feel-Good | Documentary | Custom.
   - Recommendation list (vertical cards: poster, title, year, runtime, genres, match score badge, source badge — AI Pick / Trending / Reddit Hype / Hidden Gem, AI one-liner).
   - Rewatch suggestions (occasional "Rewatch?" card for highly-rated titles matching current mood; toggle in settings).
 - **Discover screen**:

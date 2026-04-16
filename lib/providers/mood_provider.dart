@@ -1,6 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-enum WatchMood { dateNight, chill, intense, laugh, mindBending, feelGood, custom }
+enum WatchMood {
+  dateNight,
+  chill,
+  intense,
+  laugh,
+  mindBending,
+  feelGood,
+  documentary,
+  custom,
+}
 
 extension WatchMoodExt on WatchMood {
   String get label {
@@ -17,6 +26,8 @@ extension WatchMoodExt on WatchMood {
         return 'Mind-Bending';
       case WatchMood.feelGood:
         return 'Feel-Good';
+      case WatchMood.documentary:
+        return 'Documentary';
       case WatchMood.custom:
         return 'Custom';
     }
@@ -37,6 +48,8 @@ extension WatchMoodExt on WatchMood {
         return ['Science Fiction', 'Mystery', 'Fantasy'];
       case WatchMood.feelGood:
         return ['Comedy', 'Family', 'Animation', 'Romance'];
+      case WatchMood.documentary:
+        return ['Documentary'];
       case WatchMood.custom:
         return [];
     }

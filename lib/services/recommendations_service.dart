@@ -3,6 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/recommendation.dart';
 import '../models/watchlist_item.dart';
+import '../utils/tmdb_genres.dart';
 import 'tmdb_service.dart';
 
 /// Client for Phase 7's scored-recommendations pipeline:
@@ -66,80 +67,31 @@ class RecommendationsService {
     required List<WatchlistItem> watchlist,
     int trendingCap = 20,
   }) async {
-    final candidates = <Map<String, dynamic>>[];
-    final seen = <String>{};
-
-    for (final w in watchlist) {
-      final key = '${w.mediaType}:${w.tmdbId}';
-      if (seen.add(key)) {
-        candidates.add({
-          'media_type': w.mediaType,
-          'tmdb_id': w.tmdbId,
-          'title': w.title,
-          'year': w.year,
-          'poster_path': w.posterPath,
-          'genres': w.genres,
-          'overview': w.overview,
-          'source': 'watchlist',
-        });
-      }
-    }
-
-    // Pull top Reddit-mentioned titles from the global /redditMentions
-    // collection (written weekly by the redditScraper Cloud Function).
+    List<Map<String, dynamic>> redditRows = const [];
     try {
-      final redditSnap = await _db
+      final snap = await _db
           .collection('redditMentions')
           .orderBy('mention_score', descending: true)
           .limit(20)
           .get();
-      for (final doc in redditSnap.docs) {
-        final m = doc.data();
-        final id = (m['tmdb_id'] as num?)?.toInt();
-        if (id == null) continue;
-        final mediaType = (m['media_type'] as String?) ?? 'movie';
-        final key = '$mediaType:$id';
-        if (!seen.add(key)) continue;
-        candidates.add({
-          'media_type': mediaType,
-          'tmdb_id': id,
-          'title': m['title'] as String? ?? 'Untitled',
-          'year': (m['year'] as num?)?.toInt(),
-          'poster_path': m['poster_path'] as String?,
-          'overview': m['overview'] as String?,
-          'source': 'reddit',
-        });
-      }
+      redditRows = snap.docs.map((d) => d.data()).toList();
     } catch (_) {
       // Best-effort; no Reddit data is fine.
     }
 
+    Map<String, dynamic> trendingPayload = const {};
     try {
-      final trending = await _tmdb.trendingMovies();
-      final rows = (trending['results'] as List? ?? const [])
-          .cast<Map<String, dynamic>>();
-      for (final m in rows.take(trendingCap)) {
-        final id = (m['id'] as num?)?.toInt();
-        if (id == null) continue;
-        final mediaType = (m['media_type'] as String?) ?? 'movie';
-        final key = '$mediaType:$id';
-        if (!seen.add(key)) continue;
-        final date = (m['release_date'] ?? m['first_air_date']) as String?;
-        candidates.add({
-          'media_type': mediaType,
-          'tmdb_id': id,
-          'title': (m['title'] ?? m['name']) as String? ?? 'Untitled',
-          'year': (date != null && date.length >= 4)
-              ? int.tryParse(date.substring(0, 4))
-              : null,
-          'poster_path': m['poster_path'] as String?,
-          'overview': m['overview'] as String?,
-          'source': 'trending',
-        });
-      }
+      trendingPayload = await _tmdb.trendingMovies();
     } catch (_) {
       // Trending is best-effort — the watchlist alone is still a valid pool.
     }
+
+    final candidates = buildCandidates(
+      watchlist: watchlist,
+      redditMentions: redditRows,
+      trendingPayload: trendingPayload,
+      trendingCap: trendingCap,
+    );
 
     if (candidates.isEmpty) return;
 
@@ -148,4 +100,80 @@ class RecommendationsService {
       'candidates': candidates,
     });
   }
+}
+
+/// Pure candidate-list builder — exposed for testing. Merges watchlist,
+/// Reddit mentions, and TMDB trending rows into the payload shape the
+/// `scoreRecommendations` CF expects. Handles genre resolution (id → name)
+/// so the mood-pill filter has something to match against.
+///
+/// Order: watchlist first, then Reddit, then trending. Dedup by
+/// `{mediaType}:{tmdbId}`.
+List<Map<String, dynamic>> buildCandidates({
+  required List<WatchlistItem> watchlist,
+  List<Map<String, dynamic>> redditMentions = const [],
+  Map<String, dynamic> trendingPayload = const {},
+  int trendingCap = 20,
+}) {
+  final candidates = <Map<String, dynamic>>[];
+  final seen = <String>{};
+
+  for (final w in watchlist) {
+    final key = '${w.mediaType}:${w.tmdbId}';
+    if (seen.add(key)) {
+      candidates.add({
+        'media_type': w.mediaType,
+        'tmdb_id': w.tmdbId,
+        'title': w.title,
+        'year': w.year,
+        'poster_path': w.posterPath,
+        'genres': w.genres,
+        'overview': w.overview,
+        'source': 'watchlist',
+      });
+    }
+  }
+
+  for (final m in redditMentions) {
+    final id = (m['tmdb_id'] as num?)?.toInt();
+    if (id == null) continue;
+    final mediaType = (m['media_type'] as String?) ?? 'movie';
+    final key = '$mediaType:$id';
+    if (!seen.add(key)) continue;
+    candidates.add({
+      'media_type': mediaType,
+      'tmdb_id': id,
+      'title': m['title'] as String? ?? 'Untitled',
+      'year': (m['year'] as num?)?.toInt(),
+      'poster_path': m['poster_path'] as String?,
+      'genres': coerceGenres(m['genres'] ?? m['genre_ids'], mediaType: mediaType),
+      'overview': m['overview'] as String?,
+      'source': 'reddit',
+    });
+  }
+
+  final rows = (trendingPayload['results'] as List? ?? const [])
+      .cast<Map<String, dynamic>>();
+  for (final m in rows.take(trendingCap)) {
+    final id = (m['id'] as num?)?.toInt();
+    if (id == null) continue;
+    final mediaType = (m['media_type'] as String?) ?? 'movie';
+    final key = '$mediaType:$id';
+    if (!seen.add(key)) continue;
+    final date = (m['release_date'] ?? m['first_air_date']) as String?;
+    candidates.add({
+      'media_type': mediaType,
+      'tmdb_id': id,
+      'title': (m['title'] ?? m['name']) as String? ?? 'Untitled',
+      'year': (date != null && date.length >= 4)
+          ? int.tryParse(date.substring(0, 4))
+          : null,
+      'poster_path': m['poster_path'] as String?,
+      'genres': coerceGenres(m['genre_ids'], mediaType: mediaType),
+      'overview': m['overview'] as String?,
+      'source': 'trending',
+    });
+  }
+
+  return candidates;
 }
