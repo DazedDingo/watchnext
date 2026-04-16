@@ -99,7 +99,10 @@ For the authoritative design spec (screens, data model, flows, gamification, all
   - Top bar: Solo | Together toggle.
   - Hero: Tonight's Pick (poster card, match score, AI blurb, "Let's watch this" / "Not tonight").
   - "Decide Together" button (Together mode only).
+  - "Surprise me" button — random pick from the top of whatever's currently visible (respects mood + runtime + dismissals).
   - Mood selector pills: Date Night | Chill | Intense | Laugh | Mind-Bending | Feel-Good | Documentary | Custom.
+  - Runtime pills: <90 | 90–120 | >2h.
+  - Solo mode: "Because you loved X" chip cites a highly-rated, genre-matching title from the user's own history.
   - Recommendation list (vertical cards: poster, title, year, runtime, genres, match score badge, source badge — AI Pick / Trending / Reddit Hype / Hidden Gem, AI one-liner).
   - Rewatch suggestions (occasional "Rewatch?" card for highly-rated titles matching current mood; toggle in settings).
 - **Discover screen**:

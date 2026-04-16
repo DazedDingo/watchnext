@@ -13,6 +13,7 @@ import '../../providers/watch_entries_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../services/tmdb_service.dart';
 import '../../utils/rec_explainer.dart';
+import '../../utils/surprise_picker.dart';
 import '../../widgets/async_error.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
@@ -127,15 +128,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: ListView(
           padding: const EdgeInsets.only(bottom: 32),
           children: [
-            if (mode == ViewMode.together)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: FilledButton.icon(
-                  icon: const Icon(Icons.groups),
-                  label: const Text('Decide Together'),
-                  onPressed: () => context.push('/decide'),
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Row(
+                children: [
+                  if (mode == ViewMode.together) ...[
+                    Expanded(
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.groups),
+                        label: const Text('Decide Together'),
+                        onPressed: () => context.push('/decide'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.casino),
+                    label: const Text('Surprise me'),
+                    onPressed: available.isEmpty
+                        ? null
+                        : () {
+                            final pick = pickSurprise(available);
+                            if (pick == null) return;
+                            context.push(
+                                '/title/${pick.mediaType}/${pick.tmdbId}');
+                          },
+                  ),
+                ],
               ),
+            ),
             _MoodPills(
               selected: mood,
               onSelect: (m) => ref.read(moodProvider.notifier).state = m,
