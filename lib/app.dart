@@ -10,6 +10,7 @@ import 'providers/mode_provider.dart';
 import 'providers/trakt_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/auth/splash_screen.dart';
 import 'screens/household/setup_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/discover/discover_screen.dart';
@@ -27,19 +28,21 @@ import 'services/notification_service.dart';
 /// Pure redirect rule for the app router. Extracted so it can be unit-tested
 /// without Firebase init. Called on every navigation attempt.
 String? computeRouterRedirect({required bool signedIn, required String loc}) {
-  final isPublic = loc == '/login' || loc.startsWith('/setup');
+  final isPublic =
+      loc == '/splash' || loc == '/login' || loc.startsWith('/setup');
   if (!signedIn && !isPublic) return '/login';
   if (signedIn && loc == '/login') return '/home';
   return null;
 }
 
 final _router = GoRouter(
-  initialLocation: '/login',
+  initialLocation: '/splash',
   redirect: (_, state) => computeRouterRedirect(
     signedIn: FirebaseAuth.instance.currentUser != null,
     loc: state.matchedLocation,
   ),
   routes: [
+    GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
     GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
     GoRoute(
       path: '/setup',

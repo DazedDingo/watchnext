@@ -42,8 +42,12 @@ class LoginScreen extends ConsumerWidget {
             child: _CurtainFolds(),
           ),
           // Film-strip frames at top and bottom to frame the "screen".
-          const Positioned(top: 0, left: 0, right: 0, child: _FilmStrip()),
-          const Positioned(bottom: 0, left: 0, right: 0, child: _FilmStrip()),
+          // Padded in from the edge so the reel reads as a distinct border
+          // rather than blending into the status/nav bar chrome.
+          const Positioned(
+              top: 24, left: 0, right: 0, child: _FilmStrip()),
+          const Positioned(
+              bottom: 24, left: 0, right: 0, child: _FilmStrip()),
           // Light scrim — keeps text legible without crushing the gradient.
           DecoratedBox(
             decoration: BoxDecoration(
@@ -197,23 +201,41 @@ class _FilmStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Chunky film-reel border with a proper sprocket row. Taller + higher
+    // contrast so it reads as a real film strip, not decorative trim.
     return Container(
-      height: 28,
-      color: Colors.black,
+      height: 52,
+      decoration: const BoxDecoration(
+        color: Colors.black,
+        border: Border.symmetric(
+          horizontal: BorderSide(color: Color(0xFF2A2A2A), width: 1.5),
+        ),
+      ),
       child: LayoutBuilder(
         builder: (context, c) {
-          const holeWidth = 10.0;
-          const gap = 12.0;
-          final count = (c.maxWidth / (holeWidth + gap)).floor();
+          const holeWidth = 22.0;
+          const gap = 14.0;
+          final count = (c.maxWidth / (holeWidth + gap)).floor().clamp(1, 999);
           return Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: List.generate(count, (_) {
               return Container(
                 width: holeWidth,
-                height: 12,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A1A),
-                  borderRadius: BorderRadius.circular(2),
+                  color: const Color(0xFF0A0A0A),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: const Color(0xFF1F1F1F),
+                    width: 1,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 2,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
                 ),
               );
             }),

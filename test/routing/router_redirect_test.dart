@@ -55,5 +55,11 @@ void main() {
     test('signed-in user on /setup can still access setup', () {
       expect(computeRouterRedirect(signedIn: true, loc: '/setup'), isNull);
     });
+
+    test('/splash is public — unauthed users stay there to watch the intro',
+        () {
+      expect(computeRouterRedirect(signedIn: false, loc: '/splash'), isNull);
+      expect(computeRouterRedirect(signedIn: true, loc: '/splash'), isNull);
+    });
   });
 }
