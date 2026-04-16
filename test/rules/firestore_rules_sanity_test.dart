@@ -2,6 +2,23 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+/// Walks lib/ and returns the set of collection/doc names the client
+/// reads or writes under `/households/{hid}/<name>`. This is a static
+/// source scan — no runtime Firestore involved.
+Set<String> _discoverHouseholdChildPaths(Directory libDir) {
+  // Matches both `.collection('households/$hid/foo')` and
+  // `.doc('households/$hid/foo/...')` regardless of interpolation style.
+  final rx = RegExp(r"households/\$\{?[A-Za-z_][A-Za-z0-9_.]*\}?/([A-Za-z_]+)");
+  final found = <String>{};
+  for (final f in libDir.listSync(recursive: true).whereType<File>()) {
+    if (!f.path.endsWith('.dart')) continue;
+    for (final m in rx.allMatches(f.readAsStringSync())) {
+      found.add(m.group(1)!);
+    }
+  }
+  return found;
+}
+
 /// Lightweight sanity checks over firestore.rules to catch the class of bug
 /// we hit pre-QA: a collection the client reads/writes, but no matching
 /// rule (which silently default-denies). This is a text-level check, not a
@@ -105,6 +122,35 @@ void main() {
       // The household root must only allow update from existing members.
       expect(rules.contains(RegExp(r'allow\s+update:\s*if\s+isMember')),
           isTrue);
+    });
+  });
+
+  group('firestore.rules — discovered client paths', () {
+    // Regression guard for the exact class of bug that caused PERMISSION_DENIED
+    // on Stats and Title Detail: a collection gets added to the client, no
+    // rule is added for it, and it silently default-denies. The hardcoded
+    // list above doesn't protect against NEW collections — this one does.
+    test('every households/{hid}/<child> path hit by lib/ has a matching rule',
+        () {
+      final libDir = Directory('${rulesFile().parent.path}/lib');
+      expect(libDir.existsSync(), isTrue, reason: 'lib/ not found');
+
+      final discovered = _discoverHouseholdChildPaths(libDir);
+      expect(discovered, isNotEmpty,
+          reason: 'Regex failed — no household child paths found in lib/');
+
+      final missing = <String>[];
+      for (final name in discovered) {
+        if (!rules.contains(RegExp('match\\s+/$name/\\{'))) missing.add(name);
+      }
+      expect(
+        missing,
+        isEmpty,
+        reason:
+            'Client hits these household child paths with no matching rule — '
+            'Firestore will default-deny them and the feature breaks with '
+            'PERMISSION_DENIED: $missing',
+      );
     });
   });
 }

@@ -15,6 +15,7 @@ import '../../providers/tmdb_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/async_error.dart';
 import '../../widgets/help_button.dart';
 import '../predict/prediction_sheet.dart';
 import '../rating/rating_sheet.dart';
@@ -157,14 +158,48 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final entries = ref.watch(watchEntriesProvider).value ?? const [];
+    // Watch the async values directly so a Firestore PERMISSION_DENIED
+    // surfaces as a readable error instead of an empty-list silent fail.
+    final entriesAsync = ref.watch(watchEntriesProvider);
+    final ratingsAsync = ref.watch(ratingsProvider);
+    final watchlistAsync = ref.watch(watchlistProvider);
+    final firestoreError = entriesAsync.hasError
+        ? entriesAsync.error
+        : ratingsAsync.hasError
+            ? ratingsAsync.error
+            : watchlistAsync.hasError
+                ? watchlistAsync.error
+                : null;
+    if (firestoreError != null) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => context.pop()),
+          title: Text(_title ?? 'Title'),
+          actions: const [
+            HelpButton(title: 'Title details', body: _titleDetailHelp)
+          ],
+        ),
+        body: AsyncErrorView(
+          error: firestoreError,
+          onRetry: () {
+            ref.invalidate(watchEntriesProvider);
+            ref.invalidate(ratingsProvider);
+            ref.invalidate(watchlistProvider);
+          },
+        ),
+      );
+    }
+
+    final entries = entriesAsync.value ?? const [];
     final watchEntry = entries.cast<WatchEntry?>().firstWhere(
           (e) => e?.id == _entryId,
           orElse: () => null,
         );
     final ratingsByTarget = ref.watch(ratingsByTargetProvider);
     final ratings = ratingsByTarget[_entryId] ?? const <Rating>[];
-    final watchlist = ref.watch(watchlistProvider).value ?? const [];
+    final watchlist = watchlistAsync.value ?? const [];
     final onWatchlist = watchlist.any((w) => w.id == '${widget.mediaType == 'movie' ? 'movie' : 'tv'}:${widget.tmdbId}');
     final mode = ref.watch(viewModeProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
