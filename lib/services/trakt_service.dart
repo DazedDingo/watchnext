@@ -28,9 +28,10 @@ class TraktService implements RatingPusher {
 
   // Lazily resolved so unit tests that only exercise the HTTP surface don't
   // need a real Firebase app behind FirebaseFunctions.instance.
+  // Callables live in europe-west2 (co-located with Firestore in London).
   FirebaseFunctions? _functionsField;
   FirebaseFunctions get _functions =>
-      _functionsField ??= FirebaseFunctions.instance;
+      _functionsField ??= FirebaseFunctions.instanceFor(region: 'europe-west2');
 
   static const _api = 'https://api.trakt.tv';
   static const _apiVersion = '2';

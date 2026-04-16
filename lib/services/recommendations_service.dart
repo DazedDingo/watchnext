@@ -21,7 +21,8 @@ class RecommendationsService {
     FirebaseFunctions? fns,
     TmdbService? tmdb,
   })  : _db = db ?? FirebaseFirestore.instance,
-        _fns = fns ?? FirebaseFunctions.instance,
+        // Callables live in europe-west2 (co-located with Firestore in London).
+        _fns = fns ?? FirebaseFunctions.instanceFor(region: 'europe-west2'),
         _tmdb = tmdb ?? TmdbService();
 
   CollectionReference<Map<String, dynamic>> _col(String hh) =>

@@ -20,8 +20,10 @@ class ConciergeService {
 
   // Lazy so historyStream (Firestore only) can be unit-tested without a
   // live FirebaseFunctions instance.
+  // Callables live in europe-west2 (co-located with Firestore in London).
   FirebaseFunctions? _fnsField;
-  FirebaseFunctions get _fns => _fnsField ??= FirebaseFunctions.instance;
+  FirebaseFunctions get _fns =>
+      _fnsField ??= FirebaseFunctions.instanceFor(region: 'europe-west2');
 
   CollectionReference<Map<String, dynamic>> _col(String householdId) =>
       _db.collection('households/$householdId/conciergeHistory');
