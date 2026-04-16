@@ -9,6 +9,14 @@ import '../../providers/household_provider.dart';
 import '../../providers/prediction_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/help_button.dart';
+
+const _revealHelp =
+    'Who predicted the actual rating more accurately?\n\n'
+    '• Both members\' predictions are shown alongside the ratings you actually gave.\n'
+    '• Whoever is closer (smaller delta) wins this round and bumps their leaderboard stats.\n'
+    '• Each reveal can only be seen once — closing confirms you\'ve seen it.\n\n'
+    'The running leaderboard lives on the Stats tab.';
 
 /// Full-screen reveal showing predicted vs actual ratings side by side.
 /// Route: /reveal/:mediaType/:tmdbId
@@ -117,6 +125,7 @@ class _RevealScreenState extends ConsumerState<RevealScreen> {
         title: const Text('Predict & Rate Reveal'),
         automaticallyImplyLeading: false,
         actions: [
+          const HelpButton(title: 'Reveal', body: _revealHelp),
           TextButton(
             onPressed: () {
               if (context.canPop()) {

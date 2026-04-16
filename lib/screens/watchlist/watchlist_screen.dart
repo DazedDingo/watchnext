@@ -5,6 +5,14 @@ import 'package:go_router/go_router.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/help_button.dart';
+
+const _watchlistHelp =
+    'A shared queue of titles both members have saved.\n\n'
+    '• Add — from a title\'s detail screen, tap "Add to watchlist".\n'
+    '• Remove — swipe left on any row.\n'
+    '• Tap a row to open the title and rate, predict, or start watching.\n\n'
+    'The recommender uses your watchlist as its primary candidate pool.';
 
 class WatchlistScreen extends ConsumerWidget {
   const WatchlistScreen({super.key});
@@ -16,6 +24,7 @@ class WatchlistScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
         title: const Text('Watchlist'),
+        actions: const [HelpButton(title: 'Watchlist', body: _watchlistHelp)],
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),

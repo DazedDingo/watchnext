@@ -15,8 +15,18 @@ import '../../providers/tmdb_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/help_button.dart';
 import '../predict/prediction_sheet.dart';
 import '../rating/rating_sheet.dart';
+
+const _titleDetailHelp =
+    'Everything you can do with a title lives here.\n\n'
+    '• Add to watchlist — saves it so both members can see.\n'
+    '• Rate — rate 1–5 stars once you\'ve watched. Trakt-linked? Ratings push automatically.\n'
+    '• Predict — guess how many stars you\'ll give it before watching, for the prediction game.\n'
+    '• See Reveal — shown when you\'ve both predicted and rated, to see who was closer.\n'
+    '• AI blurb — a one-liner from the recommender explaining why this one landed on your list.\n'
+    '• Household ratings — what each member gave it.';
 
 /// Self-loading title detail screen. Route: /title/{mediaType}/{tmdbId}
 class TitleDetailScreen extends ConsumerStatefulWidget {
@@ -175,6 +185,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
         title: Text(_title ?? (widget.mediaType == 'movie' ? 'Movie' : 'TV Show')),
+        actions: const [HelpButton(title: 'Title details', body: _titleDetailHelp)],
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _details,

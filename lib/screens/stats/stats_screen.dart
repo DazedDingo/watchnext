@@ -2,20 +2,53 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../providers/ratings_provider.dart';
 import '../../providers/stats_provider.dart';
+import '../../providers/watch_entries_provider.dart';
+import '../../widgets/async_error.dart';
+import '../../widgets/help_button.dart';
+
+const _statsHelp =
+    'Stats rolls up everything your household has watched and rated.\n\n'
+    '• Watched / Movies / TV Shows — counts across both members.\n'
+    '• Runtime — total viewing time where TMDB had runtime data.\n'
+    '• Compatibility — how often both members rate the same title within 1 star.\n'
+    '• Ratings — per-member star distribution and averages.\n'
+    '• Top genres — based on what you\'ve actually watched.\n'
+    '• Predict & Rate — leaderboard for the prediction game.\n\n'
+    'Numbers update in real time as you rate and log watches.';
 
 class StatsScreen extends ConsumerWidget {
   const StatsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Watch the underlying streams directly so we can surface errors instead
+    // of silently showing a spinner forever when a Firestore listener fails.
+    final entriesAsync = ref.watch(watchEntriesProvider);
+    final ratingsAsync = ref.watch(ratingsProvider);
     final stats = ref.watch(statsProvider);
     final members = ref.watch(membersProvider).value ?? const [];
     final uid = ref.watch(authStateProvider).value?.uid;
 
+    final error = entriesAsync.hasError
+        ? entriesAsync.error
+        : (ratingsAsync.hasError ? ratingsAsync.error : null);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Stats')),
-      body: stats == null
+      appBar: AppBar(
+        title: const Text('Stats'),
+        actions: const [HelpButton(title: 'Stats', body: _statsHelp)],
+      ),
+      body: error != null
+          ? AsyncErrorView(
+              error: error,
+              onRetry: () {
+                ref.invalidate(watchEntriesProvider);
+                ref.invalidate(ratingsProvider);
+              },
+            )
+          : stats == null
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [

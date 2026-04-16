@@ -5,6 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/household_provider.dart';
 import '../../services/household_service.dart';
+import '../../widgets/help_button.dart';
+
+const _setupHelp =
+    'A household is how you share a watchlist, ratings, and recommendations with one other person.\n\n'
+    '• Create — if you\'re the first one in. You\'ll get an invite code to share with your partner.\n'
+    '• Join — if your partner already set one up. Paste the invite code here.\n\n'
+    'You can only belong to one household at a time.';
 
 class SetupScreen extends ConsumerStatefulWidget {
   final String? inviteCode;
@@ -78,7 +85,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Set up household')),
+      appBar: AppBar(
+        title: const Text('Set up household'),
+        actions: const [HelpButton(title: 'Set up household', body: _setupHelp)],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Padding(

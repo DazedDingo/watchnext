@@ -5,10 +5,27 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/trakt_provider.dart';
+import '../../widgets/help_button.dart';
+
+const _profileHelp =
+    'Account, household invite, preferences, and integrations all live here.\n\n'
+    '• Invite partner — share the code so they can join your household.\n'
+    '• Default mode — Solo ranks recommendations for you alone; Together ranks for both.\n'
+    '• Reveal notifications — optional push when a prediction reveal is ready.\n'
+    '• Trakt — link to auto-import history and push ratings.\n'
+    '• Sign out — clears your session on this device. Your data stays in the household.';
+
+/// Reads the current app version once and caches it. Kept as a Provider so
+/// every screen that wants the version string gets the same cached read.
+final _appVersionProvider = FutureProvider<String>((_) async {
+  final info = await PackageInfo.fromPlatform();
+  return '${info.version}+${info.buildNumber}';
+});
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -21,7 +38,10 @@ class ProfileScreen extends ConsumerWidget {
     final mode = ref.watch(viewModeProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: const [HelpButton(title: 'Profile', body: _profileHelp)],
+      ),
       body: ListView(
         children: [
           ListTile(
@@ -114,6 +134,42 @@ class ProfileScreen extends ConsumerWidget {
               await ref.read(authServiceProvider).signOut();
               if (context.mounted) context.go('/login');
             },
+          ),
+          const Divider(),
+          const _AboutFooter(),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// About footer — app version + signature
+// ---------------------------------------------------------------------------
+
+class _AboutFooter extends ConsumerWidget {
+  const _AboutFooter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final version = ref.watch(_appVersionProvider).value ?? '';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'WatchNext${version.isEmpty ? '' : ' v$version'}',
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'by DazedDingo',
+            style: TextStyle(
+              color: Colors.white38,
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ],
       ),

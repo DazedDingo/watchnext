@@ -10,7 +10,15 @@ import '../../providers/household_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/help_button.dart';
 import '../rating/rating_sheet.dart';
+
+const _historyHelp =
+    'Everything the household has watched, in three tabs.\n\n'
+    '• Watched — titles flagged as finished (or movies, which are always finished when logged).\n'
+    '• In progress — shows you\'re currently working through, surfaced from Trakt.\n'
+    '• Unrated — titles and episodes you\'ve watched but haven\'t rated yet. Tap the star to rate.\n\n'
+    'Link Trakt in Profile to auto-populate history.';
 
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
@@ -22,6 +30,7 @@ class HistoryScreen extends ConsumerWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('History'),
+          actions: const [HelpButton(title: 'History', body: _historyHelp)],
           bottom: const TabBar(tabs: [
             Tab(text: 'Watched'),
             Tab(text: 'In progress'),

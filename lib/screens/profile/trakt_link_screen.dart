@@ -9,6 +9,15 @@ import 'package:intl/intl.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/trakt_provider.dart';
 import '../../services/trakt_service.dart';
+import '../../widgets/help_button.dart';
+
+const _traktHelp =
+    'Link Trakt to auto-import watch history and push ratings back.\n\n'
+    '• Link — opens Trakt\'s OAuth flow in a browser. Approve and return.\n'
+    '• Once linked, your history syncs on app resume (best effort, silent if offline).\n'
+    '• Ratings you set in WatchNext push to Trakt automatically (1–5 stars → 2–10 on Trakt).\n'
+    '• Unlink — stops future sync. History already imported stays in WatchNext.\n\n'
+    'Your Trakt credentials stick through app upgrades — you won\'t need to re-link.';
 
 class TraktLinkScreen extends ConsumerStatefulWidget {
   const TraktLinkScreen({super.key});
@@ -97,6 +106,7 @@ class _TraktLinkScreenState extends ConsumerState<TraktLinkScreen> {
       appBar: AppBar(
         title: const Text('Trakt'),
         leading: IconButton(icon: const Icon(Icons.close), onPressed: () => context.pop()),
+        actions: const [HelpButton(title: 'Trakt', body: _traktHelp)],
       ),
       body: status.when(
         data: (s) => ListView(

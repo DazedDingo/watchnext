@@ -4,7 +4,16 @@ import 'package:go_router/go_router.dart';
 
 import '../../providers/discover_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
+
+const _discoverHelp =
+    'Browse what\'s popular on TMDB without leaving the app.\n\n'
+    '• Trending Movies / TV — what\'s hot this week.\n'
+    '• New Releases — upcoming and recent.\n'
+    '• Top Rated Movies — all-time TMDB highs.\n'
+    '• Browse by Genre — tap a genre to open a horizontal row.\n\n'
+    'Tap any poster to open its detail screen where you can watchlist or rate it.';
 
 // TMDB movie genre definitions used for Browse by Genre.
 const _kGenres = [
@@ -34,9 +43,10 @@ class DiscoverScreen extends ConsumerWidget {
         title: const Text('Discover'),
         actions: const [
           Padding(
-            padding: EdgeInsets.only(right: 12),
+            padding: EdgeInsets.only(right: 4),
             child: Center(child: ModeToggle()),
           ),
+          HelpButton(title: 'Discover', body: _discoverHelp),
         ],
       ),
       body: ListView(

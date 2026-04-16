@@ -9,7 +9,15 @@ import '../../providers/decide_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/help_button.dart';
 import '../predict/prediction_sheet.dart';
+
+const _decideHelp =
+    'Break a tie fast by passing the phone back and forth.\n\n'
+    '• Each member independently swipes through candidates (watchlist + top recommendations).\n'
+    '• When both have flagged the same title as "want to watch", it pops up as a match.\n'
+    '• Close any time — your progress isn\'t saved.\n\n'
+    'Pro tip: use Solo mode first if you want personalised ranking before starting.';
 
 /// Two-person Decide Together flow. Runs pass-and-play on one device.
 ///
@@ -96,6 +104,7 @@ class _DecideScreenState extends ConsumerState<DecideScreen> {
           },
         ),
         title: const Text('Decide Together'),
+        actions: const [HelpButton(title: 'Decide Together', body: _decideHelp)],
       ),
       body: members == null
           ? const Center(child: CircularProgressIndicator())

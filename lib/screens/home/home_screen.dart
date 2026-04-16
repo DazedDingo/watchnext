@@ -9,7 +9,19 @@ import '../../providers/mood_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/async_error.dart';
+import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
+
+const _homeHelp =
+    'WatchNext picks something to watch that works for both of you.\n\n'
+    '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
+    '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
+    '• Mood pills — filter the list to a vibe (cozy, tense, etc.).\n'
+    '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
+    '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz.\n'
+    '• Ask AI (bottom-right) — chat with the concierge for a bespoke recommendation.\n'
+    '• Decide Together — quick tap-through to break a tie with your partner.';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -29,7 +41,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
-    final recs = ref.watch(recommendationsProvider).value ?? const [];
+    final recsAsync = ref.watch(recommendationsProvider);
+    final recs = recsAsync.value ?? const [];
 
     // Mood filter — if no mood or no genre mapping, show everything.
     final moodGenres = mood?.genres ?? const [];
@@ -49,9 +62,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         title: const Text('WatchNext'),
         actions: const [
           Padding(
-            padding: EdgeInsets.only(right: 12),
+            padding: EdgeInsets.only(right: 4),
             child: Center(child: ModeToggle()),
           ),
+          HelpButton(title: 'Home', body: _homeHelp),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -59,9 +73,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         icon: const Icon(Icons.auto_awesome),
         label: const Text('Ask AI'),
       ),
-      body: RefreshIndicator(
-        onRefresh: () =>
-            ref.read(refreshRecommendationsProvider(true).future),
+      body: recsAsync.hasError
+          ? AsyncErrorView(
+              error: recsAsync.error!,
+              onRetry: () => ref.invalidate(recommendationsProvider),
+            )
+          : RefreshIndicator(
+        onRefresh: () async {
+          try {
+            // Force full refresh; let failures bubble up to a SnackBar so
+            // the pull-to-refresh spinner doesn't spin until the CF times
+            // out silently.
+            await ref.read(refreshRecommendationsProvider(true).future);
+          } catch (e) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Refresh failed: $e')),
+              );
+            }
+          } finally {
+            // Force the provider to re-run on next pull rather than returning
+            // the cached completed future.
+            ref.invalidate(refreshRecommendationsProvider);
+          }
+        },
         child: ListView(
           padding: const EdgeInsets.only(bottom: 32),
           children: [
