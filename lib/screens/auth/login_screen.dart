@@ -21,18 +21,19 @@ class LoginScreen extends ConsumerWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Deep red curtain-to-black radial, evoking a dimmed theater.
+          // Bright crimson stage glow fading to deep theater black.
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: RadialGradient(
-                center: Alignment(0, -0.4),
-                radius: 1.2,
+                center: Alignment(0, -0.35),
+                radius: 1.3,
                 colors: [
-                  Color(0xFF2B0608), // warm stage glow
-                  Color(0xFF12090A),
+                  Color(0xFFB02030), // bright crimson stage glow
+                  Color(0xFF6A0F18), // mid burgundy
+                  Color(0xFF200508), // deep theater black-red
                   Color(0xFF050506), // far-edge black
                 ],
-                stops: [0.0, 0.55, 1.0],
+                stops: [0.0, 0.35, 0.75, 1.0],
               ),
             ),
           ),
@@ -43,16 +44,16 @@ class LoginScreen extends ConsumerWidget {
           // Film-strip frames at top and bottom to frame the "screen".
           const Positioned(top: 0, left: 0, right: 0, child: _FilmStrip()),
           const Positioned(bottom: 0, left: 0, right: 0, child: _FilmStrip()),
-          // Heavy dark scrim so text stays high-contrast.
+          // Light scrim — keeps text legible without crushing the gradient.
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withValues(alpha: 0.55),
-                  Colors.black.withValues(alpha: 0.35),
-                  Colors.black.withValues(alpha: 0.65),
+                  Colors.black.withValues(alpha: 0.25),
+                  Colors.black.withValues(alpha: 0.10),
+                  Colors.black.withValues(alpha: 0.40),
                 ],
                 stops: const [0.0, 0.5, 1.0],
               ),
@@ -161,8 +162,8 @@ class _CurtainFolds extends StatelessWidget {
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
                 colors: [
-                  const Color(0xFF3A0A10).withValues(alpha: 0.9),
-                  const Color(0xFF1A0608).withValues(alpha: 0.4),
+                  const Color(0xFF6A1018).withValues(alpha: 0.95),
+                  const Color(0xFF3A0810).withValues(alpha: 0.55),
                   Colors.transparent,
                 ],
               ),
@@ -178,8 +179,8 @@ class _CurtainFolds extends StatelessWidget {
                 begin: Alignment.centerRight,
                 end: Alignment.centerLeft,
                 colors: [
-                  const Color(0xFF3A0A10).withValues(alpha: 0.9),
-                  const Color(0xFF1A0608).withValues(alpha: 0.4),
+                  const Color(0xFF6A1018).withValues(alpha: 0.95),
+                  const Color(0xFF3A0810).withValues(alpha: 0.55),
                   Colors.transparent,
                 ],
               ),
