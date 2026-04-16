@@ -6,9 +6,12 @@ import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
+import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
+import '../../providers/watch_entries_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../services/tmdb_service.dart';
+import '../../utils/rec_explainer.dart';
 import '../../widgets/async_error.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
@@ -56,6 +59,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final tonightsPick = available.isNotEmpty ? available.first : null;
     final listRecs =
         available.length > 1 ? available.sublist(1) : const <Recommendation>[];
+
+    // Solo mode: build "Because you loved X" chips once per build.
+    final explainers = <String, String>{};
+    if (effectiveUid != null) {
+      final allRatings = ref.watch(ratingsProvider).value ?? const [];
+      final myRatings = allRatings.where((r) => r.uid == effectiveUid);
+      final entries = ref.watch(watchEntriesProvider).value ?? const [];
+      for (final r in available) {
+        final cite = pickExplainer(
+          rec: r,
+          myRatings: myRatings,
+          entries: entries,
+        );
+        if (cite != null) explainers[r.id] = explainerLabel(cite);
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -118,6 +137,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _TonightsPick(
                 rec: tonightsPick,
                 uid: effectiveUid,
+                explainer: explainers[tonightsPick.id],
                 onWatch: () => context.push(
                     '/title/${tonightsPick.mediaType}/${tonightsPick.tmdbId}'),
                 onNotTonight: () =>
@@ -130,6 +150,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 (r) => _RecCard(
                   rec: r,
                   uid: effectiveUid,
+                  explainer: explainers[r.id],
                   onTap: () =>
                       context.push('/title/${r.mediaType}/${r.tmdbId}'),
                 ),
@@ -194,12 +215,14 @@ class _MoodPills extends StatelessWidget {
 class _TonightsPick extends StatelessWidget {
   final Recommendation rec;
   final String? uid;
+  final String? explainer;
   final VoidCallback onWatch;
   final VoidCallback onNotTonight;
 
   const _TonightsPick({
     required this.rec,
     this.uid,
+    this.explainer,
     required this.onWatch,
     required this.onNotTonight,
   });
@@ -290,6 +313,10 @@ class _TonightsPick extends StatelessWidget {
                       style: const TextStyle(
                           fontSize: 12, color: Colors.white54),
                     ),
+                  if (explainer != null) ...[
+                    const SizedBox(height: 6),
+                    _ExplainerChip(explainer!),
+                  ],
                   if (blurb.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(
@@ -331,9 +358,15 @@ class _TonightsPick extends StatelessWidget {
 class _RecCard extends StatelessWidget {
   final Recommendation rec;
   final String? uid;
+  final String? explainer;
   final VoidCallback onTap;
 
-  const _RecCard({required this.rec, this.uid, required this.onTap});
+  const _RecCard({
+    required this.rec,
+    this.uid,
+    this.explainer,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -381,6 +414,10 @@ class _RecCard extends StatelessWidget {
               rec.genres.take(3).join(' · '),
               style: const TextStyle(fontSize: 12, color: Colors.white54),
             ),
+          if (explainer != null) ...[
+            const SizedBox(height: 2),
+            _ExplainerChip(explainer!),
+          ],
           if (blurb.isNotEmpty)
             Text(
               blurb,
@@ -392,6 +429,40 @@ class _RecCard extends StatelessWidget {
         ],
       ),
       onTap: onTap,
+    );
+  }
+}
+
+/// Small badge shown in solo mode citing a highly-rated title the user has
+/// watched that shares genres with this rec. Quiet palette — shouldn't
+/// outshout the AI blurb.
+class _ExplainerChip extends StatelessWidget {
+  final String label;
+  const _ExplainerChip(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.favorite, size: 12, color: Colors.pinkAccent),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.pinkAccent,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
