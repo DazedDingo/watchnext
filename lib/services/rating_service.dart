@@ -59,4 +59,36 @@ class RatingService {
       }
     }
   }
+
+  /// Undo of [save]: deletes the rating doc and (best-effort) asks Trakt to
+  /// forget it too. Keyed on (uid, level, targetId) — same shape as
+  /// [Rating.buildId], so if the caller is rating a title they haven't
+  /// rated the delete is a harmless no-op.
+  Future<void> delete({
+    required String householdId,
+    required String uid,
+    required String level,
+    required String targetId,
+    int? traktId,
+    int? season,
+    int? episode,
+  }) async {
+    final id = Rating.buildId(uid, level, targetId);
+    await _db.doc('households/$householdId/ratings/$id').delete();
+
+    if (traktId != null) {
+      try {
+        final token = await trakt.getLiveAccessToken(householdId: householdId, uid: uid);
+        final ref = <String, dynamic>{
+          'ids': {'trakt': traktId},
+          'season': ?season,
+          'number': ?episode,
+        };
+        await trakt.removeRating(token: token, level: level, traktRef: ref);
+      } catch (_) {
+        // Best-effort. Firestore delete already succeeded — a stranded Trakt
+        // rating will be reconciled by the next pull-sync.
+      }
+    }
+  }
 }

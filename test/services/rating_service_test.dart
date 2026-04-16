@@ -5,9 +5,11 @@ import 'package:watchnext/services/rating_service.dart';
 
 class _RecordingPusher implements RatingPusher {
   final List<Map<String, dynamic>> pushed = [];
+  final List<Map<String, dynamic>> removed = [];
   int tokenCalls = 0;
   String tokenToReturn = 'tok';
   Object? pushThrows;
+  Object? removeThrows;
 
   _RecordingPusher();
 
@@ -33,6 +35,20 @@ class _RecordingPusher implements RatingPusher {
       'level': level,
       'traktRef': traktRef,
       'stars': stars,
+    });
+  }
+
+  @override
+  Future<void> removeRating({
+    required String token,
+    required String level,
+    required Map<String, dynamic> traktRef,
+  }) async {
+    if (removeThrows != null) throw removeThrows!;
+    removed.add({
+      'token': token,
+      'level': level,
+      'traktRef': traktRef,
     });
   }
 }
@@ -195,6 +211,151 @@ void main() {
       final doc = await db.doc('households/$hh/ratings/u1:movie:movie:1').get();
       expect(doc.data()!['tags'], ['funny', 'rewatch']);
       expect(doc.data()!['note'], 'loved it');
+    });
+  });
+
+  group('RatingService.delete (undo)', () {
+    late FakeFirebaseFirestore db;
+    late _RecordingPusher trakt;
+    late RatingService svc;
+    const hh = 'hh1';
+
+    setUp(() {
+      db = FakeFirebaseFirestore();
+      trakt = _RecordingPusher();
+      svc = RatingService(db: db, trakt: trakt);
+    });
+
+    test('deletes the stable-id rating doc', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+      );
+      expect((await db.collection('households/$hh/ratings').get()).size, 1);
+
+      await svc.delete(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+      );
+      expect((await db.collection('households/$hh/ratings').get()).size, 0);
+    });
+
+    test('no traktId means Trakt is never called on undo', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+      );
+      trakt.tokenCalls = 0; // reset after save
+      await svc.delete(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+      );
+      expect(trakt.tokenCalls, 0);
+      expect(trakt.removed, isEmpty);
+    });
+
+    test('with traktId: token fetched, removeRating called with matching ref',
+        () async {
+      await svc.delete(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        traktId: 603,
+      );
+      expect(trakt.tokenCalls, 1);
+      expect(trakt.removed, hasLength(1));
+      final call = trakt.removed.single;
+      expect(call['level'], 'movie');
+      expect((call['traktRef'] as Map)['ids'], {'trakt': 603});
+      expect((call['traktRef'] as Map).containsKey('season'), isFalse);
+    });
+
+    test('episode undo includes season and number', () async {
+      await svc.delete(
+        householdId: hh,
+        uid: 'u1',
+        level: 'episode',
+        targetId: 'tv:1:1_2',
+        traktId: 999,
+        season: 1,
+        episode: 2,
+      );
+      final ref = trakt.removed.single['traktRef'] as Map;
+      expect(ref['ids'], {'trakt': 999});
+      expect(ref['season'], 1);
+      expect(ref['number'], 2);
+    });
+
+    test('Trakt remove failure still succeeds locally (best-effort)', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+      );
+      trakt.removeThrows = Exception('trakt 500');
+      await svc.delete(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        traktId: 603,
+      );
+      // Firestore delete is the source of truth — Trakt reconciles later.
+      expect((await db.collection('households/$hh/ratings').get()).size, 0);
+    });
+
+    test('delete of a never-saved rating is a no-op (undo is idempotent)',
+        () async {
+      // No save() call — just delete.
+      await svc.delete(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:999',
+      );
+      expect((await db.collection('households/$hh/ratings').get()).size, 0);
+    });
+
+    test('save → delete → save roundtrip leaves exactly one rating',
+        () async {
+      for (var stars = 1; stars <= 3; stars++) {
+        await svc.save(
+          householdId: hh,
+          uid: 'u1',
+          level: 'movie',
+          targetId: 'movie:42',
+          stars: stars,
+        );
+        await svc.delete(
+          householdId: hh,
+          uid: 'u1',
+          level: 'movie',
+          targetId: 'movie:42',
+        );
+      }
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 5,
+      );
+      final snap = await db.collection('households/$hh/ratings').get();
+      expect(snap.size, 1);
+      expect(snap.docs.first.data()['stars'], 5);
     });
   });
 }

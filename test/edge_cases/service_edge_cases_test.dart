@@ -22,6 +22,12 @@ class _NoopPusher implements RatingPusher {
     required Map<String, dynamic> traktRef,
     required int stars,
   }) async {}
+  @override
+  Future<void> removeRating({
+    required String token,
+    required String level,
+    required Map<String, dynamic> traktRef,
+  }) async {}
 }
 
 void main() {

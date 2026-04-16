@@ -17,4 +17,10 @@ abstract class RatingPusher {
     required Map<String, dynamic> traktRef,
     required int stars,
   });
+
+  Future<void> removeRating({
+    required String token,
+    required String level,
+    required Map<String, dynamic> traktRef,
+  });
 }

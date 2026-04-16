@@ -259,6 +259,108 @@ void main() {
     });
   });
 
+  group('TraktService.removeRating (RatingPusher undo)', () {
+    test('POSTs to /sync/ratings/remove with the right body key per level',
+        () async {
+      final rec = _Recorder();
+      final trakt = TraktService(
+        client: rec.build(routes: {
+          '/sync/ratings/remove': (_) => http.Response('{}', 200),
+        }),
+        db: FakeFirebaseFirestore(),
+      );
+      for (final pair in const [
+        ['movie', 'movies'],
+        ['show', 'shows'],
+        ['season', 'seasons'],
+        ['episode', 'episodes'],
+      ]) {
+        rec.calls.clear();
+        await trakt.removeRating(
+          token: 'T',
+          level: pair[0],
+          traktRef: {'ids': {'trakt': 1}},
+        );
+        expect(rec.calls.single.url.path, endsWith('/sync/ratings/remove'));
+        final body = json.decode(rec.calls.single.body) as Map<String, dynamic>;
+        expect(body.keys.single, pair[1]);
+      }
+    });
+
+    test('removeRating body omits rating/rated_at (server infers from ref)',
+        () async {
+      final rec = _Recorder();
+      final trakt = TraktService(
+        client: rec.build(routes: {
+          '/sync/ratings/remove': (_) => http.Response('{}', 200),
+        }),
+        db: FakeFirebaseFirestore(),
+      );
+      await trakt.removeRating(
+        token: 'T',
+        level: 'movie',
+        traktRef: {'ids': {'trakt': 603}},
+      );
+      final body = json.decode(rec.calls.single.body) as Map<String, dynamic>;
+      final first = (body['movies'] as List).single as Map<String, dynamic>;
+      expect(first['ids'], {'trakt': 603});
+      expect(first.containsKey('rating'), isFalse);
+      expect(first.containsKey('rated_at'), isFalse);
+    });
+
+    test('bad level throws ArgumentError before hitting the network', () async {
+      final rec = _Recorder();
+      final trakt = TraktService(
+        client: rec.build(routes: const {}),
+        db: FakeFirebaseFirestore(),
+      );
+      expect(
+        () => trakt.removeRating(
+          token: 'T',
+          level: 'bogus',
+          traktRef: {'ids': {'trakt': 1}},
+        ),
+        throwsArgumentError,
+      );
+      expect(rec.calls, isEmpty);
+    });
+
+    test('non-2xx response surfaces as exception', () async {
+      final trakt = TraktService(
+        client: MockClient((_) async => http.Response('oops', 500)),
+        db: FakeFirebaseFirestore(),
+      );
+      expect(
+        () => trakt.removeRating(
+          token: 'T',
+          level: 'movie',
+          traktRef: {'ids': {'trakt': 1}},
+        ),
+        throwsA(predicate((e) => e.toString().contains('500'))),
+      );
+    });
+
+    test('sends required Trakt headers', () async {
+      final rec = _Recorder();
+      final trakt = TraktService(
+        client: rec.build(routes: {
+          '/sync/ratings/remove': (_) => http.Response('{}', 200),
+        }),
+        db: FakeFirebaseFirestore(),
+      );
+      await trakt.removeRating(
+        token: 'T',
+        level: 'movie',
+        traktRef: {'ids': {'trakt': 1}},
+      );
+      final h = rec.calls.single.headers;
+      expect(h['authorization'], 'Bearer T');
+      expect(h['trakt-api-version'], '2');
+      expect(h.containsKey('trakt-api-key'), isTrue);
+      expect(h['content-type'], contains('application/json'));
+    });
+  });
+
   group('TraktService.isConfigured', () {
     test('reflects whether TRAKT_CLIENT_ID was passed at build', () {
       // Under `flutter test` without --dart-define, this is the empty string

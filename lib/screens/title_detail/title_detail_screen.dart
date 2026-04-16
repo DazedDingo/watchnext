@@ -121,6 +121,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
       traktId: null,
     );
     if (saved == true && mounted) {
+      _showRatingSavedSnack();
       // Check if a reveal is now ready for this title.
       final prediction = ref.read(predictionProvider(_entryId)).value;
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -129,6 +130,49 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
         if (myEntry != null && !myEntry.skipped && !prediction.revealSeenBy(uid)) {
           context.push('/reveal/${widget.mediaType}/${widget.tmdbId}');
         }
+      }
+    }
+  }
+
+  /// Offer an Undo for the rating we just wrote. Delete runs in a fresh
+  /// async frame so a stale `mounted` check doesn't swallow it.
+  void _showRatingSavedSnack() {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('Rating saved'),
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: _undoRating,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _undoRating() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      final householdId = await ref.read(householdIdProvider.future);
+      if (householdId == null) return;
+      await ref.read(ratingServiceProvider).delete(
+            householdId: householdId,
+            uid: uid,
+            level: _ratingLevel,
+            targetId: _entryId,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Rating removed')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Undo failed: $e')),
+        );
       }
     }
   }

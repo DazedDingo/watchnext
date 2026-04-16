@@ -220,15 +220,8 @@ class TraktService implements RatingPusher {
     required int stars,
   }) async {
     final rating10 = (stars * 2).clamp(1, 10);
-    final key = switch (level) {
-      'movie' => 'movies',
-      'show' => 'shows',
-      'season' => 'seasons',
-      'episode' => 'episodes',
-      _ => throw ArgumentError('Bad level: $level'),
-    };
     final body = {
-      key: [
+      _syncKeyFor(level): [
         {
           ...traktRef,
           'rating': rating10,
@@ -245,6 +238,33 @@ class TraktService implements RatingPusher {
       throw Exception('Trakt push rating ${res.statusCode}: ${res.body}');
     }
   }
+
+  @override
+  Future<void> removeRating({
+    required String token,
+    required String level,
+    required Map<String, dynamic> traktRef,
+  }) async {
+    final body = {
+      _syncKeyFor(level): [traktRef],
+    };
+    final res = await _client.post(
+      Uri.parse('$_api/sync/ratings/remove'),
+      headers: _headers(token),
+      body: json.encode(body),
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception('Trakt remove rating ${res.statusCode}: ${res.body}');
+    }
+  }
+
+  String _syncKeyFor(String level) => switch (level) {
+        'movie' => 'movies',
+        'show' => 'shows',
+        'season' => 'seasons',
+        'episode' => 'episodes',
+        _ => throw ArgumentError('Bad level: $level'),
+      };
 
   Future<List<Map<String, dynamic>>> fetchTrending(String token, {required String type}) async {
     final res = await _getJson('/$type/trending', token, query: {'limit': '30'});
