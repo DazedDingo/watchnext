@@ -91,11 +91,14 @@ class WatchEntry {
       };
 
   factory WatchEntry.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final d = doc.data()!;
+    final d = doc.data() ?? const <String, dynamic>{};
+    // Defensive casts so a single malformed doc can't take down the stream
+    // and blank out the history / stats / title-detail screens.
+    final rawWatchedBy = (d['watched_by'] as Map?) ?? const {};
     return WatchEntry(
       id: doc.id,
-      mediaType: d['media_type'] as String,
-      tmdbId: (d['tmdb_id'] as num).toInt(),
+      mediaType: d['media_type'] as String? ?? 'movie',
+      tmdbId: (d['tmdb_id'] as num?)?.toInt() ?? 0,
       traktId: (d['trakt_id'] as num?)?.toInt(),
       imdbId: d['imdb_id'] as String?,
       title: d['title'] as String? ?? 'Untitled',
@@ -103,11 +106,14 @@ class WatchEntry {
       posterPath: d['poster_path'] as String?,
       backdropPath: d['backdrop_path'] as String?,
       runtime: (d['runtime'] as num?)?.toInt(),
-      genres: (d['genres'] as List?)?.cast<String>() ?? const [],
+      genres: (d['genres'] as List?)?.whereType<String>().toList() ?? const [],
       overview: d['overview'] as String?,
       lastWatchedAt: (d['last_watched_at'] as Timestamp?)?.toDate(),
       firstWatchedAt: (d['first_watched_at'] as Timestamp?)?.toDate(),
-      watchedBy: (d['watched_by'] as Map?)?.map((k, v) => MapEntry(k as String, v as bool)) ?? const {},
+      watchedBy: {
+        for (final e in rawWatchedBy.entries)
+          if (e.key is String && e.value is bool) e.key as String: e.value as bool,
+      },
       addedSource: d['added_source'] as String? ?? 'trakt',
       addedBy: d['added_by'] as String?,
       addedAt: (d['added_at'] as Timestamp?)?.toDate(),

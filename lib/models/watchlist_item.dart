@@ -48,19 +48,20 @@ class WatchlistItem {
       };
 
   factory WatchlistItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final d = doc.data()!;
+    final d = doc.data() ?? const <String, dynamic>{};
     return WatchlistItem(
       id: doc.id,
-      mediaType: d['media_type'] as String,
-      tmdbId: (d['tmdb_id'] as num).toInt(),
+      mediaType: d['media_type'] as String? ?? 'movie',
+      tmdbId: (d['tmdb_id'] as num?)?.toInt() ?? 0,
       title: d['title'] as String? ?? 'Untitled',
       year: (d['year'] as num?)?.toInt(),
       posterPath: d['poster_path'] as String?,
-      genres: (d['genres'] as List?)?.cast<String>() ?? const [],
+      genres: (d['genres'] as List?)?.whereType<String>().toList() ?? const [],
       runtime: (d['runtime'] as num?)?.toInt(),
       overview: d['overview'] as String?,
-      addedBy: d['added_by'] as String,
-      addedAt: (d['added_at'] as Timestamp).toDate(),
+      addedBy: d['added_by'] as String? ?? '',
+      addedAt:
+          (d['added_at'] as Timestamp?)?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0),
       addedSource: d['added_source'] as String? ?? 'manual',
     );
   }

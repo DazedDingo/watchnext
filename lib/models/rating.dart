@@ -43,16 +43,17 @@ class Rating {
       };
 
   factory Rating.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final d = doc.data()!;
+    final d = doc.data() ?? const <String, dynamic>{};
     return Rating(
       id: doc.id,
-      uid: d['uid'] as String,
-      level: d['level'] as String,
-      targetId: d['target_id'] as String,
-      stars: (d['stars'] as num).toInt(),
-      tags: (d['tags'] as List?)?.cast<String>() ?? const [],
+      uid: d['uid'] as String? ?? '',
+      level: d['level'] as String? ?? 'movie',
+      targetId: d['target_id'] as String? ?? '',
+      stars: (d['stars'] as num?)?.toInt() ?? 0,
+      tags: (d['tags'] as List?)?.whereType<String>().toList() ?? const [],
       note: d['note'] as String?,
-      ratedAt: (d['rated_at'] as Timestamp).toDate(),
+      ratedAt:
+          (d['rated_at'] as Timestamp?)?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0),
       pushedToTrakt: d['pushed_to_trakt'] as bool? ?? false,
     );
   }

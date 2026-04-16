@@ -50,9 +50,15 @@ class Prediction {
       tmdbId: (d['tmdb_id'] as num?)?.toInt() ?? 0,
       title: d['title'] as String? ?? 'Untitled',
       posterPath: d['poster_path'] as String?,
-      entries: rawEntries.map((k, v) =>
-          MapEntry(k as String, PredictionEntry.fromMap(v as Map))),
-      revealSeen: rawSeen.map((k, v) => MapEntry(k as String, v as bool)),
+      entries: {
+        for (final e in rawEntries.entries)
+          if (e.key is String && e.value is Map)
+            e.key as String: PredictionEntry.fromMap(e.value as Map),
+      },
+      revealSeen: {
+        for (final e in rawSeen.entries)
+          if (e.key is String && e.value is bool) e.key as String: e.value as bool,
+      },
       createdAt: (d['created_at'] as Timestamp?)?.toDate(),
     );
   }

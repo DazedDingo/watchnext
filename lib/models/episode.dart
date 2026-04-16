@@ -49,19 +49,23 @@ class Episode {
       };
 
   factory Episode.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final d = doc.data()!;
+    final d = doc.data() ?? const <String, dynamic>{};
     final rawWatched = (d['watched_by_at'] as Map?) ?? const {};
     return Episode(
       id: doc.id,
-      season: (d['season'] as num).toInt(),
-      number: (d['number'] as num).toInt(),
+      season: (d['season'] as num?)?.toInt() ?? 0,
+      number: (d['number'] as num?)?.toInt() ?? 0,
       title: d['title'] as String?,
       tmdbId: (d['tmdb_id'] as num?)?.toInt(),
       overview: d['overview'] as String?,
       stillPath: d['still_path'] as String?,
       runtime: (d['runtime'] as num?)?.toInt(),
       airedAt: (d['aired_at'] as Timestamp?)?.toDate(),
-      watchedByAt: rawWatched.map((k, v) => MapEntry(k as String, (v as Timestamp).toDate())),
+      watchedByAt: {
+        for (final e in rawWatched.entries)
+          if (e.key is String && e.value is Timestamp)
+            e.key as String: (e.value as Timestamp).toDate(),
+      },
     );
   }
 }
