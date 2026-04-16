@@ -57,7 +57,11 @@ function requireString(v: unknown, field: string): string {
 async function postTraktToken(body: Record<string, string>): Promise<TraktTokenResponse> {
   const res = await fetch(TRAKT_TOKEN_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "User-Agent": "watchnext/1.0 (+https://github.com/DazedDingo/watchnext)",
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -127,7 +131,11 @@ export const traktRevoke = onCall(
 
     const res = await fetch(TRAKT_REVOKE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "watchnext/1.0 (+https://github.com/DazedDingo/watchnext)",
+      },
       body: JSON.stringify({
         token,
         client_id: TRAKT_CLIENT_ID.value(),
