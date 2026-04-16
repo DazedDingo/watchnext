@@ -35,6 +35,8 @@ type Candidate = {
   year?: number | null;
   poster_path?: string | null;
   genres?: string[];
+  /** Runtime in minutes. Missing for trending-sourced candidates. */
+  runtime?: number | null;
   overview?: string | null;
   source?: string;
 };
@@ -211,6 +213,7 @@ export const scoreRecommendations = onCall(
         year: c.year ?? null,
         poster_path: c.poster_path ?? null,
         genres: c.genres ?? [],
+        runtime: c.runtime ?? null,
         source: c.source ?? "unknown",
         match_score: score?.together ?? 50,
         match_score_solo: score?.solo ?? {},

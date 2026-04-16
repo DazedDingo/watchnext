@@ -8,6 +8,7 @@ import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
+import '../../providers/runtime_filter_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../services/tmdb_service.dart';
@@ -41,6 +42,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final mode = ref.watch(viewModeProvider);
     final mood = ref.watch(moodProvider);
+    final runtime = ref.watch(runtimeFilterProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
@@ -49,9 +51,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Mood filter — if no mood or no genre mapping, show everything.
     final moodGenres = mood?.genres ?? const [];
-    final filtered = moodGenres.isEmpty
+    final moodFiltered = moodGenres.isEmpty
         ? recs
         : recs.where((r) => r.genres.any(moodGenres.contains)).toList();
+
+    // Runtime filter — null bucket = show everything. An active bucket
+    // hides recs whose runtime we don't know (trending sources strip it).
+    final filtered = runtime == null
+        ? moodFiltered
+        : moodFiltered.where((r) => runtime.matches(r.runtime)).toList();
 
     final available =
         filtered.where((r) => !_dismissed.contains(r.id)).toList();
@@ -132,6 +140,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               selected: mood,
               onSelect: (m) => ref.read(moodProvider.notifier).state = m,
             ),
+            _RuntimePills(
+              selected: runtime,
+              onSelect: (b) =>
+                  ref.read(runtimeFilterProvider.notifier).state = b,
+            ),
             if (tonightsPick != null) ...[
               const _SectionLabel("TONIGHT'S PICK"),
               _TonightsPick(
@@ -203,6 +216,38 @@ class _MoodPills extends StatelessWidget {
             label: Text(mood.label),
             selected: active,
             onSelected: (_) => onSelect(active ? null : mood),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Runtime pills ────────────────────────────────────────────────────────────
+
+class _RuntimePills extends StatelessWidget {
+  final RuntimeBucket? selected;
+  final void Function(RuntimeBucket?) onSelect;
+
+  const _RuntimePills({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: RuntimeBucket.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final bucket = RuntimeBucket.values[i];
+          final active = selected == bucket;
+          return FilterChip(
+            avatar: const Icon(Icons.schedule, size: 16),
+            label: Text(bucket.label),
+            selected: active,
+            onSelected: (_) => onSelect(active ? null : bucket),
           );
         },
       ),

@@ -7,6 +7,7 @@ WatchlistItem _w({
   required int id,
   required String title,
   List<String> genres = const [],
+  int? runtime,
 }) {
   return WatchlistItem(
     id: '$mediaType:$id',
@@ -14,6 +15,7 @@ WatchlistItem _w({
     tmdbId: id,
     title: title,
     genres: genres,
+    runtime: runtime,
     addedBy: 'u1',
     addedAt: DateTime.utc(2026, 1, 1),
   );
@@ -423,6 +425,56 @@ void main() {
         trendingCap: 0,
       );
       expect(out, isEmpty);
+    });
+  });
+
+  group('buildCandidates — runtime passthrough', () {
+    test('watchlist candidates carry runtime from the WatchlistItem', () {
+      final out = buildCandidates(watchlist: [
+        _w(mediaType: 'movie', id: 1, title: 'Short', runtime: 85),
+        _w(mediaType: 'movie', id: 2, title: 'Long', runtime: 175),
+        _w(mediaType: 'movie', id: 3, title: 'Unknown'),
+      ]);
+      expect(out[0]['runtime'], 85);
+      expect(out[1]['runtime'], 175);
+      expect(out[2]['runtime'], isNull);
+    });
+
+    test('reddit candidates pass runtime through when present', () {
+      final out = buildCandidates(watchlist: const [], redditMentions: [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Doc',
+          'runtime': 95,
+        },
+        {
+          'media_type': 'movie',
+          'tmdb_id': 2,
+          'title': 'No-rt doc',
+        },
+      ]);
+      expect(out[0]['runtime'], 95);
+      expect(out[1]['runtime'], isNull);
+    });
+
+    test('trending candidates leave runtime null (TMDB trending has no rt)',
+        () {
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingPayload: const {
+          'results': [
+            {
+              'id': 1,
+              'media_type': 'movie',
+              'title': 'T',
+              'genre_ids': [18],
+            },
+          ],
+        },
+      );
+      expect(out.single.containsKey('runtime'), isFalse,
+          reason: 'trending rows should not inject a phantom runtime key');
     });
   });
 }

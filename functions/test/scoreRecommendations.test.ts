@@ -38,6 +38,26 @@ describe("isCandidate", () => {
     expect(isCandidate("movie:1")).toBe(false);
     expect(isCandidate(42)).toBe(false);
   });
+
+  test("accepts optional runtime alongside required fields", () => {
+    expect(
+      isCandidate({
+        media_type: "movie",
+        tmdb_id: 1,
+        title: "X",
+        runtime: 95,
+      }),
+    ).toBe(true);
+    // null runtime (trending-sourced candidate) is still valid.
+    expect(
+      isCandidate({
+        media_type: "movie",
+        tmdb_id: 1,
+        title: "X",
+        runtime: null,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("trimProfileForPrompt", () => {

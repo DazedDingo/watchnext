@@ -14,6 +14,8 @@ class Recommendation {
   final int? year;
   final String? posterPath;
   final List<String> genres;
+  /// Minutes. Null when the source (trending) didn't carry it.
+  final int? runtime;
   final int matchScore;
   final Map<String, int> matchScoreSolo;
   final String aiBlurb;
@@ -31,6 +33,7 @@ class Recommendation {
     this.year,
     this.posterPath,
     this.genres = const [],
+    this.runtime,
     this.matchScoreSolo = const {},
     this.aiBlurb = '',
     this.aiBlurbSolo = const {},
@@ -61,6 +64,7 @@ class Recommendation {
       year: (d['year'] as num?)?.toInt(),
       posterPath: d['poster_path'] as String?,
       genres: (d['genres'] as List?)?.cast<String>() ?? const [],
+      runtime: (d['runtime'] as num?)?.toInt(),
       matchScore: (d['match_score'] as num?)?.toInt() ?? 0,
       matchScoreSolo: (d['match_score_solo'] as Map?)
               ?.map((k, v) => MapEntry(k as String, (v as num).toInt())) ??

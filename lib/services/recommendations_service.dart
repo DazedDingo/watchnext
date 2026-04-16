@@ -128,6 +128,7 @@ List<Map<String, dynamic>> buildCandidates({
         'year': w.year,
         'poster_path': w.posterPath,
         'genres': w.genres,
+        'runtime': w.runtime,
         'overview': w.overview,
         'source': 'watchlist',
       });
@@ -147,6 +148,7 @@ List<Map<String, dynamic>> buildCandidates({
       'year': (m['year'] as num?)?.toInt(),
       'poster_path': m['poster_path'] as String?,
       'genres': coerceGenres(m['genres'] ?? m['genre_ids'], mediaType: mediaType),
+      'runtime': (m['runtime'] as num?)?.toInt(),
       'overview': m['overview'] as String?,
       'source': 'reddit',
     });

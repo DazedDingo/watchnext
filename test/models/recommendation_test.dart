@@ -72,6 +72,26 @@ void main() {
       expect(parsed.scored, isFalse);
       expect(parsed.source, 'unknown');
       expect(parsed.aiBlurb, '');
+      expect(parsed.runtime, isNull);
+    });
+
+    test('fromDoc parses runtime when the CF carried it forward', () async {
+      final db = FakeFirebaseFirestore();
+      await db.doc('r/movie:1').set({
+        'tmdb_id': 1,
+        'title': 'Short',
+        'runtime': 85,
+      });
+      final parsed = Recommendation.fromDoc(await db.doc('r/movie:1').get());
+      expect(parsed.runtime, 85);
+    });
+
+    test('fromDoc tolerates runtime stored as num (Firestore decode)',
+        () async {
+      final db = FakeFirebaseFirestore();
+      await db.doc('r/x').set({'tmdb_id': 1, 'title': 'X', 'runtime': 120.0});
+      final parsed = Recommendation.fromDoc(await db.doc('r/x').get());
+      expect(parsed.runtime, 120);
     });
   });
 }
