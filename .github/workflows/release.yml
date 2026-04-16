@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
 
+env:
+  # The SHA-1 the APK MUST be signed with — matches the keystore the
+  # DEBUG_KEYSTORE_B64 secret holds, and must be registered in Firebase
+  # console for Google Sign-In to succeed. If this value changes without
+  # updating Firebase, sign-in will break. Any drift from this value at
+  # build time fails the build loudly.
+  EXPECTED_SHA1: AD:47:4F:31:16:04:FD:6D:3E:31:38:0C:68:D4:2A:58:CF:26:C2:38
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -21,21 +29,23 @@ jobs:
       - name: Write google-services.json
         run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
 
-      - name: Restore debug keystore (consistent SHA-1 for Google Sign-In)
+      - name: Restore debug keystore (pinned location)
+        # Signing is pinned to android/app/debug.keystore via an explicit
+        # signingConfig in app/build.gradle.kts. Using an in-tree location
+        # (instead of ~/.android/debug.keystore) avoids AGP silently falling
+        # back to a freshly-generated keystore when the default path is
+        # unreadable for whatever reason — which previously gave us a
+        # different SHA-1 on every build.
         run: |
-          mkdir -p ~/.android
-          echo '${{ secrets.DEBUG_KEYSTORE_B64 }}' | base64 -d > ~/.android/debug.keystore
-          # Fail fast if restoration produced an unusable keystore — otherwise
-          # gradle silently auto-generates a fresh one, giving every build a
-          # different SHA-1 and breaking Firebase-registered Google Sign-In.
-          if ! keytool -list -keystore ~/.android/debug.keystore \
+          echo '${{ secrets.DEBUG_KEYSTORE_B64 }}' | base64 -d > android/app/debug.keystore
+          if ! keytool -list -keystore android/app/debug.keystore \
               -storepass android -alias androiddebugkey > /dev/null 2>&1; then
             echo "::error::Debug keystore restoration failed — secret missing, malformed, or wrong password."
             exit 1
           fi
-          echo "Debug keystore SHA-1:"
-          keytool -list -v -keystore ~/.android/debug.keystore \
-            -storepass android -alias androiddebugkey | grep SHA1:
+          echo "Restored debug keystore fingerprint:"
+          keytool -list -v -keystore android/app/debug.keystore \
+            -storepass android -alias androiddebugkey | grep -E 'SHA1:|SHA256:'
 
       - run: flutter pub get
 
@@ -44,6 +54,29 @@ jobs:
           flutter build apk --release \
             --dart-define=TMDB_API_KEY=${{ secrets.TMDB_API_KEY }} \
             --dart-define=TRAKT_CLIENT_ID=${{ secrets.TRAKT_CLIENT_ID }}
+
+      - name: Verify APK is signed with the expected keystore
+        # If AGP sidesteps our pinned signingConfig for any reason, the APK's
+        # cert SHA-1 will not match EXPECTED_SHA1 and this step fails. That
+        # stops us from ever shipping another release that Firebase won't
+        # authenticate against.
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER=$(ls -t $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | head -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found in $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          echo "Using apksigner: $APKSIGNER"
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+          echo "$CERTS"
+          ACTUAL=$(echo "$CERTS" | grep -i 'SHA-1 digest' | awk '{print $NF}')
+          EXPECTED_COMPACT=$(echo "$EXPECTED_SHA1" | tr -d ':' | tr 'A-F' 'a-f')
+          if [ "$ACTUAL" != "$EXPECTED_COMPACT" ]; then
+            echo "::error::APK signed with $ACTUAL but expected $EXPECTED_COMPACT — Firebase Google Sign-In will fail."
+            exit 1
+          fi
+          echo "✓ APK signed with the Firebase-registered keystore."
 
       - name: Get version from pubspec
         id: version

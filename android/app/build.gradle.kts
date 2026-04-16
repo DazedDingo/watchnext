@@ -31,9 +31,24 @@ android {
         versionName = flutter.versionName
     }
 
+    // Pin the debug signing config to an in-tree keystore file so CI and local
+    // builds sign with the SAME key — otherwise AGP's default behaviour quietly
+    // materialises a fresh ~/.android/debug.keystore if it can't read the
+    // expected one, producing a DIFFERENT SHA-1 on every machine and breaking
+    // Firebase-registered Google Sign-In. The keystore lives at
+    // android/app/debug.keystore and is .gitignored; CI writes it from the
+    // DEBUG_KEYSTORE_B64 secret before the build step.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
