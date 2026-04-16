@@ -54,7 +54,7 @@ Trakt's `client_secret` lives only in Firebase Secrets Manager (`TRAKT_CLIENT_SE
 | State management | Riverpod |
 | Routing | go_router |
 | Backend | Firebase (Auth, Firestore, Cloud Functions, Cloud Messaging) |
-| Cloud Functions | TypeScript (Node 20) |
+| Cloud Functions | TypeScript (Node 22) |
 | Auth | Google Sign-In via Firebase Auth |
 | Movie data | TMDB API |
 | Watch tracking | Trakt API (Phase 2) |
