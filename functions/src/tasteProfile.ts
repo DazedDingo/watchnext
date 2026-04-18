@@ -206,24 +206,15 @@ export function compatibility(ratings: Rating[], uids: string[]): {
   };
 }
 
-export const generateTasteProfile = onCall({ region: "europe-west2" }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
-  const householdId = request.data?.householdId;
-  if (typeof householdId !== "string" || !householdId) {
-    throw new HttpsError("invalid-argument", "Missing householdId.");
-  }
-
-  const db = admin.firestore();
-
-  // Gate on membership (rules would block it anyway, but good to fail fast).
-  const memberSnap = await db
-    .doc(`households/${householdId}/members/${uid}`)
-    .get();
-  if (!memberSnap.exists) {
-    throw new HttpsError("permission-denied", "Not a household member.");
-  }
-
+/**
+ * Pure server-side taste-profile regeneration. Exposed so both the user-facing
+ * callable and the scheduled re-score drain can share the same writer without
+ * a self-callable round-trip.
+ */
+export async function buildAndWriteTasteProfile(
+  db: admin.firestore.Firestore,
+  householdId: string,
+): Promise<{ member_count: number; rated_count: number; compatibility_pct: number }> {
   const [ratingsSnap, entriesSnap, membersSnap] = await Promise.all([
     db.collection(`households/${householdId}/ratings`).get(),
     db.collection(`households/${householdId}/watchEntries`).get(),
@@ -237,9 +228,6 @@ export const generateTasteProfile = onCall({ region: "europe-west2" }, async (re
   }
   const memberUids = membersSnap.docs.map((d) => d.id);
 
-  // Three profiles per member: cross-context (back-compat for concierge /
-  // Phase 9 stats + scorer fallback) and the two explicit per-mode slots that
-  // Phase 7's scorer and the Phase 8 concierge solo branch now consume.
   const per_user: Record<string, UserProfile> = {};
   const per_user_solo: Record<string, UserProfile> = {};
   const per_user_together: Record<string, UserProfile> = {};
@@ -250,7 +238,6 @@ export const generateTasteProfile = onCall({ region: "europe-west2" }, async (re
       buildUserProfile(mUid, ratings, entriesById, "together");
   }
 
-  // Combined = merged genre weights + intersection of "liked" sets.
   const combinedGenres = new Map<string, { weight: number; count: number }>();
   for (const prof of Object.values(per_user)) {
     for (const g of prof.top_genres) {
@@ -309,9 +296,30 @@ export const generateTasteProfile = onCall({ region: "europe-west2" }, async (re
   await db.doc(`households/${householdId}/tasteProfile/default`).set(profile);
 
   return {
-    ok: true,
     member_count: memberUids.length,
     rated_count: totalRated,
     compatibility_pct: compat.within_1_star_pct,
   };
+}
+
+export const generateTasteProfile = onCall({ region: "europe-west2" }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
+  const householdId = request.data?.householdId;
+  if (typeof householdId !== "string" || !householdId) {
+    throw new HttpsError("invalid-argument", "Missing householdId.");
+  }
+
+  const db = admin.firestore();
+
+  // Gate on membership (rules would block it anyway, but good to fail fast).
+  const memberSnap = await db
+    .doc(`households/${householdId}/members/${uid}`)
+    .get();
+  if (!memberSnap.exists) {
+    throw new HttpsError("permission-denied", "Not a household member.");
+  }
+
+  const result = await buildAndWriteTasteProfile(db, householdId);
+  return { ok: true, ...result };
 });

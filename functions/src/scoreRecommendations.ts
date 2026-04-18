@@ -28,7 +28,7 @@ const DEFAULT_MODEL = "claude-sonnet-4-6";
 const BATCH_SIZE = 10;
 const MAX_CANDIDATES = 50;
 
-type Candidate = {
+export type Candidate = {
   media_type: string;
   tmdb_id: number;
   title: string;
@@ -194,6 +194,80 @@ export function parseScores(text: string): Score[] {
   return parsed as Score[];
 }
 
+/**
+ * Runs the Claude batch-scoring loop over `candidates` and writes one doc per
+ * candidate to /households/{householdId}/recommendations. Batches that error
+ * out are skipped (logged) rather than failing the whole run — individual
+ * candidates in a failed batch fall back to the default 50 score.
+ *
+ * Shared between the user-triggered `scoreRecommendations` callable (fresh
+ * candidate lists from the client) and the scheduled `processRescoreQueue`
+ * drain (re-scoring existing recs after new ratings land).
+ */
+export async function scoreAndWriteCandidates(params: {
+  db: admin.firestore.Firestore;
+  anthropic: Anthropic;
+  householdId: string;
+  candidates: Candidate[];
+  profile: ReturnType<typeof trimProfileForPrompt>;
+  model: string;
+}): Promise<{ written: number; scored: number }> {
+  const { db, anthropic, householdId, candidates, profile, model } = params;
+  const allScores = new Map<string, Score>();
+  for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+    const batch = candidates.slice(i, i + BATCH_SIZE);
+    const prompt = buildPrompt(batch, profile);
+    let scores: Score[] = [];
+    try {
+      const res = await anthropic.messages.create({
+        model,
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const block = res.content.find((b) => b.type === "text");
+      if (block && "text" in block) {
+        scores = parseScores(block.text);
+      }
+    } catch (err) {
+      console.error("Claude batch failed", { batchStart: i, err });
+      continue;
+    }
+    for (const s of scores) allScores.set(s.key, s);
+  }
+
+  const writer = db.bulkWriter();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  let written = 0;
+  for (const c of candidates) {
+    const key = `${c.media_type}:${c.tmdb_id}`;
+    const score = allScores.get(key);
+    const doc = {
+      media_type: c.media_type,
+      tmdb_id: c.tmdb_id,
+      title: c.title,
+      year: c.year ?? null,
+      poster_path: c.poster_path ?? null,
+      genres: c.genres ?? [],
+      runtime: c.runtime ?? null,
+      source: c.source ?? "unknown",
+      match_score: score?.together ?? 50,
+      match_score_solo: score?.solo ?? {},
+      ai_blurb: score?.blurb ?? "",
+      ai_blurb_solo: score?.blurb_solo ?? {},
+      scored: !!score,
+      generated_at: now,
+    };
+    writer.set(
+      db.doc(`households/${householdId}/recommendations/${key}`),
+      doc,
+      { merge: true },
+    );
+    written += 1;
+  }
+  await writer.close();
+  return { written, scored: allScores.size };
+}
+
 export const scoreRecommendations = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 540, region: "europe-west2" },
   async (request) => {
@@ -231,68 +305,21 @@ export const scoreRecommendations = onCall(
     const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
     const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
 
-    const allScores = new Map<string, Score>();
-    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-      const batch = candidates.slice(i, i + BATCH_SIZE);
-      const prompt = buildPrompt(batch, profileSummary);
-      let scores: Score[] = [];
-      try {
-        const res = await anthropic.messages.create({
-          model,
-          max_tokens: 2000,
-          messages: [{ role: "user", content: prompt }],
-        });
-        const block = res.content.find((b) => b.type === "text");
-        if (block && "text" in block) {
-          scores = parseScores(block.text);
-        }
-      } catch (err) {
-        console.error("Claude batch failed", { batchStart: i, err });
-        // Leave this batch unscored; continue with the next.
-        continue;
-      }
-      for (const s of scores) allScores.set(s.key, s);
-    }
-
-    // Write one doc per candidate. Unscored candidates still get written with
-    // a fallback score so the Home list isn't empty during model outages.
-    const writer = db.bulkWriter();
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    let written = 0;
-
-    for (const c of candidates) {
-      const key = `${c.media_type}:${c.tmdb_id}`;
-      const score = allScores.get(key);
-      const doc = {
-        media_type: c.media_type,
-        tmdb_id: c.tmdb_id,
-        title: c.title,
-        year: c.year ?? null,
-        poster_path: c.poster_path ?? null,
-        genres: c.genres ?? [],
-        runtime: c.runtime ?? null,
-        source: c.source ?? "unknown",
-        match_score: score?.together ?? 50,
-        match_score_solo: score?.solo ?? {},
-        ai_blurb: score?.blurb ?? "",
-        ai_blurb_solo: score?.blurb_solo ?? {},
-        scored: !!score,
-        generated_at: now,
-      };
-      writer.set(
-        db.doc(`households/${householdId}/recommendations/${key}`),
-        doc,
-        { merge: true },
-      );
-      written += 1;
-    }
+    let written: number;
+    let scored: number;
     try {
-      await writer.close();
+      ({ written, scored } = await scoreAndWriteCandidates({
+        db,
+        anthropic,
+        householdId,
+        candidates,
+        profile: profileSummary,
+        model,
+      }));
     } catch (err) {
-      console.error("bulkWriter.close() failed", { householdId, err });
+      console.error("scoreAndWriteCandidates failed", { householdId, err });
       throw new HttpsError("internal", "Failed to persist recommendations.");
     }
-
-    return { ok: true, written, scored: allScores.size, model };
+    return { ok: true, written, scored, model };
   },
 );

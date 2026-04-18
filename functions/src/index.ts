@@ -18,6 +18,10 @@ export { redditScraper } from "./redditScraper";
 export { concierge } from "./concierge";
 export { onRatingCreated } from "./notifications";
 export { submitIssue } from "./submitIssue";
+export {
+  onRatingWritten,
+  processRescoreQueue,
+} from "./rescoreRecommendations";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

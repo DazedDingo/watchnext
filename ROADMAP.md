@@ -107,7 +107,11 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 - **Tonight's Pick Cloud Function** — the daily Cloud Scheduler-driven pick that Phase 10's widget is supposed to consume is not exported from `functions/src/index.ts`. Home screen picks locally instead.
 - **Curated Collections (Discover)** — "Best of A24", "Oscar Winners You Haven't Seen", "Reddit All-Time Favorites", etc. are not implemented. Discover currently offers Trending, New Releases, and Browse by Genre only.
 - **Rewatch suggestions** — occasional "Rewatch?" card for highly-rated + mood-matching titles not yet in home rotation.
-- **Scheduled re-scoring** — scoring runs only when the client invokes `refresh`. No background re-score on new ratings, new Reddit mentions, or taste-profile updates.
+
+**Shipped (scheduled re-scoring):**
+- `onRatingWritten` Firestore trigger stamps `/rescoreQueue/{householdId}` whenever a rating doc is created/updated/deleted.
+- `processRescoreQueue` scheduled CF (every 10 min) drains dirty households: regenerates the taste profile via the shared `buildAndWriteTasteProfile` helper, loads the household's current `/recommendations` docs as the candidate list (most-recent 50), and re-scores them in place using the shared `scoreAndWriteCandidates` helper.
+- Natural debounce: many rating writes in a 10-min window collapse into one drain pass (marker is overwritten, not appended). Transient Claude errors leave the household marked dirty so the next sweep retries. Background-triggered re-scoring of new Reddit mentions or watchlist arrivals is still not hooked up — those still require a client `refresh`.
 
 ---
 
@@ -170,7 +174,7 @@ Nothing shipped. Specifically:
 ## Current shipped Cloud Functions
 
 For reference, `functions/src/index.ts` exports:
-- `generateTasteProfile`, `scoreRecommendations`, `redditScraper`, `concierge`, `onRatingCreated`, `submitIssue`, `drainIssueQueue`, `traktExchangeCode`, `traktRefreshToken`, `traktRevoke`.
+- `generateTasteProfile`, `scoreRecommendations`, `redditScraper`, `concierge`, `onRatingCreated`, `onRatingWritten`, `processRescoreQueue`, `submitIssue`, `drainIssueQueue`, `traktExchangeCode`, `traktRefreshToken`, `traktRevoke`.
 
 Not yet exported but called out in the phase plan above: `tonightsPick`, `gamificationUpdater`, `releaseNotifications`, `wrappedGenerator`, `unratedQueueDigest`.
 

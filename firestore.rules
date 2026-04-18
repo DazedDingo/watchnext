@@ -91,5 +91,10 @@ service cloud.firestore {
     // Server-only scratch space.
     match /sync/{docId}/{sub=**}   { allow read, write: if false; }
     match /_rate_limits/{token}    { allow read, write: if false; }
+
+    // Re-score queue: admin-SDK only. The onRatingWritten trigger stamps
+    // entries here; the scheduled drain reads/clears them. Clients must not
+    // be able to starve the drain or spoof dirty flags for other households.
+    match /rescoreQueue/{householdId} { allow read, write: if false; }
   }
 }
