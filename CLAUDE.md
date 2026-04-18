@@ -51,6 +51,7 @@ Shared movie & TV recommender for two-person households backed by Trakt integrat
   - `notifications.ts`: Topic subscriptions, message routing
   - `submitIssue.ts` / `issueQueue.ts` / `processIssueQueue.ts`: "Report an issue" queue. Callable enqueues into `households/{hid}/issueBatches/{id}`; a scheduled drain (every 2 min) bundles each pending batch whose 10-min debounce has lapsed into a single GitHub issue. Submissions from the same user within the window append + reset the clock; clients can cancel while `status == 'pending'`.
   - `rescoreRecommendations.ts`: Background re-scoring. `onRatingWritten` Firestore trigger stamps `/rescoreQueue/{householdId}` whenever a rating is created/updated/deleted; `processRescoreQueue` scheduled CF (every 10 min) regenerates the taste profile and re-scores up to 50 most-recent recs in place via shared helpers (`buildAndWriteTasteProfile` from `tasteProfile.ts`, `scoreAndWriteCandidates` from `scoreRecommendations.ts`). Rules deny client access to `/rescoreQueue`.
+  - `gamificationUpdater.ts`: Server-side badge evaluator. `onWatchEntryWrittenBadges` + `onMemberWrittenBadges` Firestore triggers re-run the pure `evaluateBadges` helper (mirrors `computeBadges` on the client) against current household state, persist deltas to `/households/{hh}/badges/{badgeId}`, and fire FCM (`type: badge_unlocked`) when a badge flips locked → earned. Household-level badges notify both members; per-user badges notify only the earner. Writes skip when progress and earned state are unchanged to avoid spamming the badge doc on every trigger fire.
 
 - **`test/`**: 32 Dart test files across 9 categories
   - `models/`: JSON parse/hydration
@@ -111,6 +112,10 @@ redditMentions/{id}             # Global; written by CF
 rescoreQueue/{householdId}      # Background re-score marker. Admin-SDK only.
                                 # {household_id, dirty_since, last_scored_at}
                                 # dirty_since > last_scored_at → drain picks it up
+households/{householdId}/badges/{badgeId}
+                                # Server-persisted badge state. Admin-SDK writes only.
+                                # {id, name, progress, target, earned, member_uid?, earned_at?, updated_at}
+                                # badgeId = 'century_club' | 'genre_explorer' | 'prediction_machine_{uid}'
 ```
 - All reads/writes scoped to household membership via `isMember(householdId)` check
 - Two-person cap enforced client-side (`HouseholdService.joinByInviteCode`)

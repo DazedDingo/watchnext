@@ -49,6 +49,13 @@ service cloud.firestore {
         allow read, write: if isMember(householdId);
       }
 
+      // Badges are written only by the gamificationUpdater CF (admin SDK).
+      // Clients read to surface earned_at timestamps and FCM routing data.
+      match /badges/{badgeId} {
+        allow read: if isMember(householdId);
+        allow write: if false;
+      }
+
       // Reserved for Phase 11+ (trusted circle).
       match /trustedCircle/{friendUid}    { allow read, write: if isMember(householdId); }
       match /friendSuggestions/{sid}      { allow read, write: if isMember(householdId); }

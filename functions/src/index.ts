@@ -22,6 +22,10 @@ export {
   onRatingWritten,
   processRescoreQueue,
 } from "./rescoreRecommendations";
+export {
+  onWatchEntryWrittenBadges,
+  onMemberWrittenBadges,
+} from "./gamificationUpdater";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

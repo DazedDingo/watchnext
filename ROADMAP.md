@@ -136,10 +136,11 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 - **`whose_turn` counters** — updated in `DecideService.recordDecision` for tiebreak fairness.
 - **Rating streak** — `ratingStreakForUser` (pure, UTC-day bucketed, 1-day grace) derives current + best from `/ratings` with no schema change. Surfaced as a `_StreakChip` next to the Solo/Together chips on the Ratings card — flame 🔥 styling when `current >= 3`, shows "best N" when the historical run beats the active one.
 - **Badges v1** — `computeBadges` (pure, in `stats_provider.dart`) derives three achievements with no schema change: Century Club (100 titles), Genre Explorer (5 distinct genres), Prediction Machine (80% accuracy over 20+ predictions, per member). `_BadgesCard` on Stats screen shows earned/locked state with a progress bar per row; Prediction Machine swaps its progress line to `{n}% accuracy · need 80%` once volume is cleared.
+- **`gamificationUpdater` CF** — `onWatchEntryWrittenBadges` + `onMemberWrittenBadges` Firestore triggers run the TS port of `computeBadges` (`evaluateBadges` in `functions/src/gamificationUpdater.ts`), persist deltas to `/households/{hh}/badges/{badgeId}`, and fire FCM (`type: badge_unlocked`) the moment a badge flips locked → earned. Household badges notify both members; per-user badges notify only the earner. Unchanged progress/earned state skips the write to stay cheap.
 
 **Gaps vs spec:**
 - **Watch streak** and **prediction streak** — not yet derived. Same pure-function pattern will extend to `/watchEntries.completed_at` and predictions once we ship counters/buckets for those.
-- **Badges (remaining 10)** — First Watch, Hidden Gem Hunter, Reddit Scout, Perfect Sync, Compromise Champ, Marathon Mode, Around the World, Binge Master, Rewatch Royalty, Collection Completionist. No persistence for newly-unlocked state (so no FCM push on unlock yet — next step is a `gamificationUpdater` CF that diffs prev/current and fires notifications).
+- **Badges (remaining 10)** — First Watch, Hidden Gem Hunter, Reddit Scout, Perfect Sync, Compromise Champ, Marathon Mode, Around the World, Binge Master, Rewatch Royalty, Collection Completionist. Foundation is in place (client eval + server persistence + FCM); adding each one now is ~a pair of functions on both sides.
 - **Home-screen counters** — "Movies watched together", watch streak, Predict & Rate record not displayed on Home.
 - **`gamificationUpdater` Cloud Function** — not exported. Current counter updates are inline in service-layer code, which is fine for `whose_turn` + predict counters but doesn't scale to streaks / badges that need cross-collection triggers.
 
@@ -176,9 +177,9 @@ Nothing shipped. Specifically:
 ## Current shipped Cloud Functions
 
 For reference, `functions/src/index.ts` exports:
-- `generateTasteProfile`, `scoreRecommendations`, `redditScraper`, `concierge`, `onRatingCreated`, `onRatingWritten`, `processRescoreQueue`, `submitIssue`, `drainIssueQueue`, `traktExchangeCode`, `traktRefreshToken`, `traktRevoke`.
+- `generateTasteProfile`, `scoreRecommendations`, `redditScraper`, `concierge`, `onRatingCreated`, `onRatingWritten`, `processRescoreQueue`, `onWatchEntryWrittenBadges`, `onMemberWrittenBadges`, `submitIssue`, `drainIssueQueue`, `traktExchangeCode`, `traktRefreshToken`, `traktRevoke`.
 
-Not yet exported but called out in the phase plan above: `tonightsPick`, `gamificationUpdater`, `releaseNotifications`, `wrappedGenerator`, `unratedQueueDigest`.
+Not yet exported but called out in the phase plan above: `tonightsPick`, `releaseNotifications`, `wrappedGenerator`, `unratedQueueDigest`.
 
 ---
 

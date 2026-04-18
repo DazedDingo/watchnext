@@ -1,0 +1,318 @@
+import * as admin from "firebase-admin";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import * as logger from "firebase-functions/logger";
+
+/**
+ * Server-side badge evaluation + persistence.
+ *
+ * The Flutter client already derives badge state for display (see
+ * `computeBadges` in `lib/providers/stats_provider.dart`). This module
+ * persists that state to `/households/{hh}/badges/{badgeId}` so we can:
+ *
+ *   - Stamp an authoritative `earned_at` timestamp the first time a badge
+ *     unlocks (for "Earned on ..." UI and activity feeds).
+ *   - Fire FCM push notifications the moment a badge flips from locked
+ *     to earned. Unlocks feel flat if they only show up next time the user
+ *     opens Stats.
+ *
+ * Triggers run inline — both watchEntries (drives Century Club + Genre
+ * Explorer) and member docs (drives Prediction Machine). If the first-sync
+ * burst proves expensive we can swap to a marker-doc debounce like
+ * `rescoreQueue`, but badge unlocks feel better when instant.
+ *
+ * IMPORTANT: `evaluateBadges` must mirror `computeBadges` on the client. If
+ * you change the threshold or add a badge, update both sides.
+ */
+
+export type BadgeState = {
+  id: string;
+  name: string;
+  progress: number;
+  target: number;
+  earned: boolean;
+  member_uid: string | null;
+};
+
+export type MemberDoc = {
+  uid: string;
+  display_name?: string;
+  fcm_token?: string;
+  predict_total?: number;
+  predict_wins?: number;
+  predict_total_solo?: number;
+  predict_wins_solo?: number;
+  predict_total_together?: number;
+  predict_wins_together?: number;
+};
+
+export type EntryDoc = {
+  media_type?: string;
+  genres?: string[];
+};
+
+/**
+ * Derives badge state from raw household inputs. Pure — exposed for unit
+ * tests. Order matches client: Century Club, Genre Explorer, then one
+ * Prediction Machine per member in the order passed in.
+ */
+export function evaluateBadges(params: {
+  entries: EntryDoc[];
+  members: MemberDoc[];
+}): BadgeState[] {
+  const { entries, members } = params;
+  const result: BadgeState[] = [];
+
+  const total = entries.length;
+  result.push({
+    id: "century_club",
+    name: "Century Club",
+    progress: Math.min(total, 100),
+    target: 100,
+    earned: total >= 100,
+    member_uid: null,
+  });
+
+  const genres = new Set<string>();
+  for (const e of entries) {
+    for (const g of e.genres ?? []) genres.add(g);
+  }
+  result.push({
+    id: "genre_explorer",
+    name: "Genre Explorer",
+    progress: Math.min(genres.size, 5),
+    target: 5,
+    earned: genres.size >= 5,
+    member_uid: null,
+  });
+
+  for (const m of members) {
+    // Match `HouseholdMember.predictTotal` getter on the client — legacy +
+    // per-mode counters all roll up into the badge threshold.
+    const totalPred =
+      (m.predict_total ?? 0) +
+      (m.predict_total_solo ?? 0) +
+      (m.predict_total_together ?? 0);
+    const winsPred =
+      (m.predict_wins ?? 0) +
+      (m.predict_wins_solo ?? 0) +
+      (m.predict_wins_together ?? 0);
+    const accuracy = totalPred === 0 ? 0 : winsPred / totalPred;
+    const earned = totalPred >= 20 && accuracy >= 0.8;
+    const progress = totalPred >= 20 ? 20 : totalPred;
+    result.push({
+      id: `prediction_machine_${m.uid}`,
+      name: "Prediction Machine",
+      progress,
+      target: 20,
+      earned,
+      member_uid: m.uid,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Diffs computed badge state against what's already persisted. Returns:
+ *   - `writes`: badges whose progress or earned state changed — those need
+ *     to be upserted. Unchanged rows are skipped so we don't spam writes
+ *     on every trigger fire.
+ *   - `newlyEarned`: full badge state objects that flipped locked → earned
+ *     this pass. The caller uses these to stamp `earned_at` and send FCM.
+ */
+export function diffBadgeUnlocks(params: {
+  computed: BadgeState[];
+  existing: Map<string, { earned: boolean; progress: number }>;
+}): { writes: BadgeState[]; newlyEarned: BadgeState[] } {
+  const writes: BadgeState[] = [];
+  const newlyEarned: BadgeState[] = [];
+  for (const state of params.computed) {
+    const prev = params.existing.get(state.id);
+    const wasEarned = prev?.earned ?? false;
+    const progressChanged = (prev?.progress ?? -1) !== state.progress;
+    const earnedChanged = wasEarned !== state.earned;
+    if (!prev || progressChanged || earnedChanged) writes.push(state);
+    if (state.earned && !wasEarned) newlyEarned.push(state);
+  }
+  return { writes, newlyEarned };
+}
+
+/**
+ * Reads entries + members + stored badges, computes current state, persists
+ * deltas, and fires FCM for newly-earned badges. Exposed for end-to-end
+ * testing if we ever spin up `fake_cloud_firestore` on the TS side.
+ */
+export async function evaluateAndPersistBadges(
+  db: admin.firestore.Firestore,
+  householdId: string,
+): Promise<{ written: number; newlyEarned: string[] }> {
+  const [entriesSnap, membersSnap, existingSnap] = await Promise.all([
+    db.collection(`households/${householdId}/watchEntries`).get(),
+    db.collection(`households/${householdId}/members`).get(),
+    db.collection(`households/${householdId}/badges`).get(),
+  ]);
+
+  const entries: EntryDoc[] = entriesSnap.docs.map((d) => {
+    const data = d.data();
+    return {
+      media_type: typeof data.media_type === "string"
+        ? data.media_type
+        : undefined,
+      genres: Array.isArray(data.genres) ? (data.genres as string[]) : [],
+    };
+  });
+
+  const members: MemberDoc[] = membersSnap.docs.map((d) => ({
+    uid: d.id,
+    ...(d.data() as Omit<MemberDoc, "uid">),
+  }));
+
+  const existing = new Map<string, { earned: boolean; progress: number }>();
+  for (const d of existingSnap.docs) {
+    const data = d.data();
+    existing.set(d.id, {
+      earned: (data.earned_at ?? null) !== null,
+      progress: typeof data.progress === "number" ? data.progress : -1,
+    });
+  }
+
+  const computed = evaluateBadges({ entries, members });
+  const { writes, newlyEarned } = diffBadgeUnlocks({ computed, existing });
+
+  if (writes.length > 0) {
+    const batch = db.batch();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    for (const state of writes) {
+      const ref = db.doc(`households/${householdId}/badges/${state.id}`);
+      const wasEarned = existing.get(state.id)?.earned ?? false;
+      const shouldStampEarnedAt = state.earned && !wasEarned;
+      batch.set(
+        ref,
+        {
+          id: state.id,
+          name: state.name,
+          progress: state.progress,
+          target: state.target,
+          earned: state.earned,
+          member_uid: state.member_uid,
+          updated_at: now,
+          ...(shouldStampEarnedAt ? { earned_at: now } : {}),
+        },
+        { merge: true },
+      );
+    }
+    await batch.commit();
+  }
+
+  if (newlyEarned.length > 0) {
+    await sendBadgeUnlockFcm(members, newlyEarned);
+  }
+
+  return {
+    written: writes.length,
+    newlyEarned: newlyEarned.map((b) => b.id),
+  };
+}
+
+/**
+ * Fires one FCM push per (badge × recipient). Household-level badges go to
+ * both members; per-user badges go only to the member that earned them. Any
+ * FCM error (stale token, network) is logged and swallowed — we don't want
+ * a bad token to block the badge write.
+ */
+async function sendBadgeUnlockFcm(
+  members: MemberDoc[],
+  newlyEarned: BadgeState[],
+): Promise<void> {
+  const sends: Array<Promise<unknown>> = [];
+  for (const badge of newlyEarned) {
+    const recipients = badge.member_uid
+      ? members.filter((m) => m.uid === badge.member_uid)
+      : members;
+    for (const m of recipients) {
+      if (!m.fcm_token) continue;
+      sends.push(
+        admin
+          .messaging()
+          .send({
+            token: m.fcm_token,
+            data: {
+              type: "badge_unlocked",
+              badge_id: badge.id,
+              badge_name: badge.name,
+            },
+            notification: {
+              title: "Badge unlocked!",
+              body: `You earned ${badge.name}`,
+            },
+            android: { priority: "normal" },
+          })
+          .catch((err) => {
+            logger.warn("badge FCM send failed", {
+              uid: m.uid,
+              badgeId: badge.id,
+              err,
+            });
+          }),
+      );
+    }
+  }
+  await Promise.all(sends);
+}
+
+/**
+ * Firestore trigger — re-evaluate badges when a watchEntry is
+ * created/updated/deleted. This is the main driver for Century Club
+ * (length) and Genre Explorer (distinct genre count).
+ */
+export const onWatchEntryWrittenBadges = onDocumentWritten(
+  {
+    document: "households/{householdId}/watchEntries/{entryId}",
+    region: "europe-west2",
+  },
+  async (event) => {
+    const householdId = event.params.householdId;
+    try {
+      const result = await evaluateAndPersistBadges(
+        admin.firestore(),
+        householdId,
+      );
+      if (result.written > 0 || result.newlyEarned.length > 0) {
+        logger.info("badges evaluated (watchEntry)", {
+          householdId,
+          ...result,
+        });
+      }
+    } catch (err) {
+      logger.error("badge eval failed (watchEntry)", { householdId, err });
+    }
+  },
+);
+
+/**
+ * Firestore trigger — re-evaluate badges when a member doc changes. Drives
+ * Prediction Machine (counters updated by `PredictionService.markRevealSeen`).
+ *
+ * We also catch member creation here so the first predict writes unlock the
+ * badge even if the watchEntry trigger hasn't fired in between.
+ */
+export const onMemberWrittenBadges = onDocumentWritten(
+  {
+    document: "households/{householdId}/members/{uid}",
+    region: "europe-west2",
+  },
+  async (event) => {
+    const householdId = event.params.householdId;
+    try {
+      const result = await evaluateAndPersistBadges(
+        admin.firestore(),
+        householdId,
+      );
+      if (result.written > 0 || result.newlyEarned.length > 0) {
+        logger.info("badges evaluated (member)", { householdId, ...result });
+      }
+    } catch (err) {
+      logger.error("badge eval failed (member)", { householdId, err });
+    }
+  },
+);
