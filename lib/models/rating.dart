@@ -16,6 +16,11 @@ class Rating {
   final String? note;
   final DateTime ratedAt;
   final bool pushedToTrakt;
+  /// Viewing context this rating was captured in. Null = unknown (legacy rows
+  /// and Trakt historicals that predate the flag). Drives signal separation:
+  /// solo-mode taste profile pulls `context in {solo, null-if-personal-Trakt}`,
+  /// together-mode pulls `context in {together, null-if-shared-Trakt}`.
+  final String? context; // 'solo' | 'together' | null
 
   Rating({
     required this.id,
@@ -27,6 +32,7 @@ class Rating {
     this.tags = const [],
     this.note,
     this.pushedToTrakt = false,
+    this.context,
   });
 
   static String buildId(String uid, String level, String targetId) => '$uid:$level:$targetId';
@@ -40,10 +46,12 @@ class Rating {
         if (note != null) 'note': note,
         'rated_at': Timestamp.fromDate(ratedAt),
         'pushed_to_trakt': pushedToTrakt,
+        if (context != null) 'context': context,
       };
 
   factory Rating.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data() ?? const <String, dynamic>{};
+    final rawContext = d['context'] as String?;
     return Rating(
       id: doc.id,
       uid: d['uid'] as String? ?? '',
@@ -55,6 +63,7 @@ class Rating {
       ratedAt:
           (d['rated_at'] as Timestamp?)?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0),
       pushedToTrakt: d['pushed_to_trakt'] as bool? ?? false,
+      context: (rawContext == 'solo' || rawContext == 'together') ? rawContext : null,
     );
   }
 }

@@ -212,6 +212,67 @@ void main() {
       expect(doc.data()!['tags'], ['funny', 'rewatch']);
       expect(doc.data()!['note'], 'loved it');
     });
+
+    test('save without context omits the field from the doc', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+      );
+      final doc = await db.doc('households/$hh/ratings/u1:movie:movie:42').get();
+      expect(doc.data()!.containsKey('context'), isFalse);
+    });
+
+    test('save with context="solo" persists it', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+        context: 'solo',
+      );
+      final doc = await db.doc('households/$hh/ratings/u1:movie:movie:42').get();
+      expect(doc.data()!['context'], 'solo');
+    });
+
+    test('save with context="together" persists it', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'show',
+        targetId: 'tv:1',
+        stars: 5,
+        context: 'together',
+      );
+      final doc = await db.doc('households/$hh/ratings/u1:show:tv:1').get();
+      expect(doc.data()!['context'], 'together');
+    });
+
+    test('rerating can flip context on the same stable id', () async {
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 3,
+        context: 'solo',
+      );
+      await svc.save(
+        householdId: hh,
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 5,
+        context: 'together',
+      );
+      final snap = await db.collection('households/$hh/ratings').get();
+      expect(snap.size, 1);
+      expect(snap.docs.first.data()['context'], 'together');
+      expect(snap.docs.first.data()['stars'], 5);
+    });
   });
 
   group('RatingService.delete (undo)', () {

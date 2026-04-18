@@ -22,6 +22,8 @@ class RatingService {
     required int stars,
     List<String> tags = const [],
     String? note,
+    // 'solo' | 'together' | null (null = unknown / legacy).
+    String? context,
     // Trakt ids for push; null skips the push.
     int? traktId,
     int? season,
@@ -38,6 +40,7 @@ class RatingService {
       note: note,
       ratedAt: DateTime.now(),
       pushedToTrakt: false,
+      context: context,
     );
     await _db.doc('households/$householdId/ratings/$id').set(rating.toFirestore());
 

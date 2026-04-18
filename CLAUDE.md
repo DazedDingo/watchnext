@@ -79,7 +79,8 @@ households/{householdId}/
   ├─ members/{uid}              # User ref + Trakt tokens
   ├─ watchEntries/{mediaType:tmdbId}
   │  └─ episodes/{traktId}      # Per-ep timestamps
-  ├─ ratings/{id}               # {tmdbId, score, createdBy, ...}
+  ├─ ratings/{id}               # {uid, level, target_id, stars, tags, note, rated_at, pushed_to_trakt, context?}
+                                # context: 'solo'|'together'|null (null = legacy / Trakt historical)
   ├─ watchlist/{id}             # {mediaType, tmdbId, addedAt, ...}
   ├─ predictions/{id}           # Forecast metadata (Phase 8+)
   ├─ recommendations/{id}       # {mediaType, tmdbId, match_score, match_score_solo, ai_blurb, ...}

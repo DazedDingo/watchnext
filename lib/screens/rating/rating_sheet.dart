@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
+import '../../providers/mode_provider.dart';
 import '../../providers/ratings_provider.dart';
 
 /// Bottom-sheet rating flow. Works at movie/show/season/episode level.
@@ -79,6 +80,9 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
   late final Set<String> _selectedTags = {...?widget.initialTags};
   late final TextEditingController _noteCtrl = TextEditingController(text: widget.initialNote);
   bool _saving = false;
+  // Null until the first build reads viewModeProvider; user can override
+  // before saving. Stays non-null once set.
+  ViewMode? _context;
 
   @override
   void dispose() {
@@ -94,6 +98,7 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
       if (uid == null) throw StateError('Not signed in.');
       final householdId = await ref.read(householdIdProvider.future);
       if (householdId == null) throw StateError('No household.');
+      final ctx = _context ?? ref.read(viewModeProvider);
       await ref.read(ratingServiceProvider).save(
             householdId: householdId,
             uid: uid,
@@ -102,6 +107,7 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
             stars: _stars,
             tags: _selectedTags.toList(),
             note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+            context: ctx == ViewMode.solo ? 'solo' : 'together',
             traktId: widget.traktId,
             season: widget.season,
             episode: widget.episode,
@@ -119,6 +125,7 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
   @override
   Widget build(BuildContext context) {
     final inset = MediaQuery.of(context).viewInsets.bottom;
+    final ViewMode effectiveContext = _context ?? ref.watch(viewModeProvider);
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + inset),
       child: Column(
@@ -128,6 +135,25 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
           Text(widget.title, style: Theme.of(context).textTheme.titleLarge, maxLines: 2, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 4),
           Text(_levelLabel(), style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(height: 12),
+          Center(
+            child: SegmentedButton<ViewMode>(
+              segments: const [
+                ButtonSegment(
+                  value: ViewMode.solo,
+                  label: Text('Solo'),
+                  icon: Icon(Icons.person_outline),
+                ),
+                ButtonSegment(
+                  value: ViewMode.together,
+                  label: Text('Together'),
+                  icon: Icon(Icons.people_outline),
+                ),
+              ],
+              selected: {effectiveContext},
+              onSelectionChanged: (s) => setState(() => _context = s.first),
+            ),
+          ),
           const SizedBox(height: 20),
           Center(
             child: Row(

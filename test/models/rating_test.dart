@@ -86,6 +86,62 @@ void main() {
       expect(parsed.pushedToTrakt, false);
       expect(parsed.tags, isEmpty);
       expect(parsed.note, isNull);
+      expect(parsed.context, isNull);
+    });
+
+    test('toFirestore omits null context, emits it when set', () {
+      final r1 = Rating(
+        id: 'x',
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+        ratedAt: DateTime.utc(2025, 1, 1),
+      );
+      expect(r1.toFirestore().containsKey('context'), isFalse);
+
+      final r2 = Rating(
+        id: 'x',
+        uid: 'u1',
+        level: 'movie',
+        targetId: 'movie:42',
+        stars: 4,
+        ratedAt: DateTime.utc(2025, 1, 1),
+        context: 'solo',
+      );
+      expect(r2.toFirestore()['context'], 'solo');
+    });
+
+    test('fromDoc roundtrips context field', () async {
+      final db = FakeFirebaseFirestore();
+      for (final ctx in ['solo', 'together']) {
+        final r = Rating(
+          id: 'x',
+          uid: 'u1',
+          level: 'movie',
+          targetId: 'movie:$ctx',
+          stars: 4,
+          ratedAt: DateTime.utc(2025, 1, 1),
+          context: ctx,
+        );
+        await db.doc('r/$ctx').set(r.toFirestore());
+        final parsed = Rating.fromDoc(await db.doc('r/$ctx').get());
+        expect(parsed.context, ctx);
+      }
+    });
+
+    test('fromDoc coerces unknown context values to null', () async {
+      final db = FakeFirebaseFirestore();
+      await db.doc('r/1').set({
+        'uid': 'u1',
+        'level': 'movie',
+        'target_id': 'movie:42',
+        'stars': 2,
+        'rated_at': Timestamp.fromDate(DateTime.utc(2025, 1, 1)),
+        'context': 'shared', // not a valid value
+      });
+      final parsed = Rating.fromDoc(await db.doc('r/1').get());
+      expect(parsed.context, isNull);
     });
   });
 }
