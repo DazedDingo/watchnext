@@ -150,6 +150,13 @@ class _PosterSection extends StatelessWidget {
 }
 
 // ─── Browse by genre expandable row ──────────────────────────────────────────
+//
+// Once the user expands the row, [_opened] sticks to true so the body stays
+// mounted across collapse/re-expand cycles. Earlier the body lived inside an
+// `if (_expanded) Consumer(...)` gate captured in the children list at build
+// time; the rebuild after `setState` raced with ExpansionTile's expansion
+// animation and the inner Consumer never observed the FutureProvider's
+// resolution — the symptom was a spinner that never went away.
 
 class _GenreRow extends ConsumerStatefulWidget {
   final int genreId;
@@ -162,50 +169,63 @@ class _GenreRow extends ConsumerStatefulWidget {
 }
 
 class _GenreRowState extends ConsumerState<_GenreRow> {
-  bool _expanded = false;
+  bool _opened = false;
 
   @override
   Widget build(BuildContext context) {
     return ExpansionTile(
       title: Text(widget.genreName),
-      onExpansionChanged: (v) => setState(() => _expanded = v),
-      children: [
-        if (_expanded)
-          Consumer(
-            builder: (ctx, ref, _) {
-              final data = ref.watch(discoverByGenreProvider(widget.genreId));
-              return SizedBox(
-                height: 172,
-                child: data.when(
-                  loading: () => const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2)),
-                  error: (_, _) => const Center(
-                    child: Text('Failed to load',
-                        style: TextStyle(color: Colors.white38)),
-                  ),
-                  data: (items) => ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    itemCount: items.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (ctx, i) {
-                      final item = items[i];
-                      final tmdbId = (item['id'] as num?)?.toInt();
-                      if (tmdbId == null) return const SizedBox.shrink();
-                      final poster = TmdbService.imageUrl(
-                          item['poster_path'] as String?,
-                          size: 'w185');
-                      return _PosterTile(
-                        poster: poster,
-                        onTap: () => ctx.push('/title/movie/$tmdbId'),
-                      );
-                    },
-                  ),
-                ),
-              );
-            },
-          ),
-      ],
+      childrenPadding: EdgeInsets.zero,
+      onExpansionChanged: (v) {
+        if (v && !_opened) setState(() => _opened = true);
+      },
+      children: _opened
+          ? [_GenreRowBody(genreId: widget.genreId)]
+          : const [],
+    );
+  }
+}
+
+class _GenreRowBody extends ConsumerWidget {
+  final int genreId;
+  const _GenreRowBody({required this.genreId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final data = ref.watch(discoverByGenreProvider(genreId));
+    return SizedBox(
+      height: 172,
+      child: data.when(
+        loading: () =>
+            const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        error: (_, _) => const Center(
+          child:
+              Text('Failed to load', style: TextStyle(color: Colors.white38)),
+        ),
+        data: (items) => items.isEmpty
+            ? const Center(
+                child: Text('No titles in this genre',
+                    style: TextStyle(color: Colors.white38)),
+              )
+            : ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (ctx, i) {
+                  final item = items[i];
+                  final tmdbId = (item['id'] as num?)?.toInt();
+                  if (tmdbId == null) return const SizedBox.shrink();
+                  final poster = TmdbService.imageUrl(
+                      item['poster_path'] as String?,
+                      size: 'w185');
+                  return _PosterTile(
+                    poster: poster,
+                    onTap: () => ctx.push('/title/movie/$tmdbId'),
+                  );
+                },
+              ),
+      ),
     );
   }
 }
