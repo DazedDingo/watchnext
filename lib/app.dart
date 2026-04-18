@@ -17,6 +17,7 @@ import 'screens/discover/discover_screen.dart';
 import 'screens/history/history_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/profile/profile_screen.dart';
+import 'screens/profile/report_issue_screen.dart';
 import 'screens/profile/trakt_link_screen.dart';
 import 'screens/decide/decide_screen.dart';
 import 'screens/predict/reveal_screen.dart';
@@ -86,6 +87,10 @@ final _router = GoRouter(
           builder: (_, _) => const ProfileScreen(),
           routes: [
             GoRoute(path: 'trakt', builder: (_, _) => const TraktLinkScreen()),
+            GoRoute(
+              path: 'report-issue',
+              builder: (_, _) => const ReportIssueScreen(),
+            ),
           ],
         ),
       ],

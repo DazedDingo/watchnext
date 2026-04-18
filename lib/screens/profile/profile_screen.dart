@@ -126,6 +126,17 @@ class ProfileScreen extends ConsumerWidget {
           ),
           const Divider(),
 
+          // ── Help ──────────────────────────────────────────────────────
+          const _SectionHeader('Feedback'),
+          ListTile(
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Report an issue'),
+            subtitle: const Text("Submit a bug or idea — Claude files it on GitHub"),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/profile/report-issue'),
+          ),
+          const Divider(),
+
           // ── Sign out ───────────────────────────────────────────────────
           ListTile(
             leading: const Icon(Icons.logout),

@@ -1,7 +1,10 @@
 import * as admin from "firebase-admin";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
+import * as logger from "firebase-functions/logger";
+import { processIssueQueue, makeGitHubPoster } from "./processIssueQueue";
 
 // Firestore lives in europe-west2 (London). Co-locate all CFs so the
 // client round-trip and CF→Firestore hops stay intra-region.
@@ -14,6 +17,25 @@ export { scoreRecommendations } from "./scoreRecommendations";
 export { redditScraper } from "./redditScraper";
 export { concierge } from "./concierge";
 export { onRatingCreated } from "./notifications";
+export { submitIssue } from "./submitIssue";
+
+const GITHUB_PAT = defineSecret("GITHUB_PAT");
+
+// Drains the debounced issue queue every 2 minutes — files bundled batches
+// to GitHub.
+export const drainIssueQueue = onSchedule(
+  {
+    schedule: "every 2 minutes",
+    region: "europe-west2",
+    secrets: [GITHUB_PAT],
+  },
+  async () => {
+    const result = await processIssueQueue(makeGitHubPoster(GITHUB_PAT.value()));
+    if (result.dispatched > 0 || result.errors > 0) {
+      logger.info("Issue queue drained", result);
+    }
+  },
+);
 
 /**
  * Trakt OAuth proxy.

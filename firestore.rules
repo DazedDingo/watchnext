@@ -52,6 +52,20 @@ service cloud.firestore {
       // Reserved for Phase 11+ (trusted circle).
       match /trustedCircle/{friendUid}    { allow read, write: if isMember(householdId); }
       match /friendSuggestions/{sid}      { allow read, write: if isMember(householdId); }
+
+      // "Fix this" issue queue. Batches are per-submitter: you can only see
+      // or cancel your own. Creation happens server-side via the submitIssue
+      // callable; clients can only flip status to 'cancelled'.
+      match /issueBatches/{batchId} {
+        allow read: if isMember(householdId)
+          && resource.data.uid == request.auth.uid;
+        allow create: if false;
+        allow update: if isMember(householdId)
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status == 'cancelled';
+        allow delete: if false;
+      }
     }
 
     // Per-user pointer for fast household lookup after sign-in.
