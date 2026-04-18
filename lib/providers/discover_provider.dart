@@ -34,3 +34,19 @@ final discoverByGenreProvider =
   });
   return (res['results'] as List? ?? const []).cast<Map<String, dynamic>>();
 });
+
+/// Current search query for the Discover screen. Empty string means
+/// "not searching" — the screen falls back to its browse content.
+final searchQueryProvider = StateProvider<String>((ref) => '');
+
+/// TMDB multi search restricted to titles (movies + TV; people filtered out).
+/// Empty query short-circuits to an empty list — no network call, no spinner.
+final searchResultsProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final query = ref.watch(searchQueryProvider).trim();
+  if (query.isEmpty) return const [];
+  final res = await ref.watch(tmdbServiceProvider).searchMulti(query);
+  final results =
+      (res['results'] as List? ?? const []).cast<Map<String, dynamic>>();
+  return results.where((r) => r['media_type'] != 'person').toList();
+});

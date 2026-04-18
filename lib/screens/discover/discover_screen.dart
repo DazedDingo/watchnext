@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,11 +11,14 @@ import '../../widgets/mode_toggle.dart';
 
 const _discoverHelp =
     'Browse what\'s popular on TMDB without leaving the app.\n\n'
+    '• Search — type any title, cast, or keyword; results span movies and TV.\n'
     '• Trending Movies / TV — what\'s hot this week.\n'
     '• New Releases — upcoming and recent.\n'
     '• Top Rated Movies — all-time TMDB highs.\n'
     '• Browse by Genre — tap a genre to open a horizontal row.\n\n'
     'Tap any poster to open its detail screen where you can watchlist or rate it.';
+
+const _searchDebounce = Duration(milliseconds: 350);
 
 // TMDB movie genre definitions used for Browse by Genre.
 const _kGenres = [
@@ -33,11 +38,43 @@ const _kGenres = [
   (id: 37, name: 'Western'),
 ];
 
-class DiscoverScreen extends ConsumerWidget {
+class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DiscoverScreen> createState() => _DiscoverScreenState();
+}
+
+class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(_searchDebounce, () {
+      if (!mounted) return;
+      ref.read(searchQueryProvider.notifier).state = value.trim();
+    });
+  }
+
+  void _clearSearch() {
+    _debounce?.cancel();
+    _searchCtrl.clear();
+    ref.read(searchQueryProvider.notifier).state = '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = ref.watch(searchQueryProvider);
+    final searching = query.isNotEmpty;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Discover'),
@@ -49,40 +86,129 @@ class DiscoverScreen extends ConsumerWidget {
           HelpButton(title: 'Discover', body: _discoverHelp),
         ],
       ),
-      body: ListView(
+      body: Column(
         children: [
-          _PosterSection(
-            title: 'TRENDING MOVIES',
-            data: ref.watch(trendingMoviesProvider),
-            mediaType: 'movie',
-          ),
-          _PosterSection(
-            title: 'TRENDING TV',
-            data: ref.watch(trendingTvProvider),
-            mediaType: 'tv',
-          ),
-          _PosterSection(
-            title: 'NEW RELEASES',
-            data: ref.watch(upcomingMoviesProvider),
-            mediaType: 'movie',
-          ),
-          _PosterSection(
-            title: 'TOP RATED MOVIES',
-            data: ref.watch(topRatedMoviesProvider),
-            mediaType: 'movie',
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
-            child: Text(
-              'BROWSE BY GENRE',
-              style: TextStyle(
-                  letterSpacing: 1.2, fontSize: 12, color: Colors.white54),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: _onSearchChanged,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Search movies & TV',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchCtrl.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _clearSearch();
+                          setState(() {});
+                        },
+                      ),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
             ),
           ),
-          ..._kGenres.map((g) => _GenreRow(genreId: g.id, genreName: g.name)),
-          const SizedBox(height: 24),
+          Expanded(
+            child: searching ? const _SearchResults() : const _BrowseContent(),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _BrowseContent extends ConsumerWidget {
+  const _BrowseContent();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListView(
+      children: [
+        _PosterSection(
+          title: 'TRENDING MOVIES',
+          data: ref.watch(trendingMoviesProvider),
+          mediaType: 'movie',
+        ),
+        _PosterSection(
+          title: 'TRENDING TV',
+          data: ref.watch(trendingTvProvider),
+          mediaType: 'tv',
+        ),
+        _PosterSection(
+          title: 'NEW RELEASES',
+          data: ref.watch(upcomingMoviesProvider),
+          mediaType: 'movie',
+        ),
+        _PosterSection(
+          title: 'TOP RATED MOVIES',
+          data: ref.watch(topRatedMoviesProvider),
+          mediaType: 'movie',
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+          child: Text(
+            'BROWSE BY GENRE',
+            style: TextStyle(
+                letterSpacing: 1.2, fontSize: 12, color: Colors.white54),
+          ),
+        ),
+        ..._kGenres.map((g) => _GenreRow(genreId: g.id, genreName: g.name)),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+class _SearchResults extends ConsumerWidget {
+  const _SearchResults();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final data = ref.watch(searchResultsProvider);
+    return data.when(
+      loading: () =>
+          const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      error: (_, _) => const Center(
+        child:
+            Text('Search failed', style: TextStyle(color: Colors.white38)),
+      ),
+      data: (items) {
+        if (items.isEmpty) {
+          return const Center(
+            child: Text('No matches',
+                style: TextStyle(color: Colors.white38)),
+          );
+        }
+        return GridView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 2 / 3,
+          ),
+          itemCount: items.length,
+          itemBuilder: (ctx, i) {
+            final item = items[i];
+            final tmdbId = (item['id'] as num?)?.toInt();
+            if (tmdbId == null) return const SizedBox.shrink();
+            final mt = (item['media_type'] as String?) ?? 'movie';
+            final poster = TmdbService.imageUrl(
+                item['poster_path'] as String?,
+                size: 'w342');
+            return _PosterTile(
+              poster: poster,
+              onTap: () => ctx.push('/title/$mt/$tmdbId'),
+              fill: true,
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -236,29 +362,42 @@ class _PosterTile extends StatelessWidget {
   final String? poster;
   final VoidCallback onTap;
 
-  const _PosterTile({required this.poster, required this.onTap});
+  /// When true, the tile fills its parent (used by the search grid).
+  /// When false, it renders at a fixed 107×160 (used by the browse rows).
+  final bool fill;
+
+  const _PosterTile({
+    required this.poster,
+    required this.onTap,
+    this.fill = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final placeholder = Container(
+      color: Colors.grey.shade900,
+      alignment: Alignment.center,
+      child: const Icon(Icons.movie, color: Colors.white24),
+    );
+    final image = poster != null
+        ? Image.network(
+            poster!,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => placeholder,
+          )
+        : placeholder;
+
+    final clipped = ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: image,
+    );
+
     return InkWell(
       borderRadius: BorderRadius.circular(6),
       onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: poster != null
-            ? Image.network(poster!, width: 107, height: 160, fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  width: 107, height: 160,
-                  color: Colors.grey.shade900,
-                  child: const Icon(Icons.movie, color: Colors.white24),
-                ))
-            : Container(
-                width: 107,
-                height: 160,
-                color: Colors.grey.shade900,
-                child: const Icon(Icons.movie, color: Colors.white24),
-              ),
-      ),
+      child: fill
+          ? clipped
+          : SizedBox(width: 107, height: 160, child: clipped),
     );
   }
 }
