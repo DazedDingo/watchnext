@@ -12,6 +12,7 @@ const _statsHelp =
     'Stats rolls up everything your household has watched and rated.\n\n'
     '• Watched / Movies / TV Shows — counts across both members.\n'
     '• Runtime — total viewing time where TMDB had runtime data.\n'
+    '• Watch streak — consecutive days with any watch activity.\n'
     '• Compatibility — how often both members rate the same title within 1 star.\n'
     '• Ratings — per-member star distribution and averages, plus rating streaks.\n'
     '• Top genres — based on what you\'ve actually watched.\n'
@@ -58,6 +59,11 @@ class StatsScreen extends ConsumerWidget {
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
                       _SummaryCards(stats: stats),
+                      if (stats.watchStreak.current > 0 ||
+                          stats.watchStreak.best > 1) ...[
+                        const SizedBox(height: 10),
+                        _WatchStreakRow(streak: stats.watchStreak),
+                      ],
                       const SizedBox(height: 16),
                       if (stats.compatibilityPct >= 0) ...[
                         _CompatibilityCard(pct: stats.compatibilityPct),
@@ -459,6 +465,59 @@ class _StreakChip extends StatelessWidget {
           color: hot ? Colors.deepOrangeAccent : Colors.white70,
           fontWeight: hot ? FontWeight.w600 : FontWeight.normal,
         ),
+      ),
+    );
+  }
+}
+
+class _WatchStreakRow extends StatelessWidget {
+  final WatchStreak streak;
+  const _WatchStreakRow({required this.streak});
+
+  @override
+  Widget build(BuildContext context) {
+    final hot = streak.current >= 3;
+    final showBest = streak.best > streak.current && streak.best > 1;
+
+    final String label;
+    if (streak.current > 0) {
+      label = '${hot ? '🔥 ' : ''}${streak.current}-day watch streak';
+    } else {
+      label = 'Best watch streak: ${streak.best}';
+    }
+    final extra = showBest ? ' · best ${streak.best}' : '';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: hot
+            ? Colors.deepOrange.withValues(alpha: 0.12)
+            : Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: hot ? Colors.deepOrange : Colors.white12,
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.local_fire_department_outlined,
+            size: 18,
+            color: hot ? Colors.deepOrangeAccent : Colors.white54,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$label$extra',
+              style: TextStyle(
+                fontSize: 13,
+                color: hot ? Colors.deepOrangeAccent : Colors.white70,
+                fontWeight: hot ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

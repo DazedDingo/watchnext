@@ -283,7 +283,8 @@ void main() {
       expect(s.best, 1);
     });
 
-    test('computeHouseholdStats exposes streaks for members with activity', () {
+    test('computeHouseholdStats exposes streaks for members with activity',
+        () {
       final stats = computeHouseholdStats(
         entries: const [],
         ratings: [
@@ -304,6 +305,109 @@ void main() {
       // Provider uses DateTime.now() internally — can't freeze today here, so
       // only assert structural shape (key exists for u1 with activity).
       expect(stats.ratingStreaks.keys, contains('u1'));
+    });
+  });
+
+  group('watchStreakHousehold', () {
+    final today = DateTime.utc(2026, 4, 18);
+    WatchEntry e(DateTime? watched, {int id = 0}) => _entry(
+          id: 'movie:$id',
+          title: 'T$id',
+          lastWatchedAt: watched,
+        );
+
+    test('empty entries → (0, 0)', () {
+      final s = watchStreakHousehold(const [], today: today);
+      expect(s.current, 0);
+      expect(s.best, 0);
+    });
+
+    test('entries without lastWatchedAt contribute nothing', () {
+      final s = watchStreakHousehold(
+        [e(null, id: 1), e(null, id: 2)],
+        today: today,
+      );
+      expect(s.current, 0);
+      expect(s.best, 0);
+    });
+
+    test('only today → current 1, best 1', () {
+      final s = watchStreakHousehold([e(today, id: 1)], today: today);
+      expect(s.current, 1);
+      expect(s.best, 1);
+    });
+
+    test('only yesterday → current 1 (grace), best 1', () {
+      final s = watchStreakHousehold(
+        [e(today.subtract(const Duration(days: 1)), id: 1)],
+        today: today,
+      );
+      expect(s.current, 1);
+      expect(s.best, 1);
+    });
+
+    test('last watch two days ago → current 0, best 1', () {
+      final s = watchStreakHousehold(
+        [e(today.subtract(const Duration(days: 2)), id: 1)],
+        today: today,
+      );
+      expect(s.current, 0);
+      expect(s.best, 1);
+    });
+
+    test('three consecutive days ending today → current 3, best 3', () {
+      final s = watchStreakHousehold(
+        [
+          e(today, id: 1),
+          e(today.subtract(const Duration(days: 1)), id: 2),
+          e(today.subtract(const Duration(days: 2)), id: 3),
+        ],
+        today: today,
+      );
+      expect(s.current, 3);
+      expect(s.best, 3);
+    });
+
+    test('multiple watches on same day collapse into one streak day', () {
+      final s = watchStreakHousehold(
+        [
+          e(today, id: 1),
+          e(today.add(const Duration(hours: 5)), id: 2),
+          e(today.subtract(const Duration(days: 1)), id: 3),
+        ],
+        today: today,
+      );
+      expect(s.current, 2);
+      expect(s.best, 2);
+    });
+
+    test('gap breaks current streak but best survives', () {
+      final s = watchStreakHousehold(
+        [
+          e(today.subtract(const Duration(days: 1)), id: 1),
+          e(today.subtract(const Duration(days: 5)), id: 2),
+          e(today.subtract(const Duration(days: 6)), id: 3),
+          e(today.subtract(const Duration(days: 7)), id: 4),
+        ],
+        today: today,
+      );
+      expect(s.current, 1);
+      expect(s.best, 3);
+    });
+
+    test('computeHouseholdStats populates watchStreak from entries', () {
+      final stats = computeHouseholdStats(
+        entries: [
+          _entry(
+            id: 'movie:1',
+            title: 'A',
+            lastWatchedAt: DateTime.utc(2026, 4, 1),
+          ),
+        ],
+        ratings: const [],
+      );
+      // Old activity — current is 0 but best should reflect the single day.
+      expect(stats.watchStreak.best >= 1, true);
     });
   });
 

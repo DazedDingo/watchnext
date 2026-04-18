@@ -111,6 +111,8 @@ class HouseholdStats {
   /// Consecutive-day rating streak per member. Empty entries are omitted —
   /// call-sites should fall back to RatingStreak.empty.
   final Map<String, RatingStreak> ratingStreaks;
+  /// Household-level watch streak (UTC-day bucketed, 1-day grace).
+  final WatchStreak watchStreak;
   /// All achievement badges, earned + unearned. Empty when members list is
   /// unavailable at compute time. Order is stable: household-level first, then
   /// per-user in member-list order.
@@ -127,6 +129,7 @@ class HouseholdStats {
     this.perUserSolo = const {},
     this.perUserTogether = const {},
     this.ratingStreaks = const {},
+    this.watchStreak = WatchStreak.empty,
     this.badges = const [],
     this.compatibilityPct = -1,
   });
@@ -158,6 +161,19 @@ class RatingStreak {
   const RatingStreak({required this.current, required this.best});
 
   static const empty = RatingStreak(current: 0, best: 0);
+}
+
+/// Household-level watch streak — consecutive UTC days with at least one
+/// watch entry (movie or TV). Kept household-wide rather than per-user so
+/// shared-Trakt households (where `watchedBy` mirrors both users) don't
+/// double-count the same activity.
+class WatchStreak {
+  final int current;
+  final int best;
+
+  const WatchStreak({required this.current, required this.best});
+
+  static const empty = WatchStreak(current: 0, best: 0);
 }
 
 /// Single achievement badge descriptor. `earned = progress >= target`.
@@ -384,6 +400,59 @@ List<BadgeDef> computeBadges({
   return result;
 }
 
+/// Computes the household watch streak from entries' `lastWatchedAt`.
+/// Pure — exposed for unit tests. `today` is injectable so tests can freeze
+/// the clock; defaults to `DateTime.now()`. Entries without a timestamp are
+/// skipped (they can't be bucketed safely).
+WatchStreak watchStreakHousehold(
+  List<WatchEntry> entries, {
+  DateTime? today,
+}) {
+  final todayDay = _dayOnlyUtc(today ?? DateTime.now());
+  final yesterdayDay = todayDay.subtract(const Duration(days: 1));
+
+  final days = <DateTime>{};
+  for (final e in entries) {
+    final ts = e.lastWatchedAt;
+    if (ts == null) continue;
+    days.add(_dayOnlyUtc(ts));
+  }
+  if (days.isEmpty) return WatchStreak.empty;
+
+  final sortedDesc = days.toList()..sort((a, b) => b.compareTo(a));
+
+  int current = 0;
+  DateTime? cursor;
+  if (sortedDesc.first == todayDay) {
+    cursor = todayDay;
+  } else if (sortedDesc.first == yesterdayDay) {
+    cursor = yesterdayDay;
+  }
+  if (cursor != null) {
+    for (final d in sortedDesc) {
+      if (d == cursor) {
+        current++;
+        cursor = cursor!.subtract(const Duration(days: 1));
+      } else if (d.isBefore(cursor!)) {
+        break;
+      }
+    }
+  }
+
+  int best = 1;
+  int run = 1;
+  for (int i = 1; i < sortedDesc.length; i++) {
+    if (sortedDesc[i - 1].difference(sortedDesc[i]).inDays == 1) {
+      run++;
+      if (run > best) best = run;
+    } else {
+      run = 1;
+    }
+  }
+
+  return WatchStreak(current: current, best: best);
+}
+
 DateTime _dayOnlyUtc(DateTime dt) {
   final u = dt.toUtc();
   return DateTime.utc(u.year, u.month, u.day);
@@ -576,6 +645,7 @@ HouseholdStats computeHouseholdStats({
     perUserSolo: perUserSolo,
     perUserTogether: perUserTogether,
     ratingStreaks: ratingStreaks,
+    watchStreak: watchStreakHousehold(entries),
     badges: badges,
     compatibilityPct: compat,
   );
