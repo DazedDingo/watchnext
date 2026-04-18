@@ -280,6 +280,8 @@ class _RatingSection extends StatelessWidget {
                 child: _UserRatingBars(
                   name: isSelf ? 'You' : member.displayName,
                   stats: entry.value,
+                  solo: stats.perUserSolo[entry.key],
+                  together: stats.perUserTogether[entry.key],
                 ),
               );
             }),
@@ -293,12 +295,25 @@ class _RatingSection extends StatelessWidget {
 class _UserRatingBars extends StatelessWidget {
   final String name;
   final UserStats stats;
-  const _UserRatingBars({required this.name, required this.stats});
+  /// Solo-only subset of this user's ratings. Only rendered when non-null and
+  /// ratedCount > 0 — keeps the card clean for households on legacy data.
+  final UserStats? solo;
+  /// Together-only subset (same null/empty suppression).
+  final UserStats? together;
+  const _UserRatingBars({
+    required this.name,
+    required this.stats,
+    this.solo,
+    this.together,
+  });
 
   @override
   Widget build(BuildContext context) {
     final maxCount =
         stats.distribution.values.fold(0, (a, b) => a > b ? a : b);
+    final hasSoloData = (solo?.ratedCount ?? 0) > 0;
+    final hasTogetherData = (together?.ratedCount ?? 0) > 0;
+    final showSplit = hasSoloData || hasTogetherData;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -314,6 +329,27 @@ class _UserRatingBars extends StatelessWidget {
             ),
           ],
         ),
+        if (showSplit) ...[
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              if (hasSoloData) ...[
+                _ContextChip(
+                  label: 'Solo',
+                  avg: solo!.avgRating,
+                  count: solo!.ratedCount,
+                ),
+                const SizedBox(width: 8),
+              ],
+              if (hasTogetherData)
+                _ContextChip(
+                  label: 'Together',
+                  avg: together!.avgRating,
+                  count: together!.ratedCount,
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 8),
         for (int s = 5; s >= 1; s--)
           Padding(
@@ -368,6 +404,33 @@ class _UserRatingBars extends StatelessWidget {
       default:
         return Colors.redAccent;
     }
+  }
+}
+
+class _ContextChip extends StatelessWidget {
+  final String label;
+  final double avg;
+  final int count;
+  const _ContextChip({
+    required this.label,
+    required this.avg,
+    required this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12, width: 0.5),
+      ),
+      child: Text(
+        '$label · ${avg.toStringAsFixed(1)} · $count',
+        style: const TextStyle(fontSize: 11, color: Colors.white70),
+      ),
+    );
   }
 }
 
@@ -475,9 +538,8 @@ class _PredictLeaderboard extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: _MemberPredictCard(
+                      member: m,
                       name: isSelf ? 'You' : m.displayName,
-                      total: m.predictTotal,
-                      wins: m.predictWins,
                       isLeading: isLeading && members.length > 1,
                     ),
                   ),
@@ -500,20 +562,24 @@ class _PredictLeaderboard extends StatelessWidget {
 }
 
 class _MemberPredictCard extends StatelessWidget {
+  final HouseholdMember member;
   final String name;
-  final int total;
-  final int wins;
   final bool isLeading;
   const _MemberPredictCard({
+    required this.member,
     required this.name,
-    required this.total,
-    required this.wins,
     required this.isLeading,
   });
 
   @override
   Widget build(BuildContext context) {
+    final total = member.predictTotal;
+    final wins = member.predictWins;
     final pct = total == 0 ? 0 : (wins / total * 100).round();
+
+    final showSplit = member.predictTotalSolo > 0 ||
+        member.predictTotalTogether > 0;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -552,8 +618,53 @@ class _MemberPredictCard extends StatelessWidget {
             style: const TextStyle(fontSize: 11, color: Colors.white54),
             textAlign: TextAlign.center,
           ),
+          if (showSplit) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1, color: Colors.white12),
+            const SizedBox(height: 6),
+            _PredictSplitRow(
+              label: 'Solo',
+              total: member.predictTotalSolo,
+              wins: member.predictWinsSolo,
+            ),
+            const SizedBox(height: 2),
+            _PredictSplitRow(
+              label: 'Together',
+              total: member.predictTotalTogether,
+              wins: member.predictWinsTogether,
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _PredictSplitRow extends StatelessWidget {
+  final String label;
+  final int total;
+  final int wins;
+  const _PredictSplitRow({
+    required this.label,
+    required this.total,
+    required this.wins,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total == 0 ? null : (wins / total * 100).round();
+    return Row(
+      children: [
+        Expanded(
+          child: Text(label,
+              style:
+                  const TextStyle(fontSize: 11, color: Colors.white54)),
+        ),
+        Text(
+          pct == null ? '—' : '$pct% · $wins/$total',
+          style: const TextStyle(fontSize: 11, color: Colors.white70),
+        ),
+      ],
     );
   }
 }

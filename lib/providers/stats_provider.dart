@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/rating.dart';
+import '../models/watch_entry.dart';
 import 'auth_provider.dart';
 import 'household_provider.dart';
 import 'ratings_provider.dart';
@@ -93,7 +95,18 @@ class HouseholdStats {
   final int tvCount;
   final int totalMinutes; // best-effort from runtime fields
   final List<({String genre, int count})> topGenres; // sorted desc
-  final Map<String, UserStats> perUser; // uid → stats
+  /// Cross-context per-user stats (every movie/show rating the user made).
+  final Map<String, UserStats> perUser;
+  /// Per-user stats filtered to `context == 'solo'` ratings only.
+  /// Null-context ratings do NOT fold in — solo breakout only reflects
+  /// ratings explicitly tagged solo, so the surfaced number tracks the
+  /// user's actual solo activity post-rollout. Empty until the first
+  /// solo-tagged rating exists.
+  final Map<String, UserStats> perUserSolo;
+  /// Per-user stats filtered to `context == 'together'` ratings only.
+  /// Same rationale as perUserSolo — null-context ratings stay out of the
+  /// breakout so the count reflects actual together-mode activity.
+  final Map<String, UserStats> perUserTogether;
   final double compatibilityPct; // 0-1 from tasteProfile, or -1 if unknown
 
   const HouseholdStats({
@@ -103,6 +116,8 @@ class HouseholdStats {
     required this.totalMinutes,
     required this.topGenres,
     required this.perUser,
+    this.perUserSolo = const {},
+    this.perUserTogether = const {},
     this.compatibilityPct = -1,
   });
 }
@@ -140,14 +155,13 @@ final tasteProfileProvider =
 // Derived stats provider — pure computation, no Firestore
 // ---------------------------------------------------------------------------
 
-final statsProvider = Provider<HouseholdStats?>((ref) {
-  final entries = ref.watch(watchEntriesProvider).value;
-  final ratings = ref.watch(ratingsProvider).value;
-  final tasteProfile = ref.watch(tasteProfileProvider).value;
-
-  if (entries == null || ratings == null) return null;
-
-  // Totals
+/// Pure derivation — exposed for unit tests. Provider just wires Firestore
+/// data into this.
+HouseholdStats computeHouseholdStats({
+  required List<WatchEntry> entries,
+  required List<Rating> ratings,
+  Map<String, dynamic>? tasteProfile,
+}) {
   int movies = 0;
   int tv = 0;
   int totalMinutes = 0;
@@ -170,31 +184,39 @@ final statsProvider = Provider<HouseholdStats?>((ref) {
       .toList()
     ..sort((a, b) => b.count.compareTo(a.count));
 
-  // Per-user rating stats from show/movie-level ratings only
   final movieShowRatings = ratings
       .where((r) => r.level == 'movie' || r.level == 'show')
       .toList();
 
-  final uids = movieShowRatings.map((r) => r.uid).toSet();
-  final perUser = <String, UserStats>{};
-
-  for (final uid in uids) {
-    final userRatings =
-        movieShowRatings.where((r) => r.uid == uid).toList();
-    final dist = <int, int>{1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
-    int sum = 0;
-    for (final r in userRatings) {
-      dist[r.stars] = (dist[r.stars] ?? 0) + 1;
-      sum += r.stars;
+  Map<String, UserStats> buildPerUser(List<Rating> source) {
+    final uids = source.map((r) => r.uid).toSet();
+    final out = <String, UserStats>{};
+    for (final uid in uids) {
+      final userRatings = source.where((r) => r.uid == uid).toList();
+      if (userRatings.isEmpty) continue;
+      final dist = <int, int>{1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
+      int sum = 0;
+      for (final r in userRatings) {
+        dist[r.stars] = (dist[r.stars] ?? 0) + 1;
+        sum += r.stars;
+      }
+      out[uid] = UserStats(
+        avgRating: sum / userRatings.length,
+        ratedCount: userRatings.length,
+        distribution: dist,
+      );
     }
-    perUser[uid] = UserStats(
-      avgRating: userRatings.isEmpty ? 0 : sum / userRatings.length,
-      ratedCount: userRatings.length,
-      distribution: dist,
-    );
+    return out;
   }
 
-  // Compatibility from tasteProfile
+  final perUser = buildPerUser(movieShowRatings);
+  final perUserSolo = buildPerUser(
+    movieShowRatings.where((r) => r.context == 'solo').toList(),
+  );
+  final perUserTogether = buildPerUser(
+    movieShowRatings.where((r) => r.context == 'together').toList(),
+  );
+
   final combined = tasteProfile?['combined'] as Map<String, dynamic>?;
   final compatRaw =
       (combined?['compatibility'] as Map?)?['within_1_star_pct'] as num?;
@@ -207,7 +229,21 @@ final statsProvider = Provider<HouseholdStats?>((ref) {
     totalMinutes: totalMinutes,
     topGenres: topGenres.take(8).toList(),
     perUser: perUser,
+    perUserSolo: perUserSolo,
+    perUserTogether: perUserTogether,
     compatibilityPct: compat,
+  );
+}
+
+final statsProvider = Provider<HouseholdStats?>((ref) {
+  final entries = ref.watch(watchEntriesProvider).value;
+  final ratings = ref.watch(ratingsProvider).value;
+  final tasteProfile = ref.watch(tasteProfileProvider).value;
+  if (entries == null || ratings == null) return null;
+  return computeHouseholdStats(
+    entries: entries,
+    ratings: ratings,
+    tasteProfile: tasteProfile,
   );
 });
 

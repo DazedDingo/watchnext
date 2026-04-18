@@ -127,7 +127,8 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 
 **Shipped:**
 - **Stats dashboard** (`stats_screen.dart`) — total titles, movies/TV counts, runtime, compatibility %, per-user rating distributions, top genres.
-- **Predict leaderboard** — populated by `PredictionService.markRevealSeen` incrementing `predict_total` / `predict_wins` on member doc.
+- **Per-mode rating + predict breakdown** — Ratings card shows small Solo/Together avg+count chips per member (from `Rating.context`); Predict & Rate cards show Solo/Together % and wins-over-total sub-rows when that member has context-tagged predictions. Null-context ratings/predictions are kept out of the breakouts so the split numbers reflect post-rollout activity only.
+- **Predict leaderboard** — populated by `PredictionService.markRevealSeen` incrementing `predict_total` / `predict_wins` on member doc (plus the split-context counters used by the breakout).
 - **`whose_turn` counters** — updated in `DecideService.recordDecision` for tiebreak fairness.
 
 **Gaps vs spec:**
