@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/decision.dart';
 import '../models/rating.dart';
 import '../models/watch_entry.dart';
 import 'auth_provider.dart';
@@ -200,6 +201,7 @@ List<BadgeDef> computeBadges({
   required List<WatchEntry> entries,
   required List<HouseholdMember> members,
   List<Rating> ratings = const [],
+  List<Decision> decisions = const [],
   double compatibilityPct = -1,
 }) {
   final result = <BadgeDef>[];
@@ -271,6 +273,31 @@ List<BadgeDef> computeBadges({
     earned: maxPerDay >= 5,
   ));
 
+  final compromiseWins = decisions.where((d) => d.wasCompromise).length;
+  result.add(BadgeDef(
+    id: 'compromise_champ',
+    name: 'Compromise Champ',
+    description: 'Land 5 decisions via a compromise pick',
+    iconKey: 'handshake',
+    target: 5,
+    progress: compromiseWins.clamp(0, 5),
+    earned: compromiseWins >= 5,
+  ));
+
+  final finishedShows = entries
+      .where((e) =>
+          e.mediaType == 'tv' && e.inProgressStatus == 'completed')
+      .length;
+  result.add(BadgeDef(
+    id: 'show_finisher',
+    name: 'Show Finisher',
+    description: 'Finish 5 TV shows',
+    iconKey: 'flag',
+    target: 5,
+    progress: finishedShows.clamp(0, 5),
+    earned: finishedShows >= 5,
+  ));
+
   // Perfect Sync — 90% of overlapping ratings agree within 1 star. Value
   // comes from the taste profile CF; -1 means "no profile yet" → zero.
   final compatInt = compatibilityPct < 0 ? 0 : (compatibilityPct * 100).round();
@@ -336,6 +363,20 @@ List<BadgeDef> computeBadges({
       target: 10,
       progress: critic.clamp(0, 10),
       earned: critic >= 10,
+      memberUid: m.uid,
+    ));
+
+    final tagged = movieShow
+        .where((r) => r.uid == m.uid && r.tags.isNotEmpty)
+        .length;
+    result.add(BadgeDef(
+      id: 'tagger_${m.uid}',
+      name: 'Tagger',
+      description: 'Tag 10 ratings',
+      iconKey: 'label',
+      target: 10,
+      progress: tagged.clamp(0, 10),
+      earned: tagged >= 10,
       memberUid: m.uid,
     ));
   }
@@ -408,6 +449,21 @@ RatingStreak ratingStreakForUser(
 // Taste profile provider (reads /tasteProfile doc)
 // ---------------------------------------------------------------------------
 
+final decisionsProvider = StreamProvider<List<Decision>>((ref) async* {
+  final householdId = ref.watch(householdIdProvider).value;
+  if (householdId == null) {
+    yield const [];
+    return;
+  }
+  yield* FirebaseFirestore.instance
+      .collection('households/$householdId/decisionHistory')
+      .snapshots()
+      .map((s) => s.docs
+          .map((d) => Decision.fromDoc(
+              d as DocumentSnapshot<Map<String, dynamic>>))
+          .toList());
+});
+
 final tasteProfileProvider =
     StreamProvider<Map<String, dynamic>?>((ref) async* {
   final householdId = ref.watch(householdIdProvider).value;
@@ -431,6 +487,7 @@ HouseholdStats computeHouseholdStats({
   required List<WatchEntry> entries,
   required List<Rating> ratings,
   List<HouseholdMember> members = const [],
+  List<Decision> decisions = const [],
   Map<String, dynamic>? tasteProfile,
 }) {
   int movies = 0;
@@ -505,6 +562,7 @@ HouseholdStats computeHouseholdStats({
     entries: entries,
     members: members,
     ratings: ratings,
+    decisions: decisions,
     compatibilityPct: compat,
   );
 
@@ -527,12 +585,14 @@ final statsProvider = Provider<HouseholdStats?>((ref) {
   final entries = ref.watch(watchEntriesProvider).value;
   final ratings = ref.watch(ratingsProvider).value;
   final members = ref.watch(membersProvider).value ?? const <HouseholdMember>[];
+  final decisions = ref.watch(decisionsProvider).value ?? const <Decision>[];
   final tasteProfile = ref.watch(tasteProfileProvider).value;
   if (entries == null || ratings == null) return null;
   return computeHouseholdStats(
     entries: entries,
     ratings: ratings,
     members: members,
+    decisions: decisions,
     tasteProfile: tasteProfile,
   );
 });

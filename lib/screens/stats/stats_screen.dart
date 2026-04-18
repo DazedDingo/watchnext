@@ -647,6 +647,12 @@ class _BadgeRow extends StatelessWidget {
         return Icons.star_rate_outlined;
       case 'rate_review':
         return Icons.rate_review_outlined;
+      case 'handshake':
+        return Icons.handshake_outlined;
+      case 'flag':
+        return Icons.flag_outlined;
+      case 'label':
+        return Icons.label_outline;
       default:
         return Icons.workspace_premium_outlined;
     }

@@ -52,6 +52,9 @@ export type EntryDoc = {
   /// bucket entries by UTC day. Null/undefined entries are skipped rather than
   /// defaulting to "today" — we don't want a backfill to fake a marathon.
   last_watched_at_ms?: number | null;
+  /// Populated only for TV entries that have been explicitly marked finished
+  /// (`'watching' | 'completed' | 'dropped' | null`). Drives Show Finisher.
+  in_progress_status?: string | null;
 };
 
 export type RatingDoc = {
@@ -60,6 +63,10 @@ export type RatingDoc = {
   stars: number;
   note?: string | null;
   tags?: string[];
+};
+
+export type DecisionDoc = {
+  was_compromise: boolean;
 };
 
 /**
@@ -75,10 +82,12 @@ export function evaluateBadges(params: {
   entries: EntryDoc[];
   members: MemberDoc[];
   ratings?: RatingDoc[];
+  decisions?: DecisionDoc[];
   compatibilityPct?: number;
 }): BadgeState[] {
   const { entries, members } = params;
   const ratings = params.ratings ?? [];
+  const decisions = params.decisions ?? [];
   const compatibilityPct = params.compatibilityPct ?? -1;
   const result: BadgeState[] = [];
 
@@ -147,6 +156,28 @@ export function evaluateBadges(params: {
     member_uid: null,
   });
 
+  const compromiseWins = decisions.filter((d) => d.was_compromise).length;
+  result.push({
+    id: "compromise_champ",
+    name: "Compromise Champ",
+    progress: Math.min(compromiseWins, 5),
+    target: 5,
+    earned: compromiseWins >= 5,
+    member_uid: null,
+  });
+
+  const finishedShows = entries.filter(
+    (e) => e.media_type === "tv" && e.in_progress_status === "completed",
+  ).length;
+  result.push({
+    id: "show_finisher",
+    name: "Show Finisher",
+    progress: Math.min(finishedShows, 5),
+    target: 5,
+    earned: finishedShows >= 5,
+    member_uid: null,
+  });
+
   // Perfect Sync — same integer rounding as the client so the progress bar
   // renders identically once the CF persists state.
   const compatInt =
@@ -212,6 +243,19 @@ export function evaluateBadges(params: {
       earned: withNotes >= 10,
       member_uid: m.uid,
     });
+
+    const tagged = movieShowRatings.filter(
+      (r) =>
+        r.uid === m.uid && Array.isArray(r.tags) && r.tags.length > 0,
+    ).length;
+    result.push({
+      id: `tagger_${m.uid}`,
+      name: "Tagger",
+      progress: Math.min(tagged, 10),
+      target: 10,
+      earned: tagged >= 10,
+      member_uid: m.uid,
+    });
   }
 
   return result;
@@ -251,14 +295,21 @@ export async function evaluateAndPersistBadges(
   db: admin.firestore.Firestore,
   householdId: string,
 ): Promise<{ written: number; newlyEarned: string[] }> {
-  const [entriesSnap, membersSnap, ratingsSnap, existingSnap, tasteSnap] =
-    await Promise.all([
-      db.collection(`households/${householdId}/watchEntries`).get(),
-      db.collection(`households/${householdId}/members`).get(),
-      db.collection(`households/${householdId}/ratings`).get(),
-      db.collection(`households/${householdId}/badges`).get(),
-      db.doc(`households/${householdId}/tasteProfile/default`).get(),
-    ]);
+  const [
+    entriesSnap,
+    membersSnap,
+    ratingsSnap,
+    decisionsSnap,
+    existingSnap,
+    tasteSnap,
+  ] = await Promise.all([
+    db.collection(`households/${householdId}/watchEntries`).get(),
+    db.collection(`households/${householdId}/members`).get(),
+    db.collection(`households/${householdId}/ratings`).get(),
+    db.collection(`households/${householdId}/decisionHistory`).get(),
+    db.collection(`households/${householdId}/badges`).get(),
+    db.doc(`households/${householdId}/tasteProfile/default`).get(),
+  ]);
 
   const entries: EntryDoc[] = entriesSnap.docs.map((d) => {
     const data = d.data();
@@ -271,6 +322,10 @@ export async function evaluateAndPersistBadges(
         : undefined,
       genres: Array.isArray(data.genres) ? (data.genres as string[]) : [],
       last_watched_at_ms: millis,
+      in_progress_status:
+        typeof data.in_progress_status === "string"
+          ? data.in_progress_status
+          : null,
     };
   });
 
@@ -289,6 +344,10 @@ export async function evaluateAndPersistBadges(
       tags: Array.isArray(data.tags) ? (data.tags as string[]) : [],
     };
   });
+
+  const decisions: DecisionDoc[] = decisionsSnap.docs.map((d) => ({
+    was_compromise: d.data().was_compromise === true,
+  }));
 
   const existing = new Map<string, { earned: boolean; progress: number }>();
   for (const d of existingSnap.docs) {
@@ -313,6 +372,7 @@ export async function evaluateAndPersistBadges(
     entries,
     members,
     ratings,
+    decisions,
     compatibilityPct,
   });
   const { writes, newlyEarned } = diffBadgeUnlocks({ computed, existing });
@@ -510,6 +570,31 @@ export const onRatingWrittenBadges = onDocumentWritten(
       }
     } catch (err) {
       logger.error("badge eval failed (rating)", { householdId, err });
+    }
+  },
+);
+
+/**
+ * Firestore trigger — re-evaluate badges when a decision lands in
+ * decisionHistory. Drives Compromise Champ (count of `was_compromise=true`).
+ */
+export const onDecisionWrittenBadges = onDocumentWritten(
+  {
+    document: "households/{householdId}/decisionHistory/{decisionId}",
+    region: "europe-west2",
+  },
+  async (event) => {
+    const householdId = event.params.householdId;
+    try {
+      const result = await evaluateAndPersistBadges(
+        admin.firestore(),
+        householdId,
+      );
+      if (result.written > 0 || result.newlyEarned.length > 0) {
+        logger.info("badges evaluated (decision)", { householdId, ...result });
+      }
+    } catch (err) {
+      logger.error("badge eval failed (decision)", { householdId, err });
     }
   },
 );

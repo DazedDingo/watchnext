@@ -2,6 +2,7 @@ import {
   evaluateBadges,
   diffBadgeUnlocks,
   BadgeState,
+  DecisionDoc,
   EntryDoc,
   MemberDoc,
   RatingDoc,
@@ -18,6 +19,9 @@ const member = (overrides: Partial<MemberDoc> & { uid: string }): MemberDoc =>
 
 const rating = (overrides: Partial<RatingDoc> & { uid: string }): RatingDoc =>
   ({ level: "movie", stars: 4, ...overrides });
+
+const decision = (overrides: Partial<DecisionDoc> = {}): DecisionDoc =>
+  ({ was_compromise: false, ...overrides });
 
 const findBadge = (badges: BadgeState[], id: string): BadgeState => {
   const b = badges.find((x) => x.id === id);
@@ -125,15 +129,17 @@ describe("evaluateBadges", () => {
     });
   });
 
-  test("empty inputs → six household badges, zero per-user", () => {
+  test("empty inputs → eight household badges, zero per-user", () => {
     const badges = evaluateBadges({ entries: [], members: [] });
-    expect(badges).toHaveLength(6);
+    expect(badges).toHaveLength(8);
     expect(badges.map((b) => b.id)).toEqual([
       "first_watch",
       "century_club",
       "genre_explorer",
       "binge_master",
       "marathon_mode",
+      "compromise_champ",
+      "show_finisher",
       "perfect_sync",
     ]);
   });
@@ -299,6 +305,82 @@ describe("evaluateBadges", () => {
         rating({ uid: "u1", stars: 4, note: `note ${i}` }));
       const badges = evaluateBadges({ entries: [], members: [m], ratings });
       expect(findBadge(badges, "critic_u1").earned).toBe(true);
+    });
+  });
+
+  describe("Compromise Champ", () => {
+    test("counts only wasCompromise=true decisions", () => {
+      const decisions = [
+        ...Array.from({ length: 3 }, () =>
+          decision({ was_compromise: true })),
+        decision({ was_compromise: false }),
+      ];
+      const badges = evaluateBadges({
+        entries: [],
+        members: [],
+        decisions,
+      });
+      const b = findBadge(badges, "compromise_champ");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(3);
+    });
+
+    test("earned at 5 compromise wins, progress caps", () => {
+      const decisions = Array.from({ length: 7 }, () =>
+        decision({ was_compromise: true }));
+      const badges = evaluateBadges({
+        entries: [],
+        members: [],
+        decisions,
+      });
+      const b = findBadge(badges, "compromise_champ");
+      expect(b.earned).toBe(true);
+      expect(b.progress).toBe(5);
+    });
+  });
+
+  describe("Show Finisher", () => {
+    test("only TV entries with completed status count", () => {
+      const entries = [
+        ...Array.from({ length: 3 }, () =>
+          entry({ media_type: "tv", in_progress_status: "completed" })),
+        entry({ media_type: "tv", in_progress_status: "dropped" }),
+        entry({ media_type: "movie", in_progress_status: "completed" }),
+      ];
+      const badges = evaluateBadges({ entries, members: [] });
+      const b = findBadge(badges, "show_finisher");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(3);
+    });
+
+    test("earned at 5 finished shows", () => {
+      const entries = Array.from({ length: 6 }, () =>
+        entry({ media_type: "tv", in_progress_status: "completed" }));
+      const badges = evaluateBadges({ entries, members: [] });
+      expect(findBadge(badges, "show_finisher").earned).toBe(true);
+    });
+  });
+
+  describe("Tagger", () => {
+    test("counts only ratings with at least one tag", () => {
+      const m = member({ uid: "u1" });
+      const ratings = [
+        ...Array.from({ length: 5 }, () =>
+          rating({ uid: "u1", stars: 4, tags: ["funny"] })),
+        rating({ uid: "u1", stars: 4 }),
+      ];
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      const b = findBadge(badges, "tagger_u1");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(5);
+    });
+
+    test("earned at 10 tagged ratings", () => {
+      const m = member({ uid: "u1" });
+      const ratings = Array.from({ length: 10 }, () =>
+        rating({ uid: "u1", stars: 4, tags: ["slow", "beautiful"] }));
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      expect(findBadge(badges, "tagger_u1").earned).toBe(true);
     });
   });
 });

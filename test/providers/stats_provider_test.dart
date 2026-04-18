@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watchnext/models/decision.dart';
 import 'package:watchnext/models/rating.dart';
 import 'package:watchnext/models/watch_entry.dart';
 import 'package:watchnext/providers/stats_provider.dart';
@@ -10,6 +11,7 @@ WatchEntry _entry({
   int? runtime,
   List<String> genres = const [],
   DateTime? lastWatchedAt,
+  String? inProgressStatus,
 }) {
   final parts = id.split(':');
   return WatchEntry(
@@ -20,6 +22,24 @@ WatchEntry _entry({
     runtime: runtime,
     genres: genres,
     lastWatchedAt: lastWatchedAt,
+    inProgressStatus: inProgressStatus,
+  );
+}
+
+Decision _decision({
+  String id = 'd1',
+  bool wasCompromise = false,
+}) {
+  return Decision(
+    id: id,
+    winnerMediaType: 'movie',
+    winnerTmdbId: 1,
+    winnerTitle: 'T',
+    picks: const {},
+    vetoes: const [],
+    wasCompromise: wasCompromise,
+    wasTiebreak: false,
+    decidedAt: DateTime.utc(2026, 1, 1),
   );
 }
 
@@ -434,9 +454,9 @@ void main() {
         members: [HouseholdMember(uid: 'u1', displayName: 'Alice')],
       );
       expect(stats.badges, isNotEmpty);
-      // Six household badges + three per-user badges (prediction, five-star,
-      // critic).
-      expect(stats.badges.length, 9);
+      // Eight household badges + four per-user badges (prediction, five-star,
+      // critic, tagger).
+      expect(stats.badges.length, 12);
     });
 
     test('First Watch — not earned at zero entries, earned at first', () {
@@ -688,6 +708,123 @@ void main() {
         ratings: ratings,
       );
       expect(find(badges, 'critic_u1').earned, true);
+    });
+
+    test('Compromise Champ — counts only decisions with wasCompromise=true',
+        () {
+      final decisions = [
+        for (var i = 0; i < 3; i++)
+          _decision(id: 'd$i', wasCompromise: true),
+        _decision(id: 'd100', wasCompromise: false),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: const [],
+        decisions: decisions,
+      );
+      final b = find(badges, 'compromise_champ');
+      expect(b.earned, false);
+      expect(b.progress, 3);
+    });
+
+    test('Compromise Champ — earned at 5 compromise wins', () {
+      final decisions = [
+        for (var i = 0; i < 7; i++)
+          _decision(id: 'd$i', wasCompromise: true),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: const [],
+        decisions: decisions,
+      );
+      final b = find(badges, 'compromise_champ');
+      expect(b.earned, true);
+      expect(b.progress, 5);
+    });
+
+    test('Show Finisher — counts TV entries with inProgressStatus=completed',
+        () {
+      final entries = [
+        for (var i = 0; i < 3; i++)
+          _entry(
+            id: 'tv:$i',
+            title: 'Show $i',
+            mediaType: 'tv',
+            inProgressStatus: 'completed',
+          ),
+        _entry(
+          id: 'tv:50',
+          title: 'Dropped',
+          mediaType: 'tv',
+          inProgressStatus: 'dropped',
+        ),
+        // Completed movies don't count — movies aren't binge-able.
+        _entry(
+          id: 'movie:99',
+          title: 'M',
+          mediaType: 'movie',
+          inProgressStatus: 'completed',
+        ),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      final b = find(badges, 'show_finisher');
+      expect(b.earned, false);
+      expect(b.progress, 3);
+    });
+
+    test('Show Finisher — earned at 5 finished TV shows', () {
+      final entries = [
+        for (var i = 0; i < 6; i++)
+          _entry(
+            id: 'tv:$i',
+            title: 'Show $i',
+            mediaType: 'tv',
+            inProgressStatus: 'completed',
+          ),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      expect(find(badges, 'show_finisher').earned, true);
+    });
+
+    test('Tagger — counts only ratings with at least one tag', () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 5; i++)
+          _rating(
+            uid: 'u1',
+            targetId: 'movie:$i',
+            stars: 4,
+            tags: const ['funny'],
+          ),
+        _rating(uid: 'u1', targetId: 'movie:50', stars: 4),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      final b = find(badges, 'tagger_u1');
+      expect(b.earned, false);
+      expect(b.progress, 5);
+    });
+
+    test('Tagger — earned at 10 tagged ratings', () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 10; i++)
+          _rating(
+            uid: 'u1',
+            targetId: 'movie:$i',
+            stars: 4,
+            tags: const ['slow', 'beautiful'],
+          ),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      expect(find(badges, 'tagger_u1').earned, true);
     });
   });
 
