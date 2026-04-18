@@ -361,6 +361,42 @@ void main() {
     });
   });
 
+  group('TraktService.setHistoryScope', () {
+    test('writes trakt_history_scope to the member doc via merge', () async {
+      final db = FakeFirebaseFirestore();
+      // Pre-populate with an unrelated field to prove merge doesn't clobber it.
+      await db.doc('households/hh/members/u1').set({
+        'trakt_access_token': 'keepme',
+      });
+      final trakt = TraktService(
+        client: MockClient((_) async => http.Response('{}', 200)),
+        db: db,
+      );
+      await trakt.setHistoryScope(
+        householdId: 'hh',
+        uid: 'u1',
+        scope: 'shared',
+      );
+      final data = (await db.doc('households/hh/members/u1').get()).data()!;
+      expect(data['trakt_history_scope'], 'shared');
+      expect(data['trakt_access_token'], 'keepme');
+    });
+
+    test('overwrites an existing scope value on subsequent writes', () async {
+      final db = FakeFirebaseFirestore();
+      final trakt = TraktService(
+        client: MockClient((_) async => http.Response('{}', 200)),
+        db: db,
+      );
+      await trakt.setHistoryScope(
+          householdId: 'hh', uid: 'u1', scope: 'personal');
+      await trakt.setHistoryScope(
+          householdId: 'hh', uid: 'u1', scope: 'mixed');
+      final data = (await db.doc('households/hh/members/u1').get()).data()!;
+      expect(data['trakt_history_scope'], 'mixed');
+    });
+  });
+
   group('TraktService.isConfigured', () {
     test('reflects whether TRAKT_CLIENT_ID was passed at build', () {
       // Under `flutter test` without --dart-define, this is the empty string

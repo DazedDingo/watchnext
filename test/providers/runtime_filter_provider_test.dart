@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watchnext/providers/mode_provider.dart';
 import 'package:watchnext/providers/runtime_filter_provider.dart';
 
 void main() {
@@ -49,6 +51,56 @@ void main() {
     test('labels are unique (no duplicate pills on the home screen)', () {
       final labels = RuntimeBucket.values.map((b) => b.label).toList();
       expect(labels.toSet().length, labels.length);
+    });
+  });
+
+  group('ModeRuntimeController', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues(const {});
+    });
+
+    test('setting solo does not affect together and vice versa', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeRuntimeController(prefs, ModeRuntimeController.readAll(prefs));
+      await c.set(ViewMode.solo, RuntimeBucket.short);
+      expect(c.state[ViewMode.solo], RuntimeBucket.short);
+      expect(c.state[ViewMode.together], isNull);
+
+      await c.set(ViewMode.together, RuntimeBucket.long_);
+      expect(c.state[ViewMode.solo], RuntimeBucket.short);
+      expect(c.state[ViewMode.together], RuntimeBucket.long_);
+    });
+
+    test('persists to SharedPreferences under two keys', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeRuntimeController(prefs, ModeRuntimeController.readAll(prefs));
+      await c.set(ViewMode.solo, RuntimeBucket.short);
+      await c.set(ViewMode.together, RuntimeBucket.medium);
+
+      expect(prefs.getString('wn_runtime_solo'), 'short');
+      expect(prefs.getString('wn_runtime_together'), 'medium');
+    });
+
+    test('set(null) removes the key', () async {
+      SharedPreferences.setMockInitialValues(const {
+        'wn_runtime_solo': 'short',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeRuntimeController(prefs, ModeRuntimeController.readAll(prefs));
+      expect(c.state[ViewMode.solo], RuntimeBucket.short);
+
+      await c.set(ViewMode.solo, null);
+      expect(c.state[ViewMode.solo], isNull);
+      expect(prefs.containsKey('wn_runtime_solo'), isFalse);
+    });
+
+    test('unknown stored value decodes to null (forward-compat)', () async {
+      SharedPreferences.setMockInitialValues(const {
+        'wn_runtime_solo': 'epic',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final map = ModeRuntimeController.readAll(prefs);
+      expect(map[ViewMode.solo], isNull);
     });
   });
 }

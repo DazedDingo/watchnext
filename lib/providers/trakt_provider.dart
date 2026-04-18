@@ -36,6 +36,8 @@ final traktLinkStatusProvider = StreamProvider<TraktLinkStatus>((ref) async* {
       linked: token != null && token.isNotEmpty,
       traktUserId: data['trakt_user_id'] as String?,
       lastSync: (data['last_trakt_sync'] as Timestamp?)?.toDate(),
+      historyScope: TraktHistoryScope.decode(
+          data['trakt_history_scope'] as String?),
     );
   });
 });
@@ -44,5 +46,57 @@ class TraktLinkStatus {
   final bool linked;
   final String? traktUserId;
   final DateTime? lastSync;
-  const TraktLinkStatus({required this.linked, this.traktUserId, this.lastSync});
+  final TraktHistoryScope historyScope;
+  const TraktLinkStatus({
+    required this.linked,
+    this.traktUserId,
+    this.lastSync,
+    this.historyScope = TraktHistoryScope.mixed,
+  });
+}
+
+/// Tells the sync service how to stamp `context` on imported Trakt ratings.
+/// Users set this at link time (or later) because Trakt has no per-row
+/// "was this solo or together?" flag — we ask once and apply it to the whole
+/// history. Default is [mixed] (import without stamping) so we never silently
+/// mis-attribute — the scorer can treat null-context ratings as pure history.
+enum TraktHistoryScope {
+  /// All Trakt activity was with the partner → stamp context='together'.
+  shared,
+
+  /// All Trakt activity was solo → stamp context='solo'.
+  personal,
+
+  /// Can't say; leave context null on imports.
+  mixed;
+
+  String get label {
+    switch (this) {
+      case TraktHistoryScope.shared:
+        return 'With partner';
+      case TraktHistoryScope.personal:
+        return 'Solo';
+      case TraktHistoryScope.mixed:
+        return 'Mixed';
+    }
+  }
+
+  /// Context string to write onto imported ratings, or null when unknown.
+  String? get ratingContext {
+    switch (this) {
+      case TraktHistoryScope.shared:
+        return 'together';
+      case TraktHistoryScope.personal:
+        return 'solo';
+      case TraktHistoryScope.mixed:
+        return null;
+    }
+  }
+
+  static TraktHistoryScope decode(String? raw) {
+    for (final v in TraktHistoryScope.values) {
+      if (v.name == raw) return v;
+    }
+    return TraktHistoryScope.mixed;
+  }
 }

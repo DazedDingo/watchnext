@@ -1,4 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'mode_provider.dart';
 
 /// Length-of-the-thing filter, sitting alongside the mood pills on Home.
 ///
@@ -42,5 +45,72 @@ extension RuntimeBucketExt on RuntimeBucket {
   }
 }
 
-/// Currently selected runtime bucket on Home. null = no runtime filter.
-final runtimeFilterProvider = StateProvider<RuntimeBucket?>((ref) => null);
+/// Per-mode runtime-bucket selection, persisted to SharedPreferences under
+/// `wn_runtime_solo` / `wn_runtime_together`. Mirrors [moodProvider]'s
+/// mode-keyed shape: reads yield the current mode's slot, writes go only
+/// to that slot.
+class ModeRuntimeController extends StateNotifier<Map<ViewMode, RuntimeBucket?>> {
+  ModeRuntimeController(this._prefs, Map<ViewMode, RuntimeBucket?> initial)
+      : super(initial);
+  final SharedPreferences _prefs;
+
+  static String _keyFor(ViewMode mode) =>
+      mode == ViewMode.solo ? 'wn_runtime_solo' : 'wn_runtime_together';
+
+  static RuntimeBucket? _decode(String? raw) {
+    if (raw == null) return null;
+    for (final b in RuntimeBucket.values) {
+      if (b.name == raw) return b;
+    }
+    return null;
+  }
+
+  static Map<ViewMode, RuntimeBucket?> readAll(SharedPreferences prefs) => {
+        ViewMode.solo: _decode(prefs.getString(_keyFor(ViewMode.solo))),
+        ViewMode.together: _decode(prefs.getString(_keyFor(ViewMode.together))),
+      };
+
+  Future<void> set(ViewMode mode, RuntimeBucket? bucket) async {
+    state = {...state, mode: bucket};
+    final key = _keyFor(mode);
+    if (bucket == null) {
+      await _prefs.remove(key);
+    } else {
+      await _prefs.setString(key, bucket.name);
+    }
+  }
+}
+
+final _runtimePrefsProvider =
+    FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
+
+final modeRuntimeProvider = StateNotifierProvider<ModeRuntimeController,
+    Map<ViewMode, RuntimeBucket?>>((ref) {
+  final prefs = ref.watch(_runtimePrefsProvider).value;
+  if (prefs == null) {
+    return ModeRuntimeController(
+      _UnsetPrefs(),
+      const {ViewMode.solo: null, ViewMode.together: null},
+    );
+  }
+  return ModeRuntimeController(prefs, ModeRuntimeController.readAll(prefs));
+});
+
+/// Runtime bucket for the active view mode. null = no filter.
+final runtimeFilterProvider = Provider<RuntimeBucket?>((ref) {
+  final mode = ref.watch(viewModeProvider);
+  final map = ref.watch(modeRuntimeProvider);
+  return map[mode];
+});
+
+/// Sentinel used while SharedPreferences loads on first build.
+class _UnsetPrefs implements SharedPreferences {
+  @override
+  Future<bool> setString(String key, String value) async => true;
+  @override
+  Future<bool> remove(String key) async => true;
+  @override
+  String? getString(String key) => null;
+  @override
+  dynamic noSuchMethod(Invocation i) => null;
+}

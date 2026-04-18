@@ -104,6 +104,19 @@ class TraktService implements RatingPusher {
     }, SetOptions(merge: true));
   }
 
+  /// Sets the user's Trakt history-scope flag, which the sync service reads
+  /// to decide how to stamp `context` on imported ratings. Valid values:
+  /// `shared` (with partner), `personal` (solo), `mixed` (don't stamp).
+  Future<void> setHistoryScope({
+    required String householdId,
+    required String uid,
+    required String scope,
+  }) async {
+    await _db.doc('households/$householdId/members/$uid').set({
+      'trakt_history_scope': scope,
+    }, SetOptions(merge: true));
+  }
+
   /// Unlink: revoke via Cloud Function, then clear our copy.
   Future<void> unlink({required String householdId, required String uid}) async {
     final memberRef = _db.doc('households/$householdId/members/$uid');

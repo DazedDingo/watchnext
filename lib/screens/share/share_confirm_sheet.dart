@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
+import '../../providers/mode_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/share_parser.dart';
 import '../../services/tmdb_service.dart';
@@ -32,9 +33,13 @@ class _Sheet extends ConsumerStatefulWidget {
 
 class _SheetState extends ConsumerState<_Sheet> {
   bool _saving = false;
+  // Null until the first build reads viewModeProvider; user can override
+  // before saving. Stays non-null once set.
+  ViewMode? _scope;
 
   @override
   Widget build(BuildContext context) {
+    final ViewMode scope = _scope ?? ref.watch(viewModeProvider);
     return FutureBuilder<ShareMatch?>(
       future: widget.future,
       builder: (context, snap) {
@@ -65,17 +70,24 @@ class _SheetState extends ConsumerState<_Sheet> {
             ),
           );
         }
-        return _ResolvedBody(match: snap.data!, saving: _saving, onSave: _save);
+        return _ResolvedBody(
+          match: snap.data!,
+          saving: _saving,
+          scope: scope,
+          onScopeChanged: (s) => setState(() => _scope = s),
+          onSave: (m) => _save(m, scope),
+        );
       },
     );
   }
 
-  Future<void> _save(ShareMatch m) async {
+  Future<void> _save(ShareMatch m, ViewMode scope) async {
     setState(() => _saving = true);
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       final householdId = await ref.read(householdIdProvider.future);
       if (uid == null || householdId == null) throw StateError('Not signed in or no household');
+      final scopeStr = scope == ViewMode.solo ? 'solo' : 'shared';
       await ref.read(watchlistServiceProvider).add(
             householdId: householdId,
             uid: uid,
@@ -86,11 +98,14 @@ class _SheetState extends ConsumerState<_Sheet> {
             posterPath: m.posterPath,
             overview: m.overview,
             addedSource: 'share_sheet',
+            scope: scopeStr,
           );
       if (!mounted) return;
       context.pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added "${m.title}" to watchlist')),
+        SnackBar(content: Text(scope == ViewMode.solo
+            ? 'Added "${m.title}" to your Solo list'
+            : 'Added "${m.title}" to shared watchlist')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -101,9 +116,17 @@ class _SheetState extends ConsumerState<_Sheet> {
 }
 
 class _ResolvedBody extends StatelessWidget {
-  const _ResolvedBody({required this.match, required this.saving, required this.onSave});
+  const _ResolvedBody({
+    required this.match,
+    required this.saving,
+    required this.scope,
+    required this.onScopeChanged,
+    required this.onSave,
+  });
   final ShareMatch match;
   final bool saving;
+  final ViewMode scope;
+  final ValueChanged<ViewMode> onScopeChanged;
   final Future<void> Function(ShareMatch) onSave;
 
   @override
@@ -141,9 +164,30 @@ class _ResolvedBody extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 16),
+          Center(
+            child: SegmentedButton<ViewMode>(
+              segments: const [
+                ButtonSegment(
+                  value: ViewMode.together,
+                  label: Text('Shared'),
+                  icon: Icon(Icons.people_outline),
+                ),
+                ButtonSegment(
+                  value: ViewMode.solo,
+                  label: Text('Solo'),
+                  icon: Icon(Icons.person_outline),
+                ),
+              ],
+              selected: {scope},
+              onSelectionChanged: (s) => onScopeChanged(s.first),
+            ),
+          ),
+          const SizedBox(height: 12),
           FilledButton.icon(
             icon: const Icon(Icons.bookmark_add_outlined),
-            label: Text(saving ? 'Adding…' : 'Add to Watchlist'),
+            label: Text(saving
+                ? 'Adding…'
+                : scope == ViewMode.solo ? 'Add to Solo list' : 'Add to shared watchlist'),
             onPressed: saving ? null : () => onSave(match),
           ),
         ],

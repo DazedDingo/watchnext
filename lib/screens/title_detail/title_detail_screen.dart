@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/rating.dart';
 import '../../models/watch_entry.dart';
+import '../../models/watchlist_item.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
@@ -61,7 +62,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 
   bool _watchlistBusy = false;
 
-  Future<void> _addToWatchlist(Map<String, dynamic> d) async {
+  Future<void> _addToWatchlist(Map<String, dynamic> d, {required String scope}) async {
     if (_watchlistBusy) return;
     setState(() => _watchlistBusy = true);
     try {
@@ -79,9 +80,13 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
             genres: ((d['genres'] as List?) ?? const []).map((g) => (g as Map)['name'] as String).toList(),
             runtime: _parseRuntime(d),
             overview: d['overview'] as String?,
+            scope: scope,
           );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Added to watchlist')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(scope == 'solo'
+                ? 'Added to your Solo watchlist'
+                : 'Added to shared watchlist')));
       }
     } catch (e) {
       if (mounted) {
@@ -92,7 +97,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     }
   }
 
-  Future<void> _removeFromWatchlist() async {
+  Future<void> _removeFromWatchlist(WatchlistItem entry) async {
     if (_watchlistBusy) return;
     setState(() => _watchlistBusy = true);
     try {
@@ -100,7 +105,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
       if (!mounted || householdId == null) return;
       await ref.read(watchlistServiceProvider).remove(
             householdId: householdId,
-            id: '${widget.mediaType == 'movie' ? 'movie' : 'tv'}:${widget.tmdbId}',
+            id: entry.id,
           );
     } catch (e) {
       if (mounted) {
@@ -244,9 +249,28 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     final ratingsByTarget = ref.watch(ratingsByTargetProvider);
     final ratings = ratingsByTarget[_entryId] ?? const <Rating>[];
     final watchlist = watchlistAsync.value ?? const [];
-    final onWatchlist = watchlist.any((w) => w.id == '${widget.mediaType == 'movie' ? 'movie' : 'tv'}:${widget.tmdbId}');
     final mode = ref.watch(viewModeProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
+    final mt = widget.mediaType == 'movie' ? 'movie' : 'tv';
+    // Shared copy is visible to both; my solo copy is visible only to me, in Solo mode.
+    final sharedEntry = watchlist.cast<WatchlistItem?>().firstWhere(
+          (w) => w!.scope == 'shared' && w.mediaType == mt && w.tmdbId == widget.tmdbId,
+          orElse: () => null,
+        );
+    final mySoloEntry = uid == null
+        ? null
+        : watchlist.cast<WatchlistItem?>().firstWhere(
+              (w) => w!.scope == 'solo' &&
+                  w.ownerUid == uid &&
+                  w.mediaType == mt &&
+                  w.tmdbId == widget.tmdbId,
+              orElse: () => null,
+            );
+    // Show "Remove" when this title is on any list visible in the current mode.
+    final WatchlistItem? activeEntry = mode == ViewMode.solo
+        ? (mySoloEntry ?? sharedEntry)
+        : sharedEntry;
+    final onWatchlist = activeEntry != null;
     final rec = ref.watch(singleRecProvider(_entryId)).value;
     final prediction = ref.watch(predictionProvider(_entryId)).value;
     final myPredEntry = uid != null ? prediction?.entryFor(uid) : null;
@@ -327,14 +351,19 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                   if (onWatchlist)
                     OutlinedButton.icon(
                       icon: const Icon(Icons.bookmark_remove),
-                      label: const Text('On watchlist'),
-                      onPressed: _watchlistBusy ? null : _removeFromWatchlist,
+                      label: Text(activeEntry.scope == 'solo' ? 'On Solo list' : 'On watchlist'),
+                      onPressed: _watchlistBusy ? null : () => _removeFromWatchlist(activeEntry),
                     )
                   else
                     FilledButton.icon(
                       icon: const Icon(Icons.bookmark_add),
-                      label: const Text('Add to watchlist'),
-                      onPressed: _watchlistBusy ? null : () => _addToWatchlist(d),
+                      label: Text(mode == ViewMode.solo ? 'Add to Solo list' : 'Add to watchlist'),
+                      onPressed: _watchlistBusy
+                          ? null
+                          : () => _addToWatchlist(
+                                d,
+                                scope: mode == ViewMode.solo ? 'solo' : 'shared',
+                              ),
                     ),
                   FilledButton.tonalIcon(
                     icon: const Icon(Icons.star_outline),

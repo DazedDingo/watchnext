@@ -1,4 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'mode_provider.dart';
 
 enum WatchMood {
   dateNight,
@@ -56,5 +59,77 @@ extension WatchMoodExt on WatchMood {
   }
 }
 
-/// Currently selected mood on the Home screen. null = no filter.
-final moodProvider = StateProvider<WatchMood?>((ref) => null);
+/// Per-mode mood selection, persisted to SharedPreferences under two keys
+/// (`wn_mood_solo` / `wn_mood_together`) so a Solo pick doesn't bleed into
+/// Together and vice versa.
+///
+/// Reading [moodProvider] always returns the mood for the current
+/// [viewModeProvider]; writing via [ModeMoodController.set] updates only
+/// that slot.
+class ModeMoodController extends StateNotifier<Map<ViewMode, WatchMood?>> {
+  ModeMoodController(this._prefs, Map<ViewMode, WatchMood?> initial) : super(initial);
+  final SharedPreferences _prefs;
+
+  static String _keyFor(ViewMode mode) =>
+      mode == ViewMode.solo ? 'wn_mood_solo' : 'wn_mood_together';
+
+  static WatchMood? _decode(String? raw) {
+    if (raw == null) return null;
+    for (final m in WatchMood.values) {
+      if (m.name == raw) return m;
+    }
+    return null;
+  }
+
+  static Map<ViewMode, WatchMood?> readAll(SharedPreferences prefs) => {
+        ViewMode.solo: _decode(prefs.getString(_keyFor(ViewMode.solo))),
+        ViewMode.together: _decode(prefs.getString(_keyFor(ViewMode.together))),
+      };
+
+  Future<void> set(ViewMode mode, WatchMood? mood) async {
+    state = {...state, mode: mood};
+    final key = _keyFor(mode);
+    if (mood == null) {
+      await _prefs.remove(key);
+    } else {
+      await _prefs.setString(key, mood.name);
+    }
+  }
+}
+
+final _moodPrefsProvider =
+    FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
+
+final modeMoodProvider =
+    StateNotifierProvider<ModeMoodController, Map<ViewMode, WatchMood?>>((ref) {
+  final prefs = ref.watch(_moodPrefsProvider).value;
+  if (prefs == null) {
+    return ModeMoodController(
+      _UnsetPrefs(),
+      const {ViewMode.solo: null, ViewMode.together: null},
+    );
+  }
+  return ModeMoodController(prefs, ModeMoodController.readAll(prefs));
+});
+
+/// Mood for the active view mode. Reading this yields the Solo pick in Solo
+/// mode and the Together pick in Together mode; switching modes instantly
+/// swaps the value without losing the other slot.
+final moodProvider = Provider<WatchMood?>((ref) {
+  final mode = ref.watch(viewModeProvider);
+  final map = ref.watch(modeMoodProvider);
+  return map[mode];
+});
+
+/// Sentinel used while SharedPreferences loads on first build. Mirrors the
+/// pattern in mode_provider.dart.
+class _UnsetPrefs implements SharedPreferences {
+  @override
+  Future<bool> setString(String key, String value) async => true;
+  @override
+  Future<bool> remove(String key) async => true;
+  @override
+  String? getString(String key) => null;
+  @override
+  dynamic noSuchMethod(Invocation i) => null;
+}

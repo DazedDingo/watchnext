@@ -14,19 +14,43 @@ class HouseholdMember {
   final String uid;
   final String displayName;
   final String? avatarUrl;
-  final int predictTotal;
-  final int predictWins;
+
+  /// Lifetime counters from before context-aware prediction counters existed.
+  /// New writes land in the per-mode fields below; these are only populated
+  /// for legacy rows (null-context predictions) or historical data.
+  final int predictTotalLegacy;
+  final int predictWinsLegacy;
+  final int predictTotalSolo;
+  final int predictWinsSolo;
+  final int predictTotalTogether;
+  final int predictWinsTogether;
 
   const HouseholdMember({
     required this.uid,
     required this.displayName,
     this.avatarUrl,
-    this.predictTotal = 0,
-    this.predictWins = 0,
+    this.predictTotalLegacy = 0,
+    this.predictWinsLegacy = 0,
+    this.predictTotalSolo = 0,
+    this.predictWinsSolo = 0,
+    this.predictTotalTogether = 0,
+    this.predictWinsTogether = 0,
   });
+
+  /// Sum across all contexts — keep as the default for existing leaderboard UI.
+  int get predictTotal =>
+      predictTotalLegacy + predictTotalSolo + predictTotalTogether;
+  int get predictWins =>
+      predictWinsLegacy + predictWinsSolo + predictWinsTogether;
 
   double get predictWinRate =>
       predictTotal == 0 ? 0 : predictWins / predictTotal;
+  double get predictWinRateSolo => predictTotalSolo == 0
+      ? 0
+      : predictWinsSolo / predictTotalSolo;
+  double get predictWinRateTogether => predictTotalTogether == 0
+      ? 0
+      : predictWinsTogether / predictTotalTogether;
 
   factory HouseholdMember.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data()!;
@@ -34,8 +58,12 @@ class HouseholdMember {
       uid: doc.id,
       displayName: d['display_name'] as String? ?? 'Member',
       avatarUrl: d['avatar_url'] as String?,
-      predictTotal: (d['predict_total'] as num?)?.toInt() ?? 0,
-      predictWins: (d['predict_wins'] as num?)?.toInt() ?? 0,
+      predictTotalLegacy: (d['predict_total'] as num?)?.toInt() ?? 0,
+      predictWinsLegacy: (d['predict_wins'] as num?)?.toInt() ?? 0,
+      predictTotalSolo: (d['predict_total_solo'] as num?)?.toInt() ?? 0,
+      predictWinsSolo: (d['predict_wins_solo'] as num?)?.toInt() ?? 0,
+      predictTotalTogether: (d['predict_total_together'] as num?)?.toInt() ?? 0,
+      predictWinsTogether: (d['predict_wins_together'] as num?)?.toInt() ?? 0,
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
+import '../../providers/mode_provider.dart';
 import '../../providers/prediction_provider.dart';
 
 /// Bottom sheet where a user predicts their rating before watching.
@@ -59,6 +60,7 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
       if (uid == null) throw StateError('Not signed in.');
       final householdId = await ref.read(householdIdProvider.future);
       if (householdId == null) throw StateError('No household.');
+      final mode = ref.read(viewModeProvider);
       await ref.read(predictionServiceProvider).submitPrediction(
             householdId: householdId,
             uid: uid,
@@ -67,6 +69,7 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
             title: widget.title,
             posterPath: widget.posterPath,
             stars: _stars,
+            context: mode == ViewMode.solo ? 'solo' : 'together',
           );
       if (mounted) context.pop(true);
     } catch (e) {
@@ -86,6 +89,7 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
       if (uid == null) throw StateError('Not signed in.');
       final householdId = await ref.read(householdIdProvider.future);
       if (householdId == null) throw StateError('No household.');
+      final mode = ref.read(viewModeProvider);
       await ref.read(predictionServiceProvider).skipPrediction(
             householdId: householdId,
             uid: uid,
@@ -93,6 +97,7 @@ class _PredictionSheetState extends ConsumerState<PredictionSheet> {
             tmdbId: widget.tmdbId,
             title: widget.title,
             posterPath: widget.posterPath,
+            context: mode == ViewMode.solo ? 'solo' : 'together',
           );
       if (mounted) context.pop(false);
     } catch (_) {

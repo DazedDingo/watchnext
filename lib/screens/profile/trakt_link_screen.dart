@@ -19,6 +19,17 @@ const _traktHelp =
     '• Unlink — stops future sync. History already imported stays in WatchNext.\n\n'
     'Your Trakt credentials stick through app upgrades — you won\'t need to re-link.';
 
+const _scopeHelp =
+    'How do you use Trakt?\n\n'
+    '• With partner — most of your Trakt history is co-watched. Imports are '
+    'tagged as together so the stats page can attribute them to the Together leaderboard.\n'
+    '• Solo — your Trakt history is what you watch alone. Imports are tagged '
+    'as solo.\n'
+    '• Mixed (default) — can\'t say either way. Imports are left untagged; '
+    'the scorer treats them as pure history rather than folding them into a '
+    'specific leaderboard.\n\n'
+    'Only affects newly-imported ratings. Change it any time from this screen.';
+
 class TraktLinkScreen extends ConsumerStatefulWidget {
   const TraktLinkScreen({super.key});
 
@@ -84,6 +95,24 @@ class _TraktLinkScreenState extends ConsumerState<TraktLinkScreen> {
     }
   }
 
+  Future<void> _setScope(TraktHistoryScope scope) async {
+    setState(() => _busy = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser!;
+      final householdId = await ref.read(householdIdProvider.future);
+      if (householdId == null) return;
+      await ref.read(traktServiceProvider).setHistoryScope(
+            householdId: householdId,
+            uid: user.uid,
+            scope: scope.name,
+          );
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _resync() async {
     setState(() => _busy = true);
     try {
@@ -139,6 +168,12 @@ class _TraktLinkScreenState extends ConsumerState<TraktLinkScreen> {
                 onPressed: _busy ? null : _link,
               )
             else ...[
+              _HistoryScopeCard(
+                current: s.historyScope,
+                onChange: (v) => _setScope(v),
+                disabled: _busy,
+              ),
+              const SizedBox(height: 16),
               FilledButton.icon(
                 icon: const Icon(Icons.sync),
                 label: const Text('Sync now'),
@@ -156,6 +191,56 @@ class _TraktLinkScreenState extends ConsumerState<TraktLinkScreen> {
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
+      ),
+    );
+  }
+}
+
+class _HistoryScopeCard extends StatelessWidget {
+  final TraktHistoryScope current;
+  final ValueChanged<TraktHistoryScope> onChange;
+  final bool disabled;
+
+  const _HistoryScopeCard({
+    required this.current,
+    required this.onChange,
+    required this.disabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Trakt history is…',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                const HelpButton(title: 'Trakt scope', body: _scopeHelp),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<TraktHistoryScope>(
+              segments: TraktHistoryScope.values
+                  .map((s) => ButtonSegment<TraktHistoryScope>(
+                        value: s,
+                        label: Text(s.label),
+                      ))
+                  .toList(),
+              selected: {current},
+              onSelectionChanged: disabled
+                  ? null
+                  : (set) {
+                      if (set.isNotEmpty) onChange(set.first);
+                    },
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -104,6 +104,126 @@ void main() {
       expect(mSnap.data(), isNot(contains('predict_wins')));
     });
 
+    test('submitPrediction persists context on the entry', () async {
+      await svc.submitPrediction(
+        householdId: hh,
+        uid: 'u1',
+        mediaType: 'movie',
+        tmdbId: 7,
+        title: 'X',
+        stars: 4,
+        context: 'solo',
+      );
+      final snap = await db.doc('households/$hh/predictions/movie:7').get();
+      final p = Prediction.fromDoc(snap);
+      expect(p.entryFor('u1')?.context, 'solo');
+    });
+
+    test('skipPrediction persists context on the skip entry', () async {
+      await svc.skipPrediction(
+        householdId: hh,
+        uid: 'u1',
+        mediaType: 'movie',
+        tmdbId: 8,
+        title: 'X',
+        context: 'together',
+      );
+      final snap = await db.doc('households/$hh/predictions/movie:8').get();
+      final p = Prediction.fromDoc(snap);
+      expect(p.entryFor('u1')?.context, 'together');
+      expect(p.entryFor('u1')?.skipped, isTrue);
+    });
+
+    test('submitPrediction without context omits the field (legacy path)',
+        () async {
+      await svc.submitPrediction(
+        householdId: hh,
+        uid: 'u1',
+        mediaType: 'movie',
+        tmdbId: 9,
+        title: 'X',
+        stars: 3,
+      );
+      final raw = (await db.doc('households/$hh/predictions/movie:9').get())
+          .data()!;
+      final entries = raw['entries'] as Map;
+      expect((entries['u1'] as Map).containsKey('context'), isFalse);
+    });
+
+    test('markRevealSeen with context=solo bumps _solo counters only',
+        () async {
+      await svc.submitPrediction(
+        householdId: hh,
+        uid: 'u1',
+        mediaType: 'movie',
+        tmdbId: 10,
+        title: 'X',
+        stars: 4,
+        context: 'solo',
+      );
+      await svc.markRevealSeen(
+        householdId: hh,
+        uid: 'u1',
+        predictionId: 'movie:10',
+        won: true,
+        context: 'solo',
+      );
+      final m = (await db.doc('households/$hh/members/u1').get()).data()!;
+      expect(m['predict_total_solo'], 1);
+      expect(m['predict_wins_solo'], 1);
+      expect(m, isNot(contains('predict_total')));
+      expect(m, isNot(contains('predict_total_together')));
+    });
+
+    test('markRevealSeen with context=together bumps _together counters only',
+        () async {
+      await svc.submitPrediction(
+        householdId: hh,
+        uid: 'u1',
+        mediaType: 'movie',
+        tmdbId: 11,
+        title: 'X',
+        stars: 4,
+        context: 'together',
+      );
+      await svc.markRevealSeen(
+        householdId: hh,
+        uid: 'u1',
+        predictionId: 'movie:11',
+        won: false,
+        context: 'together',
+      );
+      final m = (await db.doc('households/$hh/members/u1').get()).data()!;
+      expect(m['predict_total_together'], 1);
+      expect(m, isNot(contains('predict_wins_together')));
+      expect(m, isNot(contains('predict_total')));
+      expect(m, isNot(contains('predict_total_solo')));
+    });
+
+    test('solo and together counters accumulate independently', () async {
+      for (var i = 0; i < 3; i++) {
+        await svc.markRevealSeen(
+          householdId: hh,
+          uid: 'u1',
+          predictionId: 'movie:$i',
+          won: i == 0,
+          context: 'solo',
+        );
+      }
+      await svc.markRevealSeen(
+        householdId: hh,
+        uid: 'u1',
+        predictionId: 'movie:99',
+        won: true,
+        context: 'together',
+      );
+      final m = (await db.doc('households/$hh/members/u1').get()).data()!;
+      expect(m['predict_total_solo'], 3);
+      expect(m['predict_wins_solo'], 1);
+      expect(m['predict_total_together'], 1);
+      expect(m['predict_wins_together'], 1);
+    });
+
     test('stream emits null for a non-existent doc and updates on write',
         () async {
       final events = <Prediction?>[];

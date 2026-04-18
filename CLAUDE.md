@@ -76,13 +76,23 @@ Shared movie & TV recommender for two-person households backed by Trakt integrat
 ### Firestore Collections & Rules
 ```
 households/{householdId}/
-  ├─ members/{uid}              # User ref + Trakt tokens
+  ├─ members/{uid}              # User ref + Trakt tokens + predict counters
+                                # Counters: predict_total / predict_wins (legacy, pre-split context);
+                                #           predict_total_solo / predict_wins_solo;
+                                #           predict_total_together / predict_wins_together
+                                # trakt_history_scope: 'shared'|'personal'|'mixed' (default mixed)
+                                #   stamps Rating.context on imported Trakt ratings
   ├─ watchEntries/{mediaType:tmdbId}
   │  └─ episodes/{traktId}      # Per-ep timestamps
   ├─ ratings/{id}               # {uid, level, target_id, stars, tags, note, rated_at, pushed_to_trakt, context?}
                                 # context: 'solo'|'together'|null (null = legacy / Trakt historical)
-  ├─ watchlist/{id}             # {mediaType, tmdbId, addedAt, ...}
-  ├─ predictions/{id}           # Forecast metadata (Phase 8+)
+  ├─ watchlist/{scope:owner_or_shared:mediaType:tmdbId}
+                                # {mediaType, tmdbId, scope, owner_uid?, addedAt, ...}
+                                # scope: 'shared' (both members) | 'solo' (owner_uid only)
+                                # shared → owner_or_shared = 'shared'; solo → owner_or_shared = uid
+  ├─ predictions/{mediaType:tmdbId}
+                                # {entries: {uid: {stars, skipped, submitted_at, context?}}, reveal_seen, ...}
+                                # entry.context: 'solo'|'together'|null (determines counter routing)
   ├─ recommendations/{id}       # {mediaType, tmdbId, match_score, match_score_solo, ai_blurb, ...}
   ├─ tasteProfile/{id}          # {vector: [...], updatedAt}
   ├─ decisionHistory/{id}       # "Decide" screen picks

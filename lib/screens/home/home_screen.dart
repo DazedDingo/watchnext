@@ -159,12 +159,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             _MoodPills(
               selected: mood,
-              onSelect: (m) => ref.read(moodProvider.notifier).state = m,
+              onSelect: (m) =>
+                  ref.read(modeMoodProvider.notifier).set(mode, m),
             ),
             _RuntimePills(
               selected: runtime,
               onSelect: (b) =>
-                  ref.read(runtimeFilterProvider.notifier).state = b,
+                  ref.read(modeRuntimeProvider.notifier).set(mode, b),
             ),
             if (tonightsPick != null) ...[
               const _SectionLabel("TONIGHT'S PICK"),

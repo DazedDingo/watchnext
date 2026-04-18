@@ -20,6 +20,7 @@ class WatchlistScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(watchlistProvider);
+    final items = ref.watch(visibleWatchlistProvider);
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
@@ -29,7 +30,7 @@ class WatchlistScreen extends ConsumerWidget {
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
-        data: (items) {
+        data: (_) {
           if (items.isEmpty) {
             return const Center(
               child: Padding(
@@ -64,6 +65,12 @@ class WatchlistScreen extends ConsumerWidget {
                       : const SizedBox(width: 48, height: 72, child: Icon(Icons.movie)),
                   title: Text(w.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text([if (w.year != null) '${w.year}', if (w.genres.isNotEmpty) w.genres.first].join(' · ')),
+                  trailing: w.scope == 'solo'
+                      ? const Tooltip(
+                          message: 'Only on your Solo watchlist',
+                          child: Icon(Icons.person_outline, size: 18),
+                        )
+                      : null,
                   onTap: () => context.push('/title/${w.mediaType}/${w.tmdbId}'),
                 ),
               );

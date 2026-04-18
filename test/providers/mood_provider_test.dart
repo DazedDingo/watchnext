@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watchnext/providers/mode_provider.dart';
 import 'package:watchnext/providers/mood_provider.dart';
 
 void main() {
@@ -57,4 +59,85 @@ void main() {
       }
     });
   });
+
+  group('ModeMoodController', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues(const {});
+    });
+
+    test('starts empty and returns null for both modes', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeMoodController(
+        prefs,
+        ModeMoodController.readAll(prefs),
+      );
+      expect(c.state[ViewMode.solo], isNull);
+      expect(c.state[ViewMode.together], isNull);
+    });
+
+    test('setting solo does not affect together and vice versa', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeMoodController(
+        prefs,
+        ModeMoodController.readAll(prefs),
+      );
+      await c.set(ViewMode.solo, WatchMood.intense);
+      expect(c.state[ViewMode.solo], WatchMood.intense);
+      expect(c.state[ViewMode.together], isNull);
+
+      await c.set(ViewMode.together, WatchMood.chill);
+      expect(c.state[ViewMode.solo], WatchMood.intense);
+      expect(c.state[ViewMode.together], WatchMood.chill);
+    });
+
+    test('persists to SharedPreferences under two keys', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeMoodController(
+        prefs,
+        ModeMoodController.readAll(prefs),
+      );
+      await c.set(ViewMode.solo, WatchMood.intense);
+      await c.set(ViewMode.together, WatchMood.chill);
+
+      expect(prefs.getString('wn_mood_solo'), 'intense');
+      expect(prefs.getString('wn_mood_together'), 'chill');
+    });
+
+    test('set(null) removes the key', () async {
+      SharedPreferences.setMockInitialValues(const {
+        'wn_mood_solo': 'intense',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final c = ModeMoodController(
+        prefs,
+        ModeMoodController.readAll(prefs),
+      );
+      expect(c.state[ViewMode.solo], WatchMood.intense);
+
+      await c.set(ViewMode.solo, null);
+      expect(c.state[ViewMode.solo], isNull);
+      expect(prefs.containsKey('wn_mood_solo'), isFalse);
+    });
+
+    test('readAllForTest recovers enum values from string', () async {
+      SharedPreferences.setMockInitialValues(const {
+        'wn_mood_solo': 'documentary',
+        'wn_mood_together': 'dateNight',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final map = ModeMoodController.readAll(prefs);
+      expect(map[ViewMode.solo], WatchMood.documentary);
+      expect(map[ViewMode.together], WatchMood.dateNight);
+    });
+
+    test('unknown stored value decodes to null (forward-compat)', () async {
+      SharedPreferences.setMockInitialValues(const {
+        'wn_mood_solo': 'totally-not-a-mood',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final map = ModeMoodController.readAll(prefs);
+      expect(map[ViewMode.solo], isNull);
+    });
+  });
+
 }

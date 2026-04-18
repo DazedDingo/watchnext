@@ -21,17 +21,15 @@ void main() {
     return List.generate(len, (_) => chars[rng.nextInt(chars.length)]).join();
   }
 
-  group('WatchEntry.buildId / WatchlistItem.buildId / Prediction.buildId', () {
+  group('WatchEntry.buildId / Prediction.buildId / Recommendation.buildId', () {
     test('all three produce the same "mediaType:tmdbId" shape', () {
       for (var i = 0; i < 200; i++) {
         final type = rng.nextBool() ? 'movie' : 'tv';
         final id = rng.nextInt(1 << 30);
         final w = WatchEntry.buildId(type, id);
-        final wl = WatchlistItem.buildId(type, id);
         final p = Prediction.buildId(type, id);
         final r = Recommendation.buildId(type, id);
         expect(w, '$type:$id');
-        expect(wl, w);
         expect(p, w);
         expect(r, w);
       }
@@ -52,6 +50,31 @@ void main() {
         final parts = k.split(':');
         expect(parts.length, 2);
         expect(int.tryParse(parts[1]), isNotNull);
+      }
+    });
+  });
+
+  group('WatchlistItem.buildId (scope-aware)', () {
+    test('default scope is shared, shape is "shared:shared:type:id"', () {
+      for (var i = 0; i < 100; i++) {
+        final type = rng.nextBool() ? 'movie' : 'tv';
+        final id = rng.nextInt(1 << 30);
+        expect(WatchlistItem.buildId(type, id), 'shared:shared:$type:$id');
+      }
+    });
+
+    test('scope=solo + distinct ownerUid never collide for same title', () {
+      for (var i = 0; i < 100; i++) {
+        final type = rng.nextBool() ? 'movie' : 'tv';
+        final id = rng.nextInt(1 << 30);
+        final u1 = randomAlnum(28);
+        final u2 = randomAlnum(28);
+        final a = WatchlistItem.buildId(type, id, scope: 'solo', ownerUid: u1);
+        final b = WatchlistItem.buildId(type, id, scope: 'solo', ownerUid: u2);
+        final shared = WatchlistItem.buildId(type, id);
+        expect(a == b, u1 == u2);
+        expect(a, isNot(shared));
+        expect(b, isNot(shared));
       }
     });
   });

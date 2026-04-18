@@ -85,6 +85,7 @@ class _RevealScreenState extends ConsumerState<RevealScreen> {
           uid: uid,
           predictionId: _predId,
           won: won,
+          context: myEntry?.context,
         );
   }
 

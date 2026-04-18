@@ -65,7 +65,7 @@ void main() {
           await svc.contains(
               householdId: 'hh', mediaType: 'movie', tmdbId: 1),
           isTrue);
-      await svc.remove(householdId: 'hh', id: 'movie:1');
+      await svc.remove(householdId: 'hh', id: 'shared:shared:movie:1');
       expect(
           await svc.contains(
               householdId: 'hh', mediaType: 'movie', tmdbId: 1),
@@ -76,7 +76,7 @@ void main() {
       final db = FakeFirebaseFirestore();
       final svc = WatchlistService(db: db);
       await expectLater(
-        svc.remove(householdId: 'hh', id: 'movie:999'),
+        svc.remove(householdId: 'hh', id: 'shared:shared:movie:999'),
         completes,
       );
     });

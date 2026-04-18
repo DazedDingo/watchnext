@@ -52,6 +52,14 @@ class TraktSyncService {
   }) async {
     final token = await trakt.getLiveAccessToken(householdId: householdId, uid: uid);
 
+    // Read the user's trakt_history_scope choice so we can stamp Rating.context
+    // correctly on historical imports (shared→together, personal→solo,
+    // mixed→null). Defaults to 'mixed' for legacy users who linked before the
+    // field existed.
+    final memberSnap = await _db.doc('households/$householdId/members/$uid').get();
+    final scopeRaw = memberSnap.data()?['trakt_history_scope'] as String?;
+    final ratingContext = _decodeRatingContext(scopeRaw);
+
     final movieRows = await trakt.fetchHistory(token: token, type: 'movies', startAt: startAt);
     final showRows = await trakt.fetchHistory(token: token, type: 'shows', startAt: startAt);
 
@@ -66,13 +74,33 @@ class TraktSyncService {
     for (final level in const ['movies', 'shows', 'seasons', 'episodes']) {
       final ratings = await trakt.fetchRatings(token: token, type: level);
       for (final r in ratings) {
-        await _upsertRatingRow(householdId: householdId, uid: uid, level: level, row: r);
+        await _upsertRatingRow(
+          householdId: householdId,
+          uid: uid,
+          level: level,
+          row: r,
+          context: ratingContext,
+        );
       }
     }
 
     await _db.doc('households/$householdId/members/$uid').set({
       'last_trakt_sync': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// Maps the trakt_history_scope flag → Rating.context value for imports.
+  /// Intentionally defined here (not as a dependency on TraktHistoryScope
+  /// from providers/) so the service stays Flutter-free.
+  static String? _decodeRatingContext(String? scope) {
+    switch (scope) {
+      case 'shared':
+        return 'together';
+      case 'personal':
+        return 'solo';
+      default:
+        return null; // 'mixed', null, or any unknown value
+    }
   }
 
   Future<void> _upsertMovieRow({
@@ -214,6 +242,7 @@ class TraktSyncService {
     required String uid,
     required String level, // 'movies' | 'shows' | 'seasons' | 'episodes'
     required Map<String, dynamic> row,
+    String? context,
   }) async {
     final rating10 = (row['rating'] as num?)?.toInt();
     if (rating10 == null) return;
@@ -264,6 +293,7 @@ class TraktSyncService {
       stars: stars,
       ratedAt: ratedAt,
       pushedToTrakt: true, // it came *from* Trakt
+      context: context,
     );
     await _db.doc('households/$householdId/ratings/$id').set(rating.toFirestore());
   }

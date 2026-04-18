@@ -23,9 +23,13 @@ class WatchlistService {
     int? runtime,
     String? overview,
     String addedSource = 'manual',
+    // 'shared' (default) or 'solo'. Solo items only show in Solo mode and
+    // only to the owner (enforced client-side via watchlistProvider filters).
+    String scope = 'shared',
   }) async {
+    final ownerUid = scope == 'solo' ? uid : null;
     final item = WatchlistItem(
-      id: WatchlistItem.buildId(mediaType, tmdbId),
+      id: WatchlistItem.buildId(mediaType, tmdbId, scope: scope, ownerUid: ownerUid),
       mediaType: mediaType,
       tmdbId: tmdbId,
       title: title,
@@ -37,6 +41,8 @@ class WatchlistService {
       addedBy: uid,
       addedAt: DateTime.now(),
       addedSource: addedSource,
+      scope: scope,
+      ownerUid: ownerUid,
     );
     await _coll(householdId).doc(item.id).set(item.toFirestore());
   }
@@ -45,8 +51,19 @@ class WatchlistService {
     await _coll(householdId).doc(id).delete();
   }
 
-  Future<bool> contains({required String householdId, required String mediaType, required int tmdbId}) async {
-    final doc = await _coll(householdId).doc(WatchlistItem.buildId(mediaType, tmdbId)).get();
+  /// Checks whether a title is on the watchlist for a given scope. Defaults
+  /// to shared — callers that want to check a user's solo slot must pass
+  /// `scope: 'solo'` + the owner uid.
+  Future<bool> contains({
+    required String householdId,
+    required String mediaType,
+    required int tmdbId,
+    String scope = 'shared',
+    String? ownerUid,
+  }) async {
+    final doc = await _coll(householdId)
+        .doc(WatchlistItem.buildId(mediaType, tmdbId, scope: scope, ownerUid: ownerUid))
+        .get();
     return doc.exists;
   }
 }

@@ -69,16 +69,30 @@ class PredictionEntry {
   final int? stars;
   final bool skipped;
   final DateTime? submittedAt;
+  /// Viewing context the user was in when they predicted. 'solo' | 'together'
+  /// | null (null = legacy doc that predates the field). Used to route
+  /// prediction-game counter bumps into the right per-mode slot at reveal
+  /// time and to filter leaderboards by mode.
+  final String? context;
 
-  const PredictionEntry({this.stars, this.skipped = false, this.submittedAt});
+  const PredictionEntry({
+    this.stars,
+    this.skipped = false,
+    this.submittedAt,
+    this.context,
+  });
 
   bool get isSubmitted => skipped || stars != null;
 
-  factory PredictionEntry.fromMap(Map raw) => PredictionEntry(
-        stars: (raw['stars'] as num?)?.toInt(),
-        skipped: raw['skipped'] as bool? ?? false,
-        submittedAt: (raw['submitted_at'] as Timestamp?)?.toDate(),
-      );
+  factory PredictionEntry.fromMap(Map raw) {
+    final rawContext = raw['context'] as String?;
+    return PredictionEntry(
+      stars: (raw['stars'] as num?)?.toInt(),
+      skipped: raw['skipped'] as bool? ?? false,
+      submittedAt: (raw['submitted_at'] as Timestamp?)?.toDate(),
+      context: (rawContext == 'solo' || rawContext == 'together') ? rawContext : null,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         if (stars != null) 'stars': stars,
@@ -86,5 +100,6 @@ class PredictionEntry {
         'submitted_at': submittedAt != null
             ? Timestamp.fromDate(submittedAt!)
             : FieldValue.serverTimestamp(),
+        if (context != null) 'context': context,
       };
 }

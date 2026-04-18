@@ -72,6 +72,38 @@ void main() {
       expect(parsed.revealSeenBy('u2'), isFalse);
     });
 
+    test('PredictionEntry.context defaults to null', () {
+      expect(const PredictionEntry(stars: 4).context, isNull);
+      expect(const PredictionEntry(skipped: true).context, isNull);
+    });
+
+    test('PredictionEntry.toMap omits context when null', () {
+      final m = const PredictionEntry(stars: 4).toMap();
+      expect(m.containsKey('context'), isFalse);
+    });
+
+    test('PredictionEntry.toMap emits context when solo/together', () {
+      expect(const PredictionEntry(stars: 4, context: 'solo').toMap()['context'],
+          'solo');
+      expect(
+          const PredictionEntry(skipped: true, context: 'together')
+              .toMap()['context'],
+          'together');
+    });
+
+    test('PredictionEntry.fromMap roundtrips solo/together context', () {
+      expect(PredictionEntry.fromMap(const {'stars': 4, 'context': 'solo'})
+          .context, 'solo');
+      expect(PredictionEntry.fromMap(const {'stars': 4, 'context': 'together'})
+          .context, 'together');
+    });
+
+    test('PredictionEntry.fromMap coerces unknown context value to null', () {
+      expect(PredictionEntry.fromMap(const {'stars': 4, 'context': 'bogus'})
+          .context, isNull);
+      expect(PredictionEntry.fromMap(const {'stars': 4}).context, isNull);
+    });
+
     test('fromDoc tolerates missing fields with safe defaults', () async {
       final db = FakeFirebaseFirestore();
       await db.doc('p/blank').set(<String, dynamic>{});

@@ -82,7 +82,9 @@ class _DecideScreenState extends ConsumerState<DecideScreen> {
   Future<void> _ensureStarted() async {
     if (_started) return;
     _started = true;
-    final watchlist = ref.read(watchlistProvider).value ?? const [];
+    // Candidate pool follows the visibility rules for the current mode:
+    // Together excludes all solo items; Solo keeps my own solo items.
+    final watchlist = ref.read(visibleWatchlistProvider);
     await ref.read(decideSessionProvider.notifier).start(watchlist);
   }
 
