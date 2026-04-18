@@ -63,6 +63,55 @@ describe("trimProfile", () => {
     );
   });
 
+  test("solo mode prefers per_user_solo over per_user when present", () => {
+    const out = trimProfile(
+      {
+        per_user: {
+          u1: {
+            top_genres: [{ genre: "Drama", weight: 5 }],
+            liked_titles: [{ title: "CrossContext", stars: 5 }],
+            disliked_titles: [],
+            avg_rating: 3.0,
+          },
+        },
+        per_user_solo: {
+          u1: {
+            top_genres: [{ genre: "Horror", weight: 5 }],
+            liked_titles: [{ title: "SoloOnly", stars: 5 }],
+            disliked_titles: [],
+            avg_rating: 4.5,
+          },
+        },
+      },
+      "u1",
+      "solo",
+    );
+    expect(out).toContain("Horror");
+    expect(out).toContain("SoloOnly");
+    // Cross-context Drama shouldn't leak into the solo summary.
+    expect(out).not.toContain("Drama");
+    expect(out).not.toContain("CrossContext");
+  });
+
+  test("solo mode falls back to per_user when per_user_solo is missing", () => {
+    const out = trimProfile(
+      {
+        per_user: {
+          u1: {
+            top_genres: [{ genre: "Action", weight: 5 }],
+            liked_titles: [{ title: "Legacy", stars: 5 }],
+            disliked_titles: [],
+            avg_rating: 4.0,
+          },
+        },
+      },
+      "u1",
+      "solo",
+    );
+    expect(out).toContain("Action");
+    expect(out).toContain("Legacy");
+  });
+
   test("together with no compat key omits the compat line", () => {
     const out = trimProfile(
       {

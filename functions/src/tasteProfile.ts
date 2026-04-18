@@ -17,7 +17,22 @@ type Rating = {
   target_id: string;
   stars: number;
   tags?: string[];
+  /**
+   * Viewing context the user was in when they rated. 'solo' | 'together'
+   * | null/undefined (undefined = legacy / Trakt historical).
+   * Null-context ratings flow into both the solo and together profiles as
+   * shared backdrop signal.
+   */
+  context?: "solo" | "together" | null;
 };
+
+/**
+ * Describes which ratings to fold into a profile.
+ *  - null → include everything (cross-context, back-compat shape).
+ *  - "solo" → include context='solo' OR null (null = generic backdrop signal).
+ *  - "together" → include context='together' OR null.
+ */
+export type ContextFilter = "solo" | "together" | null;
 
 type WatchEntry = {
   media_type: string;
@@ -59,13 +74,36 @@ export function decadeBucket(year: number | undefined): string | null {
   return `${d}s`;
 }
 
+/**
+ * Returns true iff [r.context] matches the context filter.
+ *  - null filter → anything matches (cross-context profile).
+ *  - "solo" filter → only solo-stamped or null-context ratings contribute.
+ *  - "together" filter → only together-stamped or null-context ratings contribute.
+ *
+ * Exported so tests and the scorer can reuse the same contract.
+ */
+export function matchesContextFilter(
+  ratingContext: string | null | undefined,
+  filter: ContextFilter,
+): boolean {
+  if (filter === null) return true;
+  // null/undefined context = legacy / Trakt-historical = shared backdrop,
+  // folded into both solo and together profiles.
+  if (ratingContext == null) return true;
+  return ratingContext === filter;
+}
+
 export function buildUserProfile(
   uid: string,
   ratings: Rating[],
   entriesById: Map<string, WatchEntry>,
+  contextFilter: ContextFilter = null,
 ): UserProfile {
   const mine = ratings.filter(
-    (r) => r.uid === uid && (r.level === "movie" || r.level === "show"),
+    (r) =>
+      r.uid === uid &&
+      (r.level === "movie" || r.level === "show") &&
+      matchesContextFilter(r.context, contextFilter),
   );
 
   const genreWeights = new Map<string, { weight: number; count: number }>();
@@ -199,9 +237,17 @@ export const generateTasteProfile = onCall({ region: "europe-west2" }, async (re
   }
   const memberUids = membersSnap.docs.map((d) => d.id);
 
+  // Three profiles per member: cross-context (back-compat for concierge /
+  // Phase 9 stats + scorer fallback) and the two explicit per-mode slots that
+  // Phase 7's scorer and the Phase 8 concierge solo branch now consume.
   const per_user: Record<string, UserProfile> = {};
+  const per_user_solo: Record<string, UserProfile> = {};
+  const per_user_together: Record<string, UserProfile> = {};
   for (const mUid of memberUids) {
     per_user[mUid] = buildUserProfile(mUid, ratings, entriesById);
+    per_user_solo[mUid] = buildUserProfile(mUid, ratings, entriesById, "solo");
+    per_user_together[mUid] =
+      buildUserProfile(mUid, ratings, entriesById, "together");
   }
 
   // Combined = merged genre weights + intersection of "liked" sets.
@@ -256,6 +302,8 @@ export const generateTasteProfile = onCall({ region: "europe-west2" }, async (re
       compatibility: compat,
     },
     per_user,
+    per_user_solo,
+    per_user_together,
   };
 
   await db.doc(`households/${householdId}/tasteProfile/default`).set(profile);

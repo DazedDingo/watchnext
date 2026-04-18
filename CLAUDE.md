@@ -94,7 +94,10 @@ households/{householdId}/
                                 # {entries: {uid: {stars, skipped, submitted_at, context?}}, reveal_seen, ...}
                                 # entry.context: 'solo'|'together'|null (determines counter routing)
   ├─ recommendations/{id}       # {mediaType, tmdbId, match_score, match_score_solo, ai_blurb, ...}
-  ├─ tasteProfile/{id}          # {vector: [...], updatedAt}
+  ├─ tasteProfile/{id}          # {combined, per_user, per_user_solo, per_user_together, member_uids, updatedAt}
+                                # per_user_solo[uid]: built from ratings with context='solo' OR null
+                                # per_user_together[uid]: built from ratings with context='together' OR null
+                                # per_user[uid]: cross-context (kept for back-compat + legacy consumers)
   ├─ decisionHistory/{id}       # "Decide" screen picks
   ├─ conciergeHistory/{id}      # Concierge chat logs
   ├─ collections/{id}           # Custom lists (Phase 10+)

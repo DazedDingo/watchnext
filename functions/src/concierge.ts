@@ -71,12 +71,19 @@ export function trimProfile(
     avg_rating?: number;
   } | undefined;
 
-  const perUser = profile.per_user as Record<string, {
+  type UserSlot = {
     top_genres?: { genre: string; weight: number }[];
     liked_titles?: { title: string; stars: number }[];
     disliked_titles?: { title: string }[];
     avg_rating?: number;
-  }> | undefined;
+  };
+
+  const perUser = profile.per_user as Record<string, UserSlot> | undefined;
+  // Signal-separation slot: solo chat prefers the user's solo-context taste so
+  // recommendations don't lean on together-only watches. Legacy tasteProfile
+  // docs predate the split — fall back to per_user when missing.
+  const perUserSolo =
+    profile.per_user_solo as Record<string, UserSlot> | undefined;
 
   const lines: string[] = [];
 
@@ -87,14 +94,16 @@ export function trimProfile(
     lines.push(`Shared top genres: ${genres || "n/a"}`);
     if (favs) lines.push(`Both loved: ${favs}`);
     if (compat != null) lines.push(`Rating agreement: ${Math.round(compat * 100)}% within 1 star`);
-  } else if (perUser?.[uid]) {
-    const p = perUser[uid];
-    const genres = (p.top_genres ?? []).slice(0, 6).map(g => g.genre).join(", ");
-    const liked = (p.liked_titles ?? []).slice(0, 6).map(t => t.title).join(", ");
-    const disliked = (p.disliked_titles ?? []).slice(0, 3).map(t => t.title).join(", ");
-    lines.push(`Top genres: ${genres || "n/a"}`);
-    if (liked) lines.push(`High-rated: ${liked}`);
-    if (disliked) lines.push(`Low-rated: ${disliked}`);
+  } else {
+    const p = perUserSolo?.[uid] ?? perUser?.[uid];
+    if (p) {
+      const genres = (p.top_genres ?? []).slice(0, 6).map(g => g.genre).join(", ");
+      const liked = (p.liked_titles ?? []).slice(0, 6).map(t => t.title).join(", ");
+      const disliked = (p.disliked_titles ?? []).slice(0, 3).map(t => t.title).join(", ");
+      lines.push(`Top genres: ${genres || "n/a"}`);
+      if (liked) lines.push(`High-rated: ${liked}`);
+      if (disliked) lines.push(`Low-rated: ${disliked}`);
+    }
   }
 
   return lines.join("\n") || "No taste profile yet.";

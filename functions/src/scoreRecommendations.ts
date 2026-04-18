@@ -56,12 +56,39 @@ export function isCandidate(x: unknown): x is Candidate {
     typeof c.title === "string";
 }
 
+type PromptUserProfile = {
+  top_genres?: { genre: string; weight: number }[];
+  liked_titles?: { title: string; stars: number }[];
+  disliked_titles?: { title: string; stars: number }[];
+  avg_rating?: number;
+};
+
+function summarizeUserProfile(p: PromptUserProfile | undefined): string | null {
+  if (!p) return null;
+  const genres =
+    (p.top_genres ?? []).slice(0, 5).map((g) => g.genre).join(", ");
+  const liked =
+    (p.liked_titles ?? []).slice(0, 6).map((t) => t.title).join(", ");
+  const disliked =
+    (p.disliked_titles ?? []).slice(0, 4).map((t) => t.title).join(", ");
+  return (
+    `avg ${p.avg_rating?.toFixed(1) ?? "?"}; likes: ${genres || "n/a"}; ` +
+    `high ratings: ${liked || "none"}; low ratings: ${disliked || "none"}`
+  );
+}
+
 export function trimProfileForPrompt(
   profile: admin.firestore.DocumentData | undefined,
 ): {
   member_uids: string[];
   combined_top_genres: string[];
+  /** Cross-context summary — kept as a fallback and for together scoring when
+   * no per-mode slot is present (legacy tasteProfile docs predate the split). */
   per_user_summary: Record<string, string>;
+  /** Summary built from ratings filtered to `context='solo' OR null`. */
+  per_user_solo_summary: Record<string, string>;
+  /** Summary built from ratings filtered to `context='together' OR null`. */
+  per_user_together_summary: Record<string, string>;
 } {
   const member_uids: string[] =
     (profile?.member_uids as string[] | undefined) ?? [];
@@ -70,24 +97,35 @@ export function trimProfileForPrompt(
       .slice(0, 6)
       .map((g) => g.genre);
 
+  const perUser =
+    (profile?.per_user ?? {}) as Record<string, PromptUserProfile>;
+  const perUserSolo =
+    (profile?.per_user_solo ?? {}) as Record<string, PromptUserProfile>;
+  const perUserTogether =
+    (profile?.per_user_together ?? {}) as Record<string, PromptUserProfile>;
+
   const per_user_summary: Record<string, string> = {};
-  const perUser = (profile?.per_user ?? {}) as Record<string, {
-    top_genres?: { genre: string; weight: number }[];
-    liked_titles?: { title: string; stars: number }[];
-    disliked_titles?: { title: string; stars: number }[];
-    avg_rating?: number;
-  }>;
+  const per_user_solo_summary: Record<string, string> = {};
+  const per_user_together_summary: Record<string, string> = {};
   for (const uid of member_uids) {
-    const p = perUser[uid];
-    if (!p) continue;
-    const genres = (p.top_genres ?? []).slice(0, 5).map((g) => g.genre).join(", ");
-    const liked = (p.liked_titles ?? []).slice(0, 6).map((t) => t.title).join(", ");
-    const disliked = (p.disliked_titles ?? []).slice(0, 4).map((t) => t.title).join(", ");
-    per_user_summary[uid] =
-      `avg ${p.avg_rating?.toFixed(1) ?? "?"}; likes: ${genres || "n/a"}; ` +
-      `high ratings: ${liked || "none"}; low ratings: ${disliked || "none"}`;
+    const allSummary = summarizeUserProfile(perUser[uid]);
+    if (allSummary) per_user_summary[uid] = allSummary;
+    // Per-mode slot, with graceful fallback to the cross-context summary when
+    // the profile doc predates the split (rollout back-compat).
+    const soloSummary =
+      summarizeUserProfile(perUserSolo[uid]) ?? allSummary;
+    if (soloSummary) per_user_solo_summary[uid] = soloSummary;
+    const togetherSummary =
+      summarizeUserProfile(perUserTogether[uid]) ?? allSummary;
+    if (togetherSummary) per_user_together_summary[uid] = togetherSummary;
   }
-  return { member_uids, combined_top_genres, per_user_summary };
+  return {
+    member_uids,
+    combined_top_genres,
+    per_user_summary,
+    per_user_solo_summary,
+    per_user_together_summary,
+  };
 }
 
 export function buildPrompt(
@@ -95,7 +133,21 @@ export function buildPrompt(
   profile: ReturnType<typeof trimProfileForPrompt>,
 ): string {
   const memberLines = profile.member_uids
-    .map((u) => `- ${u}: ${profile.per_user_summary[u] ?? "no data"}`)
+    .map((u) => {
+      const together =
+        profile.per_user_together_summary[u] ??
+        profile.per_user_summary[u] ??
+        "no data";
+      const solo =
+        profile.per_user_solo_summary[u] ??
+        profile.per_user_summary[u] ??
+        "no data";
+      return (
+        `- ${u}:\n` +
+        `    together-context taste: ${together}\n` +
+        `    solo-context taste: ${solo}`
+      );
+    })
     .join("\n");
   const candidateLines = batch
     .map((c, i) => {
@@ -111,6 +163,11 @@ export function buildPrompt(
 
   return `You score movie/TV candidates for a two-person household.
 
+Each member has TWO taste profiles — one built from ratings made while
+watching together with their partner, and one from ratings made while watching
+solo. Use the together-context taste for the \`together\` score and each
+member's solo-context taste for their own \`solo\` score.
+
 HOUSEHOLD TASTE PROFILE:
 Top shared genres: ${profile.combined_top_genres.join(", ") || "unknown"}
 Members:
@@ -121,8 +178,8 @@ ${candidateLines}
 
 For each candidate, return a JSON object with:
 - key: the [key=...] value from the candidate line
-- together: 0-100 score for how well this fits the household watching together
-- solo: { "<uid>": 0-100 } one score per member uid listed above
+- together: 0-100 score for how well this fits the household watching together (use each member's together-context taste)
+- solo: { "<uid>": 0-100 } one score per member uid listed above (use that member's solo-context taste)
 - blurb: ≤25 words, framed for both members ("you'll both enjoy..." / "a bit of a stretch for X but Y will love...")
 - blurb_solo: { "<uid>": "≤20 words, addressed to that member" }
 

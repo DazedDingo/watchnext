@@ -2,6 +2,7 @@ import {
   decadeBucket,
   buildUserProfile,
   compatibility,
+  matchesContextFilter,
 } from "../src/tasteProfile";
 
 describe("decadeBucket", () => {
@@ -200,6 +201,83 @@ describe("buildUserProfile", () => {
       entries,
     );
     expect(profile.rated_count).toBe(0);
+  });
+});
+
+describe("matchesContextFilter", () => {
+  test("null filter matches everything (cross-context)", () => {
+    expect(matchesContextFilter("solo", null)).toBe(true);
+    expect(matchesContextFilter("together", null)).toBe(true);
+    expect(matchesContextFilter(null, null)).toBe(true);
+    expect(matchesContextFilter(undefined, null)).toBe(true);
+  });
+
+  test("solo filter includes solo and null-context", () => {
+    expect(matchesContextFilter("solo", "solo")).toBe(true);
+    expect(matchesContextFilter(null, "solo")).toBe(true);
+    expect(matchesContextFilter(undefined, "solo")).toBe(true);
+    expect(matchesContextFilter("together", "solo")).toBe(false);
+  });
+
+  test("together filter includes together and null-context", () => {
+    expect(matchesContextFilter("together", "together")).toBe(true);
+    expect(matchesContextFilter(null, "together")).toBe(true);
+    expect(matchesContextFilter(undefined, "together")).toBe(true);
+    expect(matchesContextFilter("solo", "together")).toBe(false);
+  });
+});
+
+describe("buildUserProfile — context filter", () => {
+  const entries = new Map([
+    ["movie:1", { media_type: "movie", tmdb_id: 1, title: "SoloFav", year: 2010, genres: ["Action"] }],
+    ["movie:2", { media_type: "movie", tmdb_id: 2, title: "TogetherFav", year: 2015, genres: ["Drama"] }],
+    ["movie:3", { media_type: "movie", tmdb_id: 3, title: "Shared", year: 2018, genres: ["Comedy"] }],
+  ]);
+
+  const ratings = [
+    // Solo: two Action ratings so top_genres filter (count ≥ 2) populates.
+    { uid: "u1", level: "movie", target_id: "movie:1", stars: 5, context: "solo" as const },
+    { uid: "u1", level: "movie", target_id: "movie:1", stars: 5, context: "solo" as const },
+    { uid: "u1", level: "movie", target_id: "movie:2", stars: 5, context: "together" as const },
+    { uid: "u1", level: "movie", target_id: "movie:2", stars: 5, context: "together" as const },
+    // Null-context (legacy/Trakt) — shared backdrop.
+    { uid: "u1", level: "movie", target_id: "movie:3", stars: 4 },
+  ];
+
+  test("solo filter includes solo + null-context ratings only", () => {
+    const p = buildUserProfile("u1", ratings, entries, "solo");
+    // Drops the two together ratings → 2 solo + 1 null = 3 ratings kept.
+    expect(p.rated_count).toBe(3);
+    const genres = p.top_genres.map((g) => g.genre);
+    expect(genres).toContain("Action");
+    expect(genres).not.toContain("Drama");
+  });
+
+  test("together filter includes together + null-context ratings only", () => {
+    const p = buildUserProfile("u1", ratings, entries, "together");
+    expect(p.rated_count).toBe(3);
+    const genres = p.top_genres.map((g) => g.genre);
+    expect(genres).toContain("Drama");
+    expect(genres).not.toContain("Action");
+  });
+
+  test("null filter keeps current cross-context behavior", () => {
+    const p = buildUserProfile("u1", ratings, entries);
+    expect(p.rated_count).toBe(5);
+  });
+
+  test("null-context ratings contribute to both solo and together profiles", () => {
+    const shared = [
+      { uid: "u1", level: "movie", target_id: "movie:3", stars: 4 },
+      { uid: "u1", level: "movie", target_id: "movie:3", stars: 4 },
+    ];
+    const solo = buildUserProfile("u1", shared, entries, "solo");
+    const tog = buildUserProfile("u1", shared, entries, "together");
+    expect(solo.rated_count).toBe(2);
+    expect(tog.rated_count).toBe(2);
+    // Comedy surfaces in both because it survived the count ≥ 2 filter.
+    expect(solo.top_genres.map((g) => g.genre)).toContain("Comedy");
+    expect(tog.top_genres.map((g) => g.genre)).toContain("Comedy");
   });
 });
 

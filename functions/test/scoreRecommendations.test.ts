@@ -99,6 +99,61 @@ describe("trimProfileForPrompt", () => {
     expect(out.member_uids).toEqual([]);
     expect(out.combined_top_genres).toEqual([]);
     expect(out.per_user_summary).toEqual({});
+    expect(out.per_user_solo_summary).toEqual({});
+    expect(out.per_user_together_summary).toEqual({});
+  });
+
+  test("per-mode summaries read per_user_solo/together when present", () => {
+    const out = trimProfileForPrompt({
+      member_uids: ["u1"],
+      per_user: {
+        u1: {
+          top_genres: [{ genre: "Action", weight: 5 }],
+          liked_titles: [{ title: "CrossContext" }],
+          disliked_titles: [],
+          avg_rating: 3.8,
+        },
+      },
+      per_user_solo: {
+        u1: {
+          top_genres: [{ genre: "Horror", weight: 5 }],
+          liked_titles: [{ title: "SoloFav" }],
+          disliked_titles: [],
+          avg_rating: 4.2,
+        },
+      },
+      per_user_together: {
+        u1: {
+          top_genres: [{ genre: "Comedy", weight: 5 }],
+          liked_titles: [{ title: "TogetherFav" }],
+          disliked_titles: [],
+          avg_rating: 3.5,
+        },
+      },
+    });
+    expect(out.per_user_solo_summary.u1).toContain("Horror");
+    expect(out.per_user_solo_summary.u1).toContain("SoloFav");
+    expect(out.per_user_solo_summary.u1).toContain("avg 4.2");
+    expect(out.per_user_together_summary.u1).toContain("Comedy");
+    expect(out.per_user_together_summary.u1).toContain("TogetherFav");
+    // Cross-context summary still populated (consumers may need it).
+    expect(out.per_user_summary.u1).toContain("CrossContext");
+  });
+
+  test("legacy profile (no per_user_solo/together) falls back to per_user", () => {
+    const out = trimProfileForPrompt({
+      member_uids: ["u1"],
+      per_user: {
+        u1: {
+          top_genres: [{ genre: "Action", weight: 5 }],
+          liked_titles: [{ title: "L" }],
+          disliked_titles: [],
+          avg_rating: 4.0,
+        },
+      },
+    });
+    expect(out.per_user_solo_summary.u1).toBe(out.per_user_summary.u1);
+    expect(out.per_user_together_summary.u1).toBe(out.per_user_summary.u1);
   });
 
   test("members without per_user data are skipped in summary", () => {
@@ -149,6 +204,8 @@ describe("buildPrompt", () => {
     member_uids: ["u1"],
     combined_top_genres: ["Action"],
     per_user_summary: { u1: "avg 4.0; likes: Action" },
+    per_user_solo_summary: { u1: "avg 4.2; likes: Horror" },
+    per_user_together_summary: { u1: "avg 3.5; likes: Comedy" },
   };
 
   test("prompt includes every candidate with its key tag", () => {
@@ -163,6 +220,21 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("[key=tv:7]");
     expect(prompt).toContain("(2020)");
     expect(prompt).toContain("Top shared genres: Action");
+  });
+
+  test("prompt includes both solo and together taste summaries per member", () => {
+    const prompt = buildPrompt(
+      [{ media_type: "movie", tmdb_id: 1, title: "A" }],
+      profile,
+    );
+    expect(prompt).toContain("together-context taste:");
+    expect(prompt).toContain("solo-context taste:");
+    // Summaries for u1 each land under their labelled line.
+    expect(prompt).toContain("Horror");
+    expect(prompt).toContain("Comedy");
+    // Tells Claude how to route the two contexts into the two scores.
+    expect(prompt).toContain("together-context taste for the `together` score");
+    expect(prompt).toContain("solo-context taste for their own `solo` score");
   });
 
   test("instructs the model to return JSON-only, no prose", () => {
