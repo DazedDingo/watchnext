@@ -107,6 +107,9 @@ class HouseholdStats {
   /// Same rationale as perUserSolo — null-context ratings stay out of the
   /// breakout so the count reflects actual together-mode activity.
   final Map<String, UserStats> perUserTogether;
+  /// Consecutive-day rating streak per member. Empty entries are omitted —
+  /// call-sites should fall back to RatingStreak.empty.
+  final Map<String, RatingStreak> ratingStreaks;
   final double compatibilityPct; // 0-1 from tasteProfile, or -1 if unknown
 
   const HouseholdStats({
@@ -118,6 +121,7 @@ class HouseholdStats {
     required this.perUser,
     this.perUserSolo = const {},
     this.perUserTogether = const {},
+    this.ratingStreaks = const {},
     this.compatibilityPct = -1,
   });
 }
@@ -132,6 +136,83 @@ class UserStats {
     required this.ratedCount,
     required this.distribution,
   });
+}
+
+/// Consecutive-day rating streak for a single member. Both are 0 if the user
+/// has never rated anything.
+class RatingStreak {
+  /// Streak ending today or yesterday (1-day grace so not-yet-rated-today
+  /// doesn't break a live streak). 0 if the most recent rating is older than
+  /// yesterday.
+  final int current;
+
+  /// Longest consecutive-day run ever observed.
+  final int best;
+
+  const RatingStreak({required this.current, required this.best});
+
+  static const empty = RatingStreak(current: 0, best: 0);
+}
+
+DateTime _dayOnlyUtc(DateTime dt) {
+  final u = dt.toUtc();
+  return DateTime.utc(u.year, u.month, u.day);
+}
+
+/// Computes a member's rating streak (current + best) from the full rating
+/// list. Pure — exposed for unit tests. `today` is injectable so tests can
+/// freeze the clock; defaults to `DateTime.now()`.
+///
+/// Multiple ratings on the same day collapse into a single "streak day".
+/// Days are bucketed in UTC — good enough for a two-person household; can
+/// switch to local-time bucketing if users in extreme timezones complain.
+RatingStreak ratingStreakForUser(
+  String uid,
+  List<Rating> ratings, {
+  DateTime? today,
+}) {
+  final todayDay = _dayOnlyUtc(today ?? DateTime.now());
+  final yesterdayDay = todayDay.subtract(const Duration(days: 1));
+
+  final days = <DateTime>{};
+  for (final r in ratings) {
+    if (r.uid != uid) continue;
+    days.add(_dayOnlyUtc(r.ratedAt));
+  }
+  if (days.isEmpty) return RatingStreak.empty;
+
+  final sortedDesc = days.toList()..sort((a, b) => b.compareTo(a));
+
+  int current = 0;
+  DateTime? cursor;
+  if (sortedDesc.first == todayDay) {
+    cursor = todayDay;
+  } else if (sortedDesc.first == yesterdayDay) {
+    cursor = yesterdayDay;
+  }
+  if (cursor != null) {
+    for (final d in sortedDesc) {
+      if (d == cursor) {
+        current++;
+        cursor = cursor!.subtract(const Duration(days: 1));
+      } else if (d.isBefore(cursor!)) {
+        break;
+      }
+    }
+  }
+
+  int best = 1;
+  int run = 1;
+  for (int i = 1; i < sortedDesc.length; i++) {
+    if (sortedDesc[i - 1].difference(sortedDesc[i]).inDays == 1) {
+      run++;
+      if (run > best) best = run;
+    } else {
+      run = 1;
+    }
+  }
+
+  return RatingStreak(current: current, best: best);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +298,14 @@ HouseholdStats computeHouseholdStats({
     movieShowRatings.where((r) => r.context == 'together').toList(),
   );
 
+  final ratingStreaks = <String, RatingStreak>{};
+  for (final uid in perUser.keys) {
+    final streak = ratingStreakForUser(uid, movieShowRatings);
+    if (streak.current > 0 || streak.best > 0) {
+      ratingStreaks[uid] = streak;
+    }
+  }
+
   final combined = tasteProfile?['combined'] as Map<String, dynamic>?;
   final compatRaw =
       (combined?['compatibility'] as Map?)?['within_1_star_pct'] as num?;
@@ -231,6 +320,7 @@ HouseholdStats computeHouseholdStats({
     perUser: perUser,
     perUserSolo: perUserSolo,
     perUserTogether: perUserTogether,
+    ratingStreaks: ratingStreaks,
     compatibilityPct: compat,
   );
 }

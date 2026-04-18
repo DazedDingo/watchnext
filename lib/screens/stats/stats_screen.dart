@@ -282,6 +282,7 @@ class _RatingSection extends StatelessWidget {
                   stats: entry.value,
                   solo: stats.perUserSolo[entry.key],
                   together: stats.perUserTogether[entry.key],
+                  streak: stats.ratingStreaks[entry.key],
                 ),
               );
             }),
@@ -300,11 +301,14 @@ class _UserRatingBars extends StatelessWidget {
   final UserStats? solo;
   /// Together-only subset (same null/empty suppression).
   final UserStats? together;
+  /// Consecutive-day rating streak. Null or empty → no chip rendered.
+  final RatingStreak? streak;
   const _UserRatingBars({
     required this.name,
     required this.stats,
     this.solo,
     this.together,
+    this.streak,
   });
 
   @override
@@ -313,7 +317,9 @@ class _UserRatingBars extends StatelessWidget {
         stats.distribution.values.fold(0, (a, b) => a > b ? a : b);
     final hasSoloData = (solo?.ratedCount ?? 0) > 0;
     final hasTogetherData = (together?.ratedCount ?? 0) > 0;
-    final showSplit = hasSoloData || hasTogetherData;
+    final hasStreak =
+        streak != null && (streak!.current > 0 || streak!.best > 0);
+    final showChipRow = hasSoloData || hasTogetherData || hasStreak;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -329,18 +335,19 @@ class _UserRatingBars extends StatelessWidget {
             ),
           ],
         ),
-        if (showSplit) ...[
+        if (showChipRow) ...[
           const SizedBox(height: 4),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
             children: [
-              if (hasSoloData) ...[
+              if (hasStreak) _StreakChip(streak: streak!),
+              if (hasSoloData)
                 _ContextChip(
                   label: 'Solo',
                   avg: solo!.avgRating,
                   count: solo!.ratedCount,
                 ),
-                const SizedBox(width: 8),
-              ],
               if (hasTogetherData)
                 _ContextChip(
                   label: 'Together',
@@ -404,6 +411,48 @@ class _UserRatingBars extends StatelessWidget {
       default:
         return Colors.redAccent;
     }
+  }
+}
+
+class _StreakChip extends StatelessWidget {
+  final RatingStreak streak;
+  const _StreakChip({required this.streak});
+
+  @override
+  Widget build(BuildContext context) {
+    final hot = streak.current >= 3;
+    final showBest =
+        streak.best > streak.current && streak.best > 1;
+
+    final String label;
+    if (streak.current > 0) {
+      label = '${hot ? '🔥 ' : ''}${streak.current}-day streak';
+    } else {
+      label = 'Best: ${streak.best}';
+    }
+    final extra = showBest ? ' · best ${streak.best}' : '';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: hot
+            ? Colors.deepOrange.withValues(alpha: 0.15)
+            : Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: hot ? Colors.deepOrange : Colors.white12,
+          width: 0.5,
+        ),
+      ),
+      child: Text(
+        '$label$extra',
+        style: TextStyle(
+          fontSize: 11,
+          color: hot ? Colors.deepOrangeAccent : Colors.white70,
+          fontWeight: hot ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+    );
   }
 }
 

@@ -134,9 +134,10 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 - **Per-mode rating + predict breakdown** — Ratings card shows small Solo/Together avg+count chips per member (from `Rating.context`); Predict & Rate cards show Solo/Together % and wins-over-total sub-rows when that member has context-tagged predictions. Null-context ratings/predictions are kept out of the breakouts so the split numbers reflect post-rollout activity only.
 - **Predict leaderboard** — populated by `PredictionService.markRevealSeen` incrementing `predict_total` / `predict_wins` on member doc (plus the split-context counters used by the breakout).
 - **`whose_turn` counters** — updated in `DecideService.recordDecision` for tiebreak fairness.
+- **Rating streak** — `ratingStreakForUser` (pure, UTC-day bucketed, 1-day grace) derives current + best from `/ratings` with no schema change. Surfaced as a `_StreakChip` next to the Solo/Together chips on the Ratings card — flame 🔥 styling when `current >= 3`, shows "best N" when the historical run beats the active one.
 
 **Gaps vs spec:**
-- **Streaks** — watch streak, rating streak, prediction streak not implemented. No `streak` fields on models or stats provider.
+- **Watch streak** and **prediction streak** — not yet derived. Same pure-function pattern will extend to `/watchEntries.completed_at` and predictions once we ship counters/buckets for those.
 - **Badges** — all 13 from spec (First Watch, Century Club, Genre Explorer, Hidden Gem Hunter, Reddit Scout, Prediction Machine, Perfect Sync, Compromise Champ, Marathon Mode, Around the World, Binge Master, Rewatch Royalty, Collection Completionist) unimplemented. No badge collection, no condition checks, no FCM on unlock.
 - **Home-screen counters** — "Movies watched together", watch streak, Predict & Rate record not displayed on Home.
 - **`gamificationUpdater` Cloud Function** — not exported. Current counter updates are inline in service-layer code, which is fine for `whose_turn` + predict counters but doesn't scale to streaks / badges that need cross-collection triggers.
