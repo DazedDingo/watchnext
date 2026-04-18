@@ -9,6 +9,7 @@ WatchEntry _entry({
   String mediaType = 'movie',
   int? runtime,
   List<String> genres = const [],
+  DateTime? lastWatchedAt,
 }) {
   final parts = id.split(':');
   return WatchEntry(
@@ -18,6 +19,7 @@ WatchEntry _entry({
     title: title,
     runtime: runtime,
     genres: genres,
+    lastWatchedAt: lastWatchedAt,
   );
 }
 
@@ -28,6 +30,8 @@ Rating _rating({
   String level = 'movie',
   String? context,
   DateTime? ratedAt,
+  String? note,
+  List<String> tags = const [],
 }) {
   return Rating(
     id: Rating.buildId(uid, level, targetId),
@@ -37,6 +41,8 @@ Rating _rating({
     stars: stars,
     ratedAt: ratedAt ?? DateTime.utc(2026, 1, 1),
     context: context,
+    note: note,
+    tags: tags,
   );
 }
 
@@ -428,8 +434,9 @@ void main() {
         members: [HouseholdMember(uid: 'u1', displayName: 'Alice')],
       );
       expect(stats.badges, isNotEmpty);
-      // Five household badges + one per-user badge.
-      expect(stats.badges.length, 6);
+      // Six household badges + three per-user badges (prediction, five-star,
+      // critic).
+      expect(stats.badges.length, 9);
     });
 
     test('First Watch — not earned at zero entries, earned at first', () {
@@ -506,6 +513,181 @@ void main() {
       final b = find(badges, 'perfect_sync');
       expect(b.earned, true);
       expect(b.progress, 90);
+    });
+
+    test('Marathon Mode — entries with no lastWatchedAt contribute nothing',
+        () {
+      final entries = List.generate(
+        8,
+        (i) => _entry(id: 'movie:$i', title: 'T$i'),
+      );
+      final badges = computeBadges(entries: entries, members: const []);
+      final b = find(badges, 'marathon_mode');
+      expect(b.progress, 0);
+      expect(b.earned, false);
+    });
+
+    test('Marathon Mode — earned at 5 watches on the same UTC day', () {
+      final day = DateTime.utc(2026, 4, 18, 20);
+      final entries = [
+        for (var i = 0; i < 5; i++)
+          _entry(
+            id: 'movie:$i',
+            title: 'T$i',
+            lastWatchedAt: day.add(Duration(minutes: i * 15)),
+          ),
+        // A straggler on a different day shouldn't boost the count.
+        _entry(
+          id: 'movie:99',
+          title: 'Z',
+          lastWatchedAt: day.add(const Duration(days: 3)),
+        ),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      final b = find(badges, 'marathon_mode');
+      expect(b.earned, true);
+      expect(b.progress, 5);
+    });
+
+    test('Marathon Mode — 4 in one day → not earned, progress tracks max day',
+        () {
+      final day = DateTime.utc(2026, 4, 18, 9);
+      final entries = [
+        for (var i = 0; i < 4; i++)
+          _entry(
+            id: 'movie:$i',
+            title: 'T$i',
+            lastWatchedAt: day.add(Duration(hours: i)),
+          ),
+        _entry(
+          id: 'movie:50',
+          title: 'Other',
+          lastWatchedAt: day.add(const Duration(days: 1, hours: 2)),
+        ),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      final b = find(badges, 'marathon_mode');
+      expect(b.earned, false);
+      expect(b.progress, 4);
+    });
+
+    test('Five Star Fan — below threshold → not earned, progress tracks count',
+        () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 4; i++)
+          _rating(uid: 'u1', targetId: 'movie:$i', stars: 5),
+        _rating(uid: 'u1', targetId: 'movie:10', stars: 4),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      final b = find(badges, 'five_star_fan_u1');
+      expect(b.earned, false);
+      expect(b.progress, 4);
+    });
+
+    test('Five Star Fan — earned at 10 five-star ratings, progress caps', () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 12; i++)
+          _rating(uid: 'u1', targetId: 'movie:$i', stars: 5),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      final b = find(badges, 'five_star_fan_u1');
+      expect(b.earned, true);
+      expect(b.progress, 10);
+    });
+
+    test('Five Star Fan — other members\' ratings do not count', () {
+      final a = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final b = HouseholdMember(uid: 'u2', displayName: 'Bob');
+      final ratings = [
+        for (var i = 0; i < 10; i++)
+          _rating(uid: 'u2', targetId: 'movie:$i', stars: 5),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [a, b],
+        ratings: ratings,
+      );
+      expect(find(badges, 'five_star_fan_u1').earned, false);
+      expect(find(badges, 'five_star_fan_u2').earned, true);
+    });
+
+    test('Five Star Fan — episode ratings do not inflate the count', () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 12; i++)
+          _rating(
+            uid: 'u1',
+            targetId: 'tv:1:s1_e$i',
+            stars: 5,
+            level: 'episode',
+          ),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      expect(find(badges, 'five_star_fan_u1').earned, false);
+      expect(find(badges, 'five_star_fan_u1').progress, 0);
+    });
+
+    test('Critic — counts only ratings with a non-empty note', () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 6; i++)
+          _rating(
+            uid: 'u1',
+            targetId: 'movie:$i',
+            stars: 4,
+            note: 'Thoughts on title $i',
+          ),
+        // Whitespace-only note should not qualify.
+        _rating(
+          uid: 'u1',
+          targetId: 'movie:50',
+          stars: 3,
+          note: '   ',
+        ),
+        // No note at all.
+        _rating(uid: 'u1', targetId: 'movie:51', stars: 2),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      final critic = find(badges, 'critic_u1');
+      expect(critic.earned, false);
+      expect(critic.progress, 6);
+    });
+
+    test('Critic — earned at 10 rated-with-note entries', () {
+      final m = HouseholdMember(uid: 'u1', displayName: 'Alice');
+      final ratings = [
+        for (var i = 0; i < 10; i++)
+          _rating(
+            uid: 'u1',
+            targetId: 'movie:$i',
+            stars: 4,
+            note: 'note $i',
+          ),
+      ];
+      final badges = computeBadges(
+        entries: const [],
+        members: [m],
+        ratings: ratings,
+      );
+      expect(find(badges, 'critic_u1').earned, true);
     });
   });
 

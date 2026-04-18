@@ -4,6 +4,7 @@ import {
   BadgeState,
   EntryDoc,
   MemberDoc,
+  RatingDoc,
 } from "../src/gamificationUpdater";
 
 const entry = (overrides: Partial<EntryDoc> = {}): EntryDoc => ({
@@ -14,6 +15,9 @@ const entry = (overrides: Partial<EntryDoc> = {}): EntryDoc => ({
 
 const member = (overrides: Partial<MemberDoc> & { uid: string }): MemberDoc =>
   ({ ...overrides });
+
+const rating = (overrides: Partial<RatingDoc> & { uid: string }): RatingDoc =>
+  ({ level: "movie", stars: 4, ...overrides });
 
 const findBadge = (badges: BadgeState[], id: string): BadgeState => {
   const b = badges.find((x) => x.id === id);
@@ -121,14 +125,15 @@ describe("evaluateBadges", () => {
     });
   });
 
-  test("empty inputs → five household badges, zero per-user", () => {
+  test("empty inputs → six household badges, zero per-user", () => {
     const badges = evaluateBadges({ entries: [], members: [] });
-    expect(badges).toHaveLength(5);
+    expect(badges).toHaveLength(6);
     expect(badges.map((b) => b.id)).toEqual([
       "first_watch",
       "century_club",
       "genre_explorer",
       "binge_master",
+      "marathon_mode",
       "perfect_sync",
     ]);
   });
@@ -192,6 +197,108 @@ describe("evaluateBadges", () => {
       const b = findBadge(badges, "perfect_sync");
       expect(b.earned).toBe(true);
       expect(b.progress).toBe(90);
+    });
+  });
+
+  describe("Marathon Mode", () => {
+    test("entries without timestamps → zero progress", () => {
+      const entries = Array.from({ length: 8 }, () => entry());
+      const badges = evaluateBadges({ entries, members: [] });
+      const b = findBadge(badges, "marathon_mode");
+      expect(b.progress).toBe(0);
+      expect(b.earned).toBe(false);
+    });
+
+    test("earned at 5 watches on the same UTC day", () => {
+      const base = Date.UTC(2026, 3, 18, 14);
+      const entries = [
+        ...Array.from({ length: 5 }, (_, i) =>
+          entry({ last_watched_at_ms: base + i * 60_000 })),
+        entry({ last_watched_at_ms: base + 3 * 86_400_000 }),
+      ];
+      const badges = evaluateBadges({ entries, members: [] });
+      const b = findBadge(badges, "marathon_mode");
+      expect(b.earned).toBe(true);
+      expect(b.progress).toBe(5);
+    });
+
+    test("progress tracks max-day count when below threshold", () => {
+      const day = Date.UTC(2026, 3, 18);
+      const entries = [
+        ...Array.from({ length: 4 }, (_, i) =>
+          entry({ last_watched_at_ms: day + i * 60_000 })),
+        entry({ last_watched_at_ms: day + 86_400_000 }),
+      ];
+      const badges = evaluateBadges({ entries, members: [] });
+      const b = findBadge(badges, "marathon_mode");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(4);
+    });
+  });
+
+  describe("Five Star Fan", () => {
+    test("below threshold → not earned, progress tracks count", () => {
+      const m = member({ uid: "u1" });
+      const ratings = [
+        ...Array.from({ length: 4 }, () => rating({ uid: "u1", stars: 5 })),
+        rating({ uid: "u1", stars: 4 }),
+      ];
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      const b = findBadge(badges, "five_star_fan_u1");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(4);
+    });
+
+    test("earned at 10 five-star ratings, progress caps", () => {
+      const m = member({ uid: "u1" });
+      const ratings = Array.from({ length: 12 }, () =>
+        rating({ uid: "u1", stars: 5 }));
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      const b = findBadge(badges, "five_star_fan_u1");
+      expect(b.earned).toBe(true);
+      expect(b.progress).toBe(10);
+    });
+
+    test("another member's 5-stars do not count", () => {
+      const a = member({ uid: "u1" });
+      const b = member({ uid: "u2" });
+      const ratings = Array.from({ length: 10 }, () =>
+        rating({ uid: "u2", stars: 5 }));
+      const badges = evaluateBadges({ entries: [], members: [a, b], ratings });
+      expect(findBadge(badges, "five_star_fan_u1").earned).toBe(false);
+      expect(findBadge(badges, "five_star_fan_u2").earned).toBe(true);
+    });
+
+    test("episode-level ratings do not inflate the count", () => {
+      const m = member({ uid: "u1" });
+      const ratings = Array.from({ length: 12 }, () =>
+        rating({ uid: "u1", stars: 5, level: "episode" }));
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      expect(findBadge(badges, "five_star_fan_u1").progress).toBe(0);
+    });
+  });
+
+  describe("Critic", () => {
+    test("counts only ratings with a non-empty note", () => {
+      const m = member({ uid: "u1" });
+      const ratings = [
+        ...Array.from({ length: 6 }, (_, i) =>
+          rating({ uid: "u1", stars: 4, note: `thoughts ${i}` })),
+        rating({ uid: "u1", stars: 3, note: "   " }),
+        rating({ uid: "u1", stars: 2 }),
+      ];
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      const b = findBadge(badges, "critic_u1");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(6);
+    });
+
+    test("earned at 10 rated-with-note entries", () => {
+      const m = member({ uid: "u1" });
+      const ratings = Array.from({ length: 10 }, (_, i) =>
+        rating({ uid: "u1", stars: 4, note: `note ${i}` }));
+      const badges = evaluateBadges({ entries: [], members: [m], ratings });
+      expect(findBadge(badges, "critic_u1").earned).toBe(true);
     });
   });
 });

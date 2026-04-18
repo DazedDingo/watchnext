@@ -199,6 +199,7 @@ class BadgeDef {
 List<BadgeDef> computeBadges({
   required List<WatchEntry> entries,
   required List<HouseholdMember> members,
+  List<Rating> ratings = const [],
   double compatibilityPct = -1,
 }) {
   final result = <BadgeDef>[];
@@ -250,6 +251,26 @@ List<BadgeDef> computeBadges({
     earned: tvCount >= 10,
   ));
 
+  // Marathon Mode — max watches in a single UTC day across all entries.
+  // Entries without `lastWatchedAt` can't be bucketed and are skipped.
+  final dayCounts = <DateTime, int>{};
+  for (final e in entries) {
+    final ts = e.lastWatchedAt;
+    if (ts == null) continue;
+    final day = _dayOnlyUtc(ts);
+    dayCounts[day] = (dayCounts[day] ?? 0) + 1;
+  }
+  final maxPerDay = dayCounts.values.fold<int>(0, (a, b) => a > b ? a : b);
+  result.add(BadgeDef(
+    id: 'marathon_mode',
+    name: 'Marathon Mode',
+    description: 'Watch 5 titles in a single day',
+    iconKey: 'local_fire_department',
+    target: 5,
+    progress: maxPerDay.clamp(0, 5),
+    earned: maxPerDay >= 5,
+  ));
+
   // Perfect Sync — 90% of overlapping ratings agree within 1 star. Value
   // comes from the taste profile CF; -1 means "no profile yet" → zero.
   final compatInt = compatibilityPct < 0 ? 0 : (compatibilityPct * 100).round();
@@ -262,6 +283,12 @@ List<BadgeDef> computeBadges({
     progress: compatInt.clamp(0, 90),
     earned: compatInt >= 90,
   ));
+
+  // Per-user rating-derived counts. Only movie/show ratings count — episode
+  // and season ratings would inflate Five Star Fan / Critic.
+  final movieShow = ratings
+      .where((r) => r.level == 'movie' || r.level == 'show')
+      .toList();
 
   for (final m in members) {
     final total = m.predictTotal;
@@ -280,6 +307,35 @@ List<BadgeDef> computeBadges({
       target: 20,
       progress: progress,
       earned: earned,
+      memberUid: m.uid,
+    ));
+
+    final fiveStars = movieShow
+        .where((r) => r.uid == m.uid && r.stars == 5)
+        .length;
+    result.add(BadgeDef(
+      id: 'five_star_fan_${m.uid}',
+      name: 'Five Star Fan',
+      description: 'Give 10 perfect 5-star ratings',
+      iconKey: 'star_rate',
+      target: 10,
+      progress: fiveStars.clamp(0, 10),
+      earned: fiveStars >= 10,
+      memberUid: m.uid,
+    ));
+
+    final critic = movieShow
+        .where((r) =>
+            r.uid == m.uid && (r.note?.trim().isNotEmpty ?? false))
+        .length;
+    result.add(BadgeDef(
+      id: 'critic_${m.uid}',
+      name: 'Critic',
+      description: 'Leave notes on 10 ratings',
+      iconKey: 'rate_review',
+      target: 10,
+      progress: critic.clamp(0, 10),
+      earned: critic >= 10,
       memberUid: m.uid,
     ));
   }
@@ -448,6 +504,7 @@ HouseholdStats computeHouseholdStats({
   final badges = computeBadges(
     entries: entries,
     members: members,
+    ratings: ratings,
     compatibilityPct: compat,
   );
 

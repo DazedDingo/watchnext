@@ -641,6 +641,12 @@ class _BadgeRow extends StatelessWidget {
         return Icons.tv_outlined;
       case 'favorite':
         return Icons.favorite_outline;
+      case 'local_fire_department':
+        return Icons.local_fire_department_outlined;
+      case 'star_rate':
+        return Icons.star_rate_outlined;
+      case 'rate_review':
+        return Icons.rate_review_outlined;
       default:
         return Icons.workspace_premium_outlined;
     }

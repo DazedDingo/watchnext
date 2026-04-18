@@ -48,6 +48,18 @@ export type MemberDoc = {
 export type EntryDoc = {
   media_type?: string;
   genres?: string[];
+  /// Last-watched timestamp in millis since epoch. Used by Marathon Mode to
+  /// bucket entries by UTC day. Null/undefined entries are skipped rather than
+  /// defaulting to "today" — we don't want a backfill to fake a marathon.
+  last_watched_at_ms?: number | null;
+};
+
+export type RatingDoc = {
+  uid: string;
+  level: string;
+  stars: number;
+  note?: string | null;
+  tags?: string[];
 };
 
 /**
@@ -62,9 +74,11 @@ export type EntryDoc = {
 export function evaluateBadges(params: {
   entries: EntryDoc[];
   members: MemberDoc[];
+  ratings?: RatingDoc[];
   compatibilityPct?: number;
 }): BadgeState[] {
   const { entries, members } = params;
+  const ratings = params.ratings ?? [];
   const compatibilityPct = params.compatibilityPct ?? -1;
   const result: BadgeState[] = [];
 
@@ -111,6 +125,28 @@ export function evaluateBadges(params: {
     member_uid: null,
   });
 
+  // Marathon Mode — max watches in a single UTC day. Entries with no
+  // last_watched_at_ms don't contribute; same rule as the client.
+  const dayCounts = new Map<number, number>();
+  for (const e of entries) {
+    const ts = e.last_watched_at_ms;
+    if (ts == null) continue;
+    const dayKey = Math.floor(ts / 86_400_000);
+    dayCounts.set(dayKey, (dayCounts.get(dayKey) ?? 0) + 1);
+  }
+  let maxPerDay = 0;
+  for (const v of dayCounts.values()) {
+    if (v > maxPerDay) maxPerDay = v;
+  }
+  result.push({
+    id: "marathon_mode",
+    name: "Marathon Mode",
+    progress: Math.min(maxPerDay, 5),
+    target: 5,
+    earned: maxPerDay >= 5,
+    member_uid: null,
+  });
+
   // Perfect Sync — same integer rounding as the client so the progress bar
   // renders identically once the CF persists state.
   const compatInt =
@@ -123,6 +159,12 @@ export function evaluateBadges(params: {
     earned: compatInt >= 90,
     member_uid: null,
   });
+
+  // Pre-filter ratings to movie/show level — episode/season ratings would
+  // inflate Five Star Fan and Critic well past what the user intended.
+  const movieShowRatings = ratings.filter(
+    (r) => r.level === "movie" || r.level === "show",
+  );
 
   for (const m of members) {
     // Match `HouseholdMember.predictTotal` getter on the client — legacy +
@@ -144,6 +186,30 @@ export function evaluateBadges(params: {
       progress,
       target: 20,
       earned,
+      member_uid: m.uid,
+    });
+
+    const fiveStars = movieShowRatings.filter(
+      (r) => r.uid === m.uid && r.stars === 5,
+    ).length;
+    result.push({
+      id: `five_star_fan_${m.uid}`,
+      name: "Five Star Fan",
+      progress: Math.min(fiveStars, 10),
+      target: 10,
+      earned: fiveStars >= 10,
+      member_uid: m.uid,
+    });
+
+    const withNotes = movieShowRatings.filter(
+      (r) => r.uid === m.uid && typeof r.note === "string" && r.note.trim() !== "",
+    ).length;
+    result.push({
+      id: `critic_${m.uid}`,
+      name: "Critic",
+      progress: Math.min(withNotes, 10),
+      target: 10,
+      earned: withNotes >= 10,
       member_uid: m.uid,
     });
   }
@@ -185,21 +251,26 @@ export async function evaluateAndPersistBadges(
   db: admin.firestore.Firestore,
   householdId: string,
 ): Promise<{ written: number; newlyEarned: string[] }> {
-  const [entriesSnap, membersSnap, existingSnap, tasteSnap] =
+  const [entriesSnap, membersSnap, ratingsSnap, existingSnap, tasteSnap] =
     await Promise.all([
       db.collection(`households/${householdId}/watchEntries`).get(),
       db.collection(`households/${householdId}/members`).get(),
+      db.collection(`households/${householdId}/ratings`).get(),
       db.collection(`households/${householdId}/badges`).get(),
       db.doc(`households/${householdId}/tasteProfile/default`).get(),
     ]);
 
   const entries: EntryDoc[] = entriesSnap.docs.map((d) => {
     const data = d.data();
+    const ts = data.last_watched_at;
+    const millis =
+      ts && typeof ts.toMillis === "function" ? ts.toMillis() : null;
     return {
       media_type: typeof data.media_type === "string"
         ? data.media_type
         : undefined,
       genres: Array.isArray(data.genres) ? (data.genres as string[]) : [],
+      last_watched_at_ms: millis,
     };
   });
 
@@ -207,6 +278,17 @@ export async function evaluateAndPersistBadges(
     uid: d.id,
     ...(d.data() as Omit<MemberDoc, "uid">),
   }));
+
+  const ratings: RatingDoc[] = ratingsSnap.docs.map((d) => {
+    const data = d.data();
+    return {
+      uid: typeof data.uid === "string" ? data.uid : "",
+      level: typeof data.level === "string" ? data.level : "movie",
+      stars: typeof data.stars === "number" ? data.stars : 0,
+      note: typeof data.note === "string" ? data.note : null,
+      tags: Array.isArray(data.tags) ? (data.tags as string[]) : [],
+    };
+  });
 
   const existing = new Map<string, { earned: boolean; progress: number }>();
   for (const d of existingSnap.docs) {
@@ -227,7 +309,12 @@ export async function evaluateAndPersistBadges(
   const compatibilityPct =
     typeof compatibilityRaw === "number" ? compatibilityRaw : -1;
 
-  const computed = evaluateBadges({ entries, members, compatibilityPct });
+  const computed = evaluateBadges({
+    entries,
+    members,
+    ratings,
+    compatibilityPct,
+  });
   const { writes, newlyEarned } = diffBadgeUnlocks({ computed, existing });
 
   if (writes.length > 0) {
@@ -396,6 +483,33 @@ export const onMemberWrittenBadges = onDocumentWritten(
       }
     } catch (err) {
       logger.error("badge eval failed (member)", { householdId, err });
+    }
+  },
+);
+
+/**
+ * Firestore trigger — re-evaluate badges when a rating is written. Drives
+ * Five Star Fan (per-user 5-star count) and Critic (per-user rating-with-note
+ * count). The `onRatingWritten` trigger in rescoreRecommendations.ts handles
+ * profile refresh separately; these run in parallel.
+ */
+export const onRatingWrittenBadges = onDocumentWritten(
+  {
+    document: "households/{householdId}/ratings/{ratingId}",
+    region: "europe-west2",
+  },
+  async (event) => {
+    const householdId = event.params.householdId;
+    try {
+      const result = await evaluateAndPersistBadges(
+        admin.firestore(),
+        householdId,
+      );
+      if (result.written > 0 || result.newlyEarned.length > 0) {
+        logger.info("badges evaluated (rating)", { householdId, ...result });
+      }
+    } catch (err) {
+      logger.error("badge eval failed (rating)", { householdId, err });
     }
   },
 );
