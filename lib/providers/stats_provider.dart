@@ -191,13 +191,27 @@ class BadgeDef {
 }
 
 /// Derives the badge list from raw household inputs. Pure — exposed for tests.
-/// Household-level badges (Century Club, Genre Explorer) come first, then one
-/// Prediction Machine badge per member in list order.
+/// Household-level badges come first, then per-member badges in list order.
+///
+/// `compatibilityPct` drives Perfect Sync — pass the value from
+/// `HouseholdStats.compatibilityPct` (0-1, or -1 when the taste profile hasn't
+/// computed it yet, in which case Perfect Sync shows 0 progress).
 List<BadgeDef> computeBadges({
   required List<WatchEntry> entries,
   required List<HouseholdMember> members,
+  double compatibilityPct = -1,
 }) {
   final result = <BadgeDef>[];
+
+  result.add(BadgeDef(
+    id: 'first_watch',
+    name: 'First Watch',
+    description: 'Log your first title',
+    iconKey: 'play_circle',
+    target: 1,
+    progress: entries.isEmpty ? 0 : 1,
+    earned: entries.isNotEmpty,
+  ));
 
   final centuryProgress = entries.length.clamp(0, 100);
   result.add(BadgeDef(
@@ -223,6 +237,30 @@ List<BadgeDef> computeBadges({
     target: 5,
     progress: genreProgress,
     earned: genres.length >= 5,
+  ));
+
+  final tvCount = entries.where((e) => e.mediaType == 'tv').length;
+  result.add(BadgeDef(
+    id: 'binge_master',
+    name: 'Binge Master',
+    description: 'Watch 10 TV shows',
+    iconKey: 'tv',
+    target: 10,
+    progress: tvCount.clamp(0, 10),
+    earned: tvCount >= 10,
+  ));
+
+  // Perfect Sync — 90% of overlapping ratings agree within 1 star. Value
+  // comes from the taste profile CF; -1 means "no profile yet" → zero.
+  final compatInt = compatibilityPct < 0 ? 0 : (compatibilityPct * 100).round();
+  result.add(BadgeDef(
+    id: 'perfect_sync',
+    name: 'Perfect Sync',
+    description: 'Ratings agree within 1 star 90%+ of the time',
+    iconKey: 'favorite',
+    target: 90,
+    progress: compatInt.clamp(0, 90),
+    earned: compatInt >= 90,
   ));
 
   for (final m in members) {
@@ -402,12 +440,16 @@ HouseholdStats computeHouseholdStats({
     }
   }
 
-  final badges = computeBadges(entries: entries, members: members);
-
   final combined = tasteProfile?['combined'] as Map<String, dynamic>?;
   final compatRaw =
       (combined?['compatibility'] as Map?)?['within_1_star_pct'] as num?;
   final compat = compatRaw?.toDouble() ?? -1;
+
+  final badges = computeBadges(
+    entries: entries,
+    members: members,
+    compatibilityPct: compat,
+  );
 
   return HouseholdStats(
     totalTitles: entries.length,

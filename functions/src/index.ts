@@ -25,6 +25,7 @@ export {
 export {
   onWatchEntryWrittenBadges,
   onMemberWrittenBadges,
+  onTasteProfileWrittenBadges,
 } from "./gamificationUpdater";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");

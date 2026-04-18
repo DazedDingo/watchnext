@@ -428,8 +428,84 @@ void main() {
         members: [HouseholdMember(uid: 'u1', displayName: 'Alice')],
       );
       expect(stats.badges, isNotEmpty);
-      // Two household + one per-user badge.
-      expect(stats.badges.length, 3);
+      // Five household badges + one per-user badge.
+      expect(stats.badges.length, 6);
+    });
+
+    test('First Watch — not earned at zero entries, earned at first', () {
+      final zero = computeBadges(entries: const [], members: const []);
+      expect(find(zero, 'first_watch').earned, false);
+
+      final one = computeBadges(
+        entries: [_entry(id: 'movie:1', title: 'A')],
+        members: const [],
+      );
+      expect(find(one, 'first_watch').earned, true);
+    });
+
+    test('Binge Master — counts only TV entries', () {
+      final entries = [
+        ...List.generate(
+          20,
+          (i) => _entry(id: 'movie:$i', title: 'Movie $i'),
+        ),
+        ...List.generate(
+          4,
+          (i) => _entry(id: 'tv:$i', title: 'Show $i', mediaType: 'tv'),
+        ),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      final b = find(badges, 'binge_master');
+      expect(b.earned, false);
+      expect(b.progress, 4);
+    });
+
+    test('Binge Master — earned at 10 TV entries', () {
+      final entries = List.generate(
+        12,
+        (i) => _entry(id: 'tv:$i', title: 'Show $i', mediaType: 'tv'),
+      );
+      final badges = computeBadges(entries: entries, members: const []);
+      expect(find(badges, 'binge_master').earned, true);
+    });
+
+    test('Perfect Sync — no taste profile yet → zero progress', () {
+      final badges =
+          computeBadges(entries: const [], members: const []);
+      final b = find(badges, 'perfect_sync');
+      expect(b.progress, 0);
+      expect(b.earned, false);
+    });
+
+    test('Perfect Sync — below threshold → not earned, progress rounds', () {
+      final badges = computeBadges(
+        entries: const [],
+        members: const [],
+        compatibilityPct: 0.675,
+      );
+      final b = find(badges, 'perfect_sync');
+      expect(b.progress, 68); // 0.675 * 100 rounds to 68
+      expect(b.earned, false);
+    });
+
+    test('Perfect Sync — earned at 90% compatibility', () {
+      final badges = computeBadges(
+        entries: const [],
+        members: const [],
+        compatibilityPct: 0.9,
+      );
+      expect(find(badges, 'perfect_sync').earned, true);
+    });
+
+    test('Perfect Sync — progress caps at target when compat > 0.9', () {
+      final badges = computeBadges(
+        entries: const [],
+        members: const [],
+        compatibilityPct: 0.98,
+      );
+      final b = find(badges, 'perfect_sync');
+      expect(b.earned, true);
+      expect(b.progress, 90);
     });
   });
 

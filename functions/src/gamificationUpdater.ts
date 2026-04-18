@@ -52,17 +52,33 @@ export type EntryDoc = {
 
 /**
  * Derives badge state from raw household inputs. Pure — exposed for unit
- * tests. Order matches client: Century Club, Genre Explorer, then one
- * Prediction Machine per member in the order passed in.
+ * tests. Order matches client: First Watch, Century Club, Genre Explorer,
+ * Binge Master, Perfect Sync, then one Prediction Machine per member.
+ *
+ * `compatibilityPct` is the taste-profile-computed agreement score (0-1).
+ * Pass -1 when the profile hasn't been generated yet — Perfect Sync will
+ * read that as zero progress.
  */
 export function evaluateBadges(params: {
   entries: EntryDoc[];
   members: MemberDoc[];
+  compatibilityPct?: number;
 }): BadgeState[] {
   const { entries, members } = params;
+  const compatibilityPct = params.compatibilityPct ?? -1;
   const result: BadgeState[] = [];
 
   const total = entries.length;
+
+  result.push({
+    id: "first_watch",
+    name: "First Watch",
+    progress: total === 0 ? 0 : 1,
+    target: 1,
+    earned: total >= 1,
+    member_uid: null,
+  });
+
   result.push({
     id: "century_club",
     name: "Century Club",
@@ -82,6 +98,29 @@ export function evaluateBadges(params: {
     progress: Math.min(genres.size, 5),
     target: 5,
     earned: genres.size >= 5,
+    member_uid: null,
+  });
+
+  const tvCount = entries.filter((e) => e.media_type === "tv").length;
+  result.push({
+    id: "binge_master",
+    name: "Binge Master",
+    progress: Math.min(tvCount, 10),
+    target: 10,
+    earned: tvCount >= 10,
+    member_uid: null,
+  });
+
+  // Perfect Sync — same integer rounding as the client so the progress bar
+  // renders identically once the CF persists state.
+  const compatInt =
+    compatibilityPct < 0 ? 0 : Math.round(compatibilityPct * 100);
+  result.push({
+    id: "perfect_sync",
+    name: "Perfect Sync",
+    progress: Math.min(compatInt, 90),
+    target: 90,
+    earned: compatInt >= 90,
     member_uid: null,
   });
 
@@ -146,11 +185,13 @@ export async function evaluateAndPersistBadges(
   db: admin.firestore.Firestore,
   householdId: string,
 ): Promise<{ written: number; newlyEarned: string[] }> {
-  const [entriesSnap, membersSnap, existingSnap] = await Promise.all([
-    db.collection(`households/${householdId}/watchEntries`).get(),
-    db.collection(`households/${householdId}/members`).get(),
-    db.collection(`households/${householdId}/badges`).get(),
-  ]);
+  const [entriesSnap, membersSnap, existingSnap, tasteSnap] =
+    await Promise.all([
+      db.collection(`households/${householdId}/watchEntries`).get(),
+      db.collection(`households/${householdId}/members`).get(),
+      db.collection(`households/${householdId}/badges`).get(),
+      db.doc(`households/${householdId}/tasteProfile/default`).get(),
+    ]);
 
   const entries: EntryDoc[] = entriesSnap.docs.map((d) => {
     const data = d.data();
@@ -176,7 +217,17 @@ export async function evaluateAndPersistBadges(
     });
   }
 
-  const computed = evaluateBadges({ entries, members });
+  const tasteData = tasteSnap.data() ?? {};
+  const combined = (tasteData.combined ?? null) as
+    | Record<string, unknown>
+    | null;
+  const compatibilityRaw =
+    (combined?.compatibility as Record<string, unknown> | undefined)
+      ?.within_1_star_pct;
+  const compatibilityPct =
+    typeof compatibilityRaw === "number" ? compatibilityRaw : -1;
+
+  const computed = evaluateBadges({ entries, members, compatibilityPct });
   const { writes, newlyEarned } = diffBadgeUnlocks({ computed, existing });
 
   if (writes.length > 0) {
@@ -285,6 +336,38 @@ export const onWatchEntryWrittenBadges = onDocumentWritten(
       }
     } catch (err) {
       logger.error("badge eval failed (watchEntry)", { householdId, err });
+    }
+  },
+);
+
+/**
+ * Firestore trigger — re-evaluate badges when the taste profile doc is
+ * (re)written by the scorer / rescore pipeline. Drives Perfect Sync, whose
+ * value comes from `combined.compatibility.within_1_star_pct`.
+ */
+export const onTasteProfileWrittenBadges = onDocumentWritten(
+  {
+    document: "households/{householdId}/tasteProfile/{id}",
+    region: "europe-west2",
+  },
+  async (event) => {
+    const householdId = event.params.householdId;
+    try {
+      const result = await evaluateAndPersistBadges(
+        admin.firestore(),
+        householdId,
+      );
+      if (result.written > 0 || result.newlyEarned.length > 0) {
+        logger.info("badges evaluated (tasteProfile)", {
+          householdId,
+          ...result,
+        });
+      }
+    } catch (err) {
+      logger.error("badge eval failed (tasteProfile)", {
+        householdId,
+        err,
+      });
     }
   },
 );

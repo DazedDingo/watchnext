@@ -635,6 +635,12 @@ class _BadgeRow extends StatelessWidget {
         return Icons.explore_outlined;
       case 'psychology':
         return Icons.psychology_outlined;
+      case 'play_circle':
+        return Icons.play_circle_outline;
+      case 'tv':
+        return Icons.tv_outlined;
+      case 'favorite':
+        return Icons.favorite_outline;
       default:
         return Icons.workspace_premium_outlined;
     }

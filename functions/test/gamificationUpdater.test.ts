@@ -121,11 +121,78 @@ describe("evaluateBadges", () => {
     });
   });
 
-  test("empty inputs → two household badges, zero per-user", () => {
+  test("empty inputs → five household badges, zero per-user", () => {
     const badges = evaluateBadges({ entries: [], members: [] });
-    expect(badges).toHaveLength(2);
-    expect(badges[0].id).toBe("century_club");
-    expect(badges[1].id).toBe("genre_explorer");
+    expect(badges).toHaveLength(5);
+    expect(badges.map((b) => b.id)).toEqual([
+      "first_watch",
+      "century_club",
+      "genre_explorer",
+      "binge_master",
+      "perfect_sync",
+    ]);
+  });
+
+  describe("First Watch", () => {
+    test("not earned at zero entries, earned once any entry exists", () => {
+      const zero = evaluateBadges({ entries: [], members: [] });
+      expect(findBadge(zero, "first_watch").earned).toBe(false);
+
+      const one = evaluateBadges({ entries: [entry()], members: [] });
+      expect(findBadge(one, "first_watch").earned).toBe(true);
+    });
+  });
+
+  describe("Binge Master", () => {
+    test("counts only TV entries", () => {
+      const entries = [
+        ...Array.from({ length: 20 }, () => entry({ media_type: "movie" })),
+        ...Array.from({ length: 6 }, () => entry({ media_type: "tv" })),
+      ];
+      const badges = evaluateBadges({ entries, members: [] });
+      const b = findBadge(badges, "binge_master");
+      expect(b.earned).toBe(false);
+      expect(b.progress).toBe(6);
+    });
+
+    test("earned at 10 TV entries", () => {
+      const entries = Array.from({ length: 12 }, () =>
+        entry({ media_type: "tv" }),
+      );
+      const badges = evaluateBadges({ entries, members: [] });
+      expect(findBadge(badges, "binge_master").earned).toBe(true);
+    });
+  });
+
+  describe("Perfect Sync", () => {
+    test("no taste profile → zero progress, not earned", () => {
+      const badges = evaluateBadges({ entries: [], members: [] });
+      const b = findBadge(badges, "perfect_sync");
+      expect(b.progress).toBe(0);
+      expect(b.earned).toBe(false);
+    });
+
+    test("below threshold, progress rounds to nearest int", () => {
+      const badges = evaluateBadges({
+        entries: [],
+        members: [],
+        compatibilityPct: 0.675,
+      });
+      const b = findBadge(badges, "perfect_sync");
+      expect(b.progress).toBe(68);
+      expect(b.earned).toBe(false);
+    });
+
+    test("earned at 90% compatibility; progress caps at target", () => {
+      const badges = evaluateBadges({
+        entries: [],
+        members: [],
+        compatibilityPct: 0.97,
+      });
+      const b = findBadge(badges, "perfect_sync");
+      expect(b.earned).toBe(true);
+      expect(b.progress).toBe(90);
+    });
   });
 });
 
