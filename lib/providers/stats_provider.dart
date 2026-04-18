@@ -110,6 +110,10 @@ class HouseholdStats {
   /// Consecutive-day rating streak per member. Empty entries are omitted —
   /// call-sites should fall back to RatingStreak.empty.
   final Map<String, RatingStreak> ratingStreaks;
+  /// All achievement badges, earned + unearned. Empty when members list is
+  /// unavailable at compute time. Order is stable: household-level first, then
+  /// per-user in member-list order.
+  final List<BadgeDef> badges;
   final double compatibilityPct; // 0-1 from tasteProfile, or -1 if unknown
 
   const HouseholdStats({
@@ -122,6 +126,7 @@ class HouseholdStats {
     this.perUserSolo = const {},
     this.perUserTogether = const {},
     this.ratingStreaks = const {},
+    this.badges = const [],
     this.compatibilityPct = -1,
   });
 }
@@ -152,6 +157,96 @@ class RatingStreak {
   const RatingStreak({required this.current, required this.best});
 
   static const empty = RatingStreak(current: 0, best: 0);
+}
+
+/// Single achievement badge descriptor. `earned = progress >= target`.
+/// `memberUid` is null for household-level badges, set for per-user ones so
+/// the Stats UI can label the row.
+///
+/// `iconKey` is a UI-layer string (e.g. 'trophy', 'explore') — this provider
+/// stays material-free so the Dart side is easy to unit-test.
+class BadgeDef {
+  final String id;
+  final String name;
+  final String description;
+  final String iconKey;
+  final int target;
+  final int progress;
+  final bool earned;
+  final String? memberUid;
+
+  const BadgeDef({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.iconKey,
+    required this.target,
+    required this.progress,
+    required this.earned,
+    this.memberUid,
+  });
+
+  double get progressPct =>
+      target == 0 ? 0 : (progress / target).clamp(0.0, 1.0);
+}
+
+/// Derives the badge list from raw household inputs. Pure — exposed for tests.
+/// Household-level badges (Century Club, Genre Explorer) come first, then one
+/// Prediction Machine badge per member in list order.
+List<BadgeDef> computeBadges({
+  required List<WatchEntry> entries,
+  required List<HouseholdMember> members,
+}) {
+  final result = <BadgeDef>[];
+
+  final centuryProgress = entries.length.clamp(0, 100);
+  result.add(BadgeDef(
+    id: 'century_club',
+    name: 'Century Club',
+    description: 'Watch 100 titles',
+    iconKey: 'trophy',
+    target: 100,
+    progress: centuryProgress,
+    earned: entries.length >= 100,
+  ));
+
+  final genres = <String>{};
+  for (final e in entries) {
+    genres.addAll(e.genres);
+  }
+  final genreProgress = genres.length.clamp(0, 5);
+  result.add(BadgeDef(
+    id: 'genre_explorer',
+    name: 'Genre Explorer',
+    description: 'Watch titles across 5 genres',
+    iconKey: 'explore',
+    target: 5,
+    progress: genreProgress,
+    earned: genres.length >= 5,
+  ));
+
+  for (final m in members) {
+    final total = m.predictTotal;
+    final wins = m.predictWins;
+    final accuracy = total == 0 ? 0.0 : wins / total;
+    final earned = total >= 20 && accuracy >= 0.8;
+    // Two-phase progress: fill to 20 predictions first (volume), then the UI
+    // surfaces accuracy once volume is met. Keep `target = 20` here so the bar
+    // caps at the volume gate; the row widget adds accuracy copy.
+    final progress = total >= 20 ? 20 : total;
+    result.add(BadgeDef(
+      id: 'prediction_machine_${m.uid}',
+      name: 'Prediction Machine',
+      description: '80% accuracy over 20+ predictions',
+      iconKey: 'psychology',
+      target: 20,
+      progress: progress,
+      earned: earned,
+      memberUid: m.uid,
+    ));
+  }
+
+  return result;
 }
 
 DateTime _dayOnlyUtc(DateTime dt) {
@@ -241,6 +336,7 @@ final tasteProfileProvider =
 HouseholdStats computeHouseholdStats({
   required List<WatchEntry> entries,
   required List<Rating> ratings,
+  List<HouseholdMember> members = const [],
   Map<String, dynamic>? tasteProfile,
 }) {
   int movies = 0;
@@ -306,6 +402,8 @@ HouseholdStats computeHouseholdStats({
     }
   }
 
+  final badges = computeBadges(entries: entries, members: members);
+
   final combined = tasteProfile?['combined'] as Map<String, dynamic>?;
   final compatRaw =
       (combined?['compatibility'] as Map?)?['within_1_star_pct'] as num?;
@@ -321,6 +419,7 @@ HouseholdStats computeHouseholdStats({
     perUserSolo: perUserSolo,
     perUserTogether: perUserTogether,
     ratingStreaks: ratingStreaks,
+    badges: badges,
     compatibilityPct: compat,
   );
 }
@@ -328,11 +427,13 @@ HouseholdStats computeHouseholdStats({
 final statsProvider = Provider<HouseholdStats?>((ref) {
   final entries = ref.watch(watchEntriesProvider).value;
   final ratings = ref.watch(ratingsProvider).value;
+  final members = ref.watch(membersProvider).value ?? const <HouseholdMember>[];
   final tasteProfile = ref.watch(tasteProfileProvider).value;
   if (entries == null || ratings == null) return null;
   return computeHouseholdStats(
     entries: entries,
     ratings: ratings,
+    members: members,
     tasteProfile: tasteProfile,
   );
 });

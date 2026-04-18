@@ -13,8 +13,9 @@ const _statsHelp =
     '• Watched / Movies / TV Shows — counts across both members.\n'
     '• Runtime — total viewing time where TMDB had runtime data.\n'
     '• Compatibility — how often both members rate the same title within 1 star.\n'
-    '• Ratings — per-member star distribution and averages.\n'
+    '• Ratings — per-member star distribution and averages, plus rating streaks.\n'
     '• Top genres — based on what you\'ve actually watched.\n'
+    '• Badges — unlock milestones as you watch, rate, and predict.\n'
     '• Predict & Rate — leaderboard for the prediction game.\n\n'
     'Numbers update in real time as you rate and log watches.';
 
@@ -66,6 +67,13 @@ class StatsScreen extends ConsumerWidget {
                       const SizedBox(height: 16),
                       if (stats.topGenres.isNotEmpty) ...[
                         _GenresCard(genres: stats.topGenres),
+                        const SizedBox(height: 16),
+                      ],
+                      if (stats.badges.isNotEmpty) ...[
+                        _BadgesCard(
+                            badges: stats.badges,
+                            members: members,
+                            uid: uid),
                         const SizedBox(height: 16),
                       ],
                       if (members.isNotEmpty &&
@@ -542,6 +550,164 @@ class _GenresCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Badges card
+// ---------------------------------------------------------------------------
+
+class _BadgesCard extends StatelessWidget {
+  final List<BadgeDef> badges;
+  final List<HouseholdMember> members;
+  final String? uid;
+  const _BadgesCard(
+      {required this.badges, required this.members, this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    final earnedCount = badges.where((b) => b.earned).length;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('BADGES',
+                    style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        color: Colors.white54)),
+                const Spacer(),
+                Text('$earnedCount / ${badges.length}',
+                    style: const TextStyle(
+                        fontSize: 11, color: Colors.white54)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            for (final b in badges)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _BadgeRow(
+                  badge: b,
+                  memberLabel: _labelFor(b.memberUid),
+                  predictMember: b.memberUid == null
+                      ? null
+                      : members.firstWhere(
+                          (m) => m.uid == b.memberUid,
+                          orElse: () => HouseholdMember(
+                              uid: b.memberUid!, displayName: 'Member'),
+                        ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String? _labelFor(String? memberUid) {
+    if (memberUid == null) return null;
+    if (memberUid == uid) return 'You';
+    final m = members.where((m) => m.uid == memberUid);
+    return m.isEmpty ? 'Partner' : m.first.displayName;
+  }
+}
+
+class _BadgeRow extends StatelessWidget {
+  final BadgeDef badge;
+  final String? memberLabel;
+  /// Only non-null for per-user badges — used to print the accuracy line once
+  /// the volume gate is cleared.
+  final HouseholdMember? predictMember;
+  const _BadgeRow(
+      {required this.badge, this.memberLabel, this.predictMember});
+
+  IconData _icon(String key) {
+    switch (key) {
+      case 'trophy':
+        return Icons.emoji_events_outlined;
+      case 'explore':
+        return Icons.explore_outlined;
+      case 'psychology':
+        return Icons.psychology_outlined;
+      default:
+        return Icons.workspace_premium_outlined;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final color = badge.earned ? cs.primary : Colors.white38;
+    final title = memberLabel == null
+        ? badge.name
+        : '${badge.name} · $memberLabel';
+
+    // Prediction Machine: once 20+ predictions exist, swap the progress line
+    // from "N/20" to the current accuracy so users see how close they are.
+    String? progressLabel;
+    if (badge.earned) {
+      progressLabel = 'Earned';
+    } else if (predictMember != null && predictMember!.predictTotal >= 20) {
+      final acc = predictMember!.predictTotal == 0
+          ? 0
+          : (predictMember!.predictWins /
+                  predictMember!.predictTotal *
+                  100)
+              .round();
+      progressLabel = '$acc% accuracy · need 80%';
+    } else {
+      progressLabel = '${badge.progress} / ${badge.target}';
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(_icon(badge.iconKey), size: 26, color: color),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: badge.earned ? Colors.white : Colors.white70,
+                        )),
+                  ),
+                  if (badge.earned)
+                    Icon(Icons.check_circle,
+                        size: 16, color: cs.primary)
+                  else
+                    Text(progressLabel,
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.white54)),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(badge.description,
+                  style: const TextStyle(
+                      fontSize: 12, color: Colors.white54)),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: badge.progressPct,
+                color: color,
+                backgroundColor: Colors.white10,
+                minHeight: 4,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

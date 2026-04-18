@@ -281,6 +281,158 @@ void main() {
     });
   });
 
+  group('computeBadges', () {
+    BadgeDef find(List<BadgeDef> list, String id) =>
+        list.firstWhere((b) => b.id == id);
+
+    test('Century Club — not earned, progress caps at 100', () {
+      final entries = List.generate(
+        45,
+        (i) => _entry(id: 'movie:$i', title: 'T$i'),
+      );
+      final badges = computeBadges(entries: entries, members: const []);
+      final century = find(badges, 'century_club');
+      expect(century.earned, false);
+      expect(century.progress, 45);
+      expect(century.target, 100);
+    });
+
+    test('Century Club — earned once 100+ titles logged', () {
+      final entries = List.generate(
+        120,
+        (i) => _entry(id: 'movie:$i', title: 'T$i'),
+      );
+      final badges = computeBadges(entries: entries, members: const []);
+      final century = find(badges, 'century_club');
+      expect(century.earned, true);
+      expect(century.progress, 100); // capped
+    });
+
+    test('Genre Explorer — counts distinct genres across entries', () {
+      final entries = [
+        _entry(
+            id: 'movie:1',
+            title: 'A',
+            genres: const ['Action', 'Thriller']),
+        _entry(id: 'movie:2', title: 'B', genres: const ['Action']),
+        _entry(id: 'movie:3', title: 'C', genres: const ['Drama']),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      final ge = find(badges, 'genre_explorer');
+      expect(ge.earned, false);
+      expect(ge.progress, 3);
+    });
+
+    test('Genre Explorer — earned at 5 distinct genres', () {
+      final entries = [
+        _entry(
+            id: 'movie:1',
+            title: 'A',
+            genres: const ['Action', 'Thriller', 'Drama']),
+        _entry(
+            id: 'movie:2',
+            title: 'B',
+            genres: const ['Comedy', 'Horror']),
+      ];
+      final badges = computeBadges(entries: entries, members: const []);
+      final ge = find(badges, 'genre_explorer');
+      expect(ge.earned, true);
+      expect(ge.progress, 5);
+    });
+
+    test('Prediction Machine — below volume gate → not earned', () {
+      final m = HouseholdMember(
+        uid: 'u1',
+        displayName: 'Alice',
+        predictTotalLegacy: 5,
+        predictWinsLegacy: 5,
+      );
+      final badges = computeBadges(entries: const [], members: [m]);
+      final pm = find(badges, 'prediction_machine_u1');
+      expect(pm.earned, false); // 100% accuracy but only 5 predictions
+      expect(pm.progress, 5);
+      expect(pm.memberUid, 'u1');
+    });
+
+    test('Prediction Machine — above volume but below accuracy → not earned',
+        () {
+      final m = HouseholdMember(
+        uid: 'u1',
+        displayName: 'Alice',
+        predictTotalLegacy: 30,
+        predictWinsLegacy: 20, // ~66%
+      );
+      final badges = computeBadges(entries: const [], members: [m]);
+      final pm = find(badges, 'prediction_machine_u1');
+      expect(pm.earned, false);
+      expect(pm.progress, 20); // capped at target
+    });
+
+    test('Prediction Machine — earned at 20+ predictions & 80% accuracy', () {
+      final m = HouseholdMember(
+        uid: 'u1',
+        displayName: 'Alice',
+        predictTotalLegacy: 25,
+        predictWinsLegacy: 20, // 80%
+      );
+      final badges = computeBadges(entries: const [], members: [m]);
+      final pm = find(badges, 'prediction_machine_u1');
+      expect(pm.earned, true);
+    });
+
+    test('Prediction Machine — one badge per member', () {
+      final a = HouseholdMember(
+        uid: 'u1',
+        displayName: 'Alice',
+        predictTotalLegacy: 25,
+        predictWinsLegacy: 22,
+      );
+      final b = HouseholdMember(
+        uid: 'u2',
+        displayName: 'Bob',
+        predictTotalLegacy: 10,
+        predictWinsLegacy: 8,
+      );
+      final badges = computeBadges(entries: const [], members: [a, b]);
+      final pmA = find(badges, 'prediction_machine_u1');
+      final pmB = find(badges, 'prediction_machine_u2');
+      expect(pmA.earned, true);
+      expect(pmB.earned, false);
+      expect(pmB.progress, 10);
+    });
+
+    test('Prediction Machine — sums legacy + per-mode counters', () {
+      // predictTotal/predictWins are across-context getters on HouseholdMember.
+      final m = HouseholdMember(
+        uid: 'u1',
+        displayName: 'Alice',
+        predictTotalLegacy: 10,
+        predictWinsLegacy: 8,
+        predictTotalSolo: 15,
+        predictWinsSolo: 12,
+      );
+      final badges = computeBadges(entries: const [], members: [m]);
+      final pm = find(badges, 'prediction_machine_u1');
+      // Total 25, wins 20 → 80%, earned.
+      expect(pm.earned, true);
+    });
+
+    test('computeHouseholdStats surfaces badges in returned struct', () {
+      final entries = List.generate(
+        5,
+        (i) => _entry(id: 'movie:$i', title: 'T$i'),
+      );
+      final stats = computeHouseholdStats(
+        entries: entries,
+        ratings: const [],
+        members: [HouseholdMember(uid: 'u1', displayName: 'Alice')],
+      );
+      expect(stats.badges, isNotEmpty);
+      // Two household + one per-user badge.
+      expect(stats.badges.length, 3);
+    });
+  });
+
   group('computeHouseholdStats — compatibility', () {
     test('reads combined.compatibility.within_1_star_pct from tasteProfile', () {
       final stats = computeHouseholdStats(
