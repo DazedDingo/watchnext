@@ -10,6 +10,7 @@ import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
 import '../../providers/watch_entries_provider.dart';
+import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../services/tmdb_service.dart';
 import '../../utils/rec_explainer.dart';
@@ -23,6 +24,8 @@ const _homeHelp =
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
     '• Mood pills — filter the list to a vibe (cozy, tense, etc.).\n'
+    '• Year pills — narrow to a decade (2020s, 90s, Classic, etc.).\n'
+    '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz.\n'
     '• Ask AI (bottom-right) — chat with the concierge for a bespoke recommendation.\n'
@@ -39,11 +42,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // IDs dismissed via "Not tonight" — local per-session, not persisted.
   final _dismissed = <String>{};
 
+  // Live search query. Local per-session; cleared on screen rebuild.
+  final _searchCtrl = TextEditingController();
+  String _search = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final mode = ref.watch(viewModeProvider);
     final mood = ref.watch(moodProvider);
     final runtime = ref.watch(runtimeFilterProvider);
+    final year = ref.watch(yearFilterProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
@@ -51,16 +65,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final recs = recsAsync.value ?? const [];
 
     // Mood filter — if no mood or no genre mapping, show everything.
+    // Graceful on empty genres: recs scored before coerceGenres landed have
+    // genres=[]; dropping them would leave only watchlist candidates visible.
     final moodGenres = mood?.genres ?? const [];
     final moodFiltered = moodGenres.isEmpty
         ? recs
-        : recs.where((r) => r.genres.any(moodGenres.contains)).toList();
+        : recs
+            .where((r) =>
+                r.genres.isEmpty || r.genres.any(moodGenres.contains))
+            .toList();
 
     // Runtime filter — null bucket = show everything. An active bucket
     // hides recs whose runtime we don't know (trending sources strip it).
-    final filtered = runtime == null
+    final runtimeFiltered = runtime == null
         ? moodFiltered
         : moodFiltered.where((r) => runtime.matches(r.runtime)).toList();
+
+    // Year filter — same contract as runtime: null bucket = show everything,
+    // active bucket drops unknown-year items.
+    final yearFiltered = year == null
+        ? runtimeFiltered
+        : runtimeFiltered.where((r) => year.matches(r.year)).toList();
+
+    // Search filter — trimmed case-insensitive substring on title.
+    final q = _search.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? yearFiltered
+        : yearFiltered
+            .where((r) => r.title.toLowerCase().contains(q))
+            .toList();
 
     final available =
         filtered.where((r) => !_dismissed.contains(r.id)).toList();
@@ -167,6 +200,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onSelect: (b) =>
                   ref.read(modeRuntimeProvider.notifier).set(mode, b),
             ),
+            _YearPills(
+              selected: year,
+              onSelect: (b) =>
+                  ref.read(modeYearProvider.notifier).set(mode, b),
+            ),
+            _SearchField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _search = v),
+            ),
             if (tonightsPick != null) ...[
               const _SectionLabel("TONIGHT'S PICK"),
               _TonightsPick(
@@ -272,6 +314,78 @@ class _RuntimePills extends StatelessWidget {
             onSelected: (_) => onSelect(active ? null : bucket),
           );
         },
+      ),
+    );
+  }
+}
+
+// ─── Year pills ───────────────────────────────────────────────────────────────
+
+class _YearPills extends StatelessWidget {
+  final YearBucket? selected;
+  final void Function(YearBucket?) onSelect;
+
+  const _YearPills({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: YearBucket.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final bucket = YearBucket.values[i];
+          final active = selected == bucket;
+          return FilterChip(
+            avatar: const Icon(Icons.calendar_today, size: 14),
+            label: Text(bucket.label),
+            selected: active,
+            onSelected: (_) => onSelect(active ? null : bucket),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Search field ─────────────────────────────────────────────────────────────
+
+class _SearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _SearchField({required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Search titles…',
+          prefixIcon: const Icon(Icons.search, size: 20),
+          suffixIcon: controller.text.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.clear, size: 18),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
       ),
     );
   }
@@ -574,6 +688,8 @@ class _SourceBadge extends StatelessWidget {
         return 'On Your List';
       case 'trending':
         return 'Trending';
+      case 'top_rated':
+        return 'Top Rated';
       case 'reddit':
         return 'Reddit Hype';
       case 'similar':

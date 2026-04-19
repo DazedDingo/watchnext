@@ -112,7 +112,7 @@ void main() {
 
   group('buildCandidates — trending', () {
     test('resolves genre_ids from TMDB trending payload', () {
-      final out = buildCandidates(watchlist: const [], trendingPayload: const {
+      final out = buildCandidates(watchlist: const [], trendingMoviesPayload: const {
         'results': [
           {
             'id': 7,
@@ -138,14 +138,14 @@ void main() {
           });
       final out = buildCandidates(
         watchlist: const [],
-        trendingPayload: {'results': results},
-        trendingCap: 5,
+        trendingMoviesPayload: {'results': results},
+        tmdbCap: 5,
       );
       expect(out, hasLength(5));
     });
 
     test('tv trending uses first_air_date for year', () {
-      final out = buildCandidates(watchlist: const [], trendingPayload: const {
+      final out = buildCandidates(watchlist: const [], trendingMoviesPayload: const {
         'results': [
           {
             'id': 9,
@@ -164,7 +164,7 @@ void main() {
     test('empty trending payload is tolerated', () {
       final out = buildCandidates(
         watchlist: const [],
-        trendingPayload: const {},
+        trendingMoviesPayload: const {},
       );
       expect(out, isEmpty);
     });
@@ -172,13 +172,13 @@ void main() {
     test('missing results key is tolerated', () {
       final out = buildCandidates(
         watchlist: const [],
-        trendingPayload: const {'status': 'ok'},
+        trendingMoviesPayload: const {'status': 'ok'},
       );
       expect(out, isEmpty);
     });
 
     test('malformed trending row (no id) is skipped', () {
-      final out = buildCandidates(watchlist: const [], trendingPayload: const {
+      final out = buildCandidates(watchlist: const [], trendingMoviesPayload: const {
         'results': [
           {'title': 'no id'},
           {'id': 7, 'title': 'kept', 'genre_ids': [18]},
@@ -207,7 +207,7 @@ void main() {
             'genre_ids': [28],
           },
         ],
-        trendingPayload: const {
+        trendingMoviesPayload: const {
           'results': [
             {
               'id': 1,
@@ -229,7 +229,7 @@ void main() {
         redditMentions: [
           {'media_type': 'movie', 'tmdb_id': 2, 'title': 'R'},
         ],
-        trendingPayload: const {
+        trendingMoviesPayload: const {
           'results': [
             {'id': 3, 'media_type': 'movie', 'title': 'T', 'genre_ids': []},
           ],
@@ -247,7 +247,7 @@ void main() {
         () {
       // Regression guard for the root cause of the "empty mood pill" bug.
       // Trending rows previously had no genres → mood filter killed them.
-      final out = buildCandidates(watchlist: const [], trendingPayload: const {
+      final out = buildCandidates(watchlist: const [], trendingMoviesPayload: const {
         'results': [
           {
             'id': 100,
@@ -289,7 +289,7 @@ void main() {
             'genre_ids': [99],
           },
         ],
-        trendingPayload: const {
+        trendingMoviesPayload: const {
           'results': [
             {
               'id': 3,
@@ -310,7 +310,7 @@ void main() {
     test('realistic TMDB trending payload resolves every known genre id', () {
       // Snapshot-ish payload derived from TMDB /trending/all/week response
       // shape. Tests that the builder doesn't choke on extra fields.
-      final out = buildCandidates(watchlist: const [], trendingPayload: const {
+      final out = buildCandidates(watchlist: const [], trendingMoviesPayload: const {
         'page': 1,
         'results': [
           {
@@ -387,7 +387,7 @@ void main() {
             'genre_ids': [28],
           },
         ],
-        trendingPayload: const {
+        trendingMoviesPayload: const {
           'results': [
             {
               'id': 30,
@@ -417,14 +417,183 @@ void main() {
         () {
       final out = buildCandidates(
         watchlist: const [],
-        trendingPayload: const {
+        trendingMoviesPayload: const {
           'results': [
             {'id': 1, 'media_type': 'movie', 'title': 'X', 'genre_ids': [18]},
           ],
         },
-        trendingCap: 0,
+        tmdbCap: 0,
       );
       expect(out, isEmpty);
+    });
+  });
+
+  group('buildCandidates — expanded TMDB sources', () {
+    test('trending TV payload produces tv-domain candidates', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingTvPayload: const {
+          'results': [
+            {
+              'id': 1,
+              'name': 'Severance',
+              'genre_ids': [9648, 18], // Mystery, Drama
+              'first_air_date': '2022-02-18',
+            },
+          ],
+        },
+      );
+      expect(out, hasLength(1));
+      expect(out.first['media_type'], 'tv');
+      expect(out.first['source'], 'trending');
+      expect(out.first['genres'], ['Mystery', 'Drama']);
+      expect(out.first['year'], 2022);
+    });
+
+    test('top-rated movies get source=top_rated and use the movie genre map',
+        () {
+      final out = buildCandidates(
+        watchlist: const [],
+        topRatedMoviesPayload: const {
+          'results': [
+            {
+              'id': 2,
+              'title': 'The Godfather',
+              'genre_ids': [80, 18], // Crime, Drama
+              'release_date': '1972-03-24',
+            },
+          ],
+        },
+      );
+      expect(out.first['source'], 'top_rated');
+      expect(out.first['media_type'], 'movie');
+      expect(out.first['genres'], ['Crime', 'Drama']);
+      expect(out.first['year'], 1972);
+    });
+
+    test('top-rated TV gets source=top_rated with tv genre map', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        topRatedTvPayload: const {
+          'results': [
+            {
+              'id': 3,
+              'name': 'Breaking Bad',
+              'genre_ids': [18, 80], // Drama, Crime
+              'first_air_date': '2008-01-20',
+            },
+          ],
+        },
+      );
+      expect(out.first['source'], 'top_rated');
+      expect(out.first['media_type'], 'tv');
+      expect(out.first['genres'], ['Drama', 'Crime']);
+    });
+
+    test('all four TMDB sources contribute in declared order', () {
+      // trending movies → trending TV → top-rated movies → top-rated TV
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: const {
+          'results': [
+            {'id': 1, 'title': 'TM', 'genre_ids': [18]},
+          ],
+        },
+        trendingTvPayload: const {
+          'results': [
+            {'id': 2, 'name': 'TT', 'genre_ids': [18]},
+          ],
+        },
+        topRatedMoviesPayload: const {
+          'results': [
+            {'id': 3, 'title': 'RM', 'genre_ids': [18]},
+          ],
+        },
+        topRatedTvPayload: const {
+          'results': [
+            {'id': 4, 'name': 'RT', 'genre_ids': [18]},
+          ],
+        },
+      );
+      expect(out.map((c) => c['title']).toList(), ['TM', 'TT', 'RM', 'RT']);
+      expect(out.map((c) => c['source']).toList(),
+          ['trending', 'trending', 'top_rated', 'top_rated']);
+    });
+
+    test('dedup across TMDB sources — same id only ingested once', () {
+      // Trending TV and top-rated TV often share popular shows; we should
+      // keep the first (trending) and drop the later top-rated dupe.
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingTvPayload: const {
+          'results': [
+            {'id': 99, 'name': 'Shared Show', 'genre_ids': [18]},
+          ],
+        },
+        topRatedTvPayload: const {
+          'results': [
+            {'id': 99, 'name': 'Shared Show', 'genre_ids': [18]},
+          ],
+        },
+      );
+      expect(out, hasLength(1));
+      expect(out.first['source'], 'trending');
+    });
+
+    test('tmdbCap applies per source, not globally', () {
+      // 5-cap × 4 sources should yield up to 20 distinct candidates.
+      Map<String, dynamic> payload(int base) => {
+            'results': List.generate(10, (i) => {
+                  'id': base + i,
+                  'title': 'X${base + i}',
+                  'genre_ids': const [18],
+                }),
+          };
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: payload(1000),
+        trendingTvPayload: payload(2000),
+        topRatedMoviesPayload: payload(3000),
+        topRatedTvPayload: payload(4000),
+        tmdbCap: 5,
+      );
+      expect(out, hasLength(20));
+    });
+
+    test('mixed pool: mood filter finds hits across all four TMDB sources',
+        () {
+      // Exercises the full user story — a "Mind-Bending" pill should surface
+      // Sci-Fi picks whether they came from trending or top-rated.
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: const {
+          'results': [
+            {'id': 1, 'title': 'Inception', 'genre_ids': [878]},
+          ],
+        },
+        trendingTvPayload: const {
+          'results': [
+            {'id': 2, 'name': 'Devs', 'genre_ids': [10765]},
+          ],
+        },
+        topRatedMoviesPayload: const {
+          'results': [
+            {'id': 3, 'title': '2001', 'genre_ids': [878]},
+          ],
+        },
+        topRatedTvPayload: const {
+          'results': [
+            {'id': 4, 'name': 'Fringe', 'genre_ids': [10765]},
+          ],
+        },
+      );
+      const moodGenres = ['Science Fiction', 'Sci-Fi & Fantasy', 'Mystery'];
+      final matched = out
+          .where((c) =>
+              (c['genres'] as List).any((g) => moodGenres.contains(g)))
+          .map((c) => c['title'])
+          .toList();
+      expect(matched, containsAll(['Inception', 'Devs', '2001', 'Fringe']));
     });
   });
 
@@ -462,7 +631,7 @@ void main() {
         () {
       final out = buildCandidates(
         watchlist: const [],
-        trendingPayload: const {
+        trendingMoviesPayload: const {
           'results': [
             {
               'id': 1,

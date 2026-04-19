@@ -32,7 +32,7 @@ class RecommendationsService {
   Stream<List<Recommendation>> stream(String householdId) {
     return _col(householdId)
         .orderBy('match_score', descending: true)
-        .limit(50)
+        .limit(120)
         .snapshots()
         .map((s) => s.docs.map(Recommendation.fromDoc).toList());
   }
@@ -59,13 +59,17 @@ class RecommendationsService {
         .call({'householdId': householdId});
   }
 
-  /// Builds a candidate pool from the shared watchlist plus TMDB trending,
+  /// Builds a candidate pool from the shared watchlist plus four TMDB
+  /// sources (trending movies + TV, top-rated movies + TV) and Reddit buzz,
   /// then asks Claude to score them. Result lands in `/recommendations` and
   /// is picked up by the stream.
+  ///
+  /// Each TMDB source is fetched independently and best-effort: a failure
+  /// in one (e.g. TMDB rate-limit on top-rated) doesn't blank the pool.
   Future<void> refresh(
     String householdId, {
     required List<WatchlistItem> watchlist,
-    int trendingCap = 20,
+    int tmdbCap = 20,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
     try {
@@ -79,18 +83,23 @@ class RecommendationsService {
       // Best-effort; no Reddit data is fine.
     }
 
-    Map<String, dynamic> trendingPayload = const {};
-    try {
-      trendingPayload = await _tmdb.trendingMovies();
-    } catch (_) {
-      // Trending is best-effort — the watchlist alone is still a valid pool.
-    }
+    // Four TMDB sources fetched in parallel. Each is best-effort — the
+    // watchlist alone is still a valid pool.
+    final results = await Future.wait([
+      _tmdb.trendingMovies().catchError((_) => <String, dynamic>{}),
+      _tmdb.trendingTv().catchError((_) => <String, dynamic>{}),
+      _tmdb.topRatedMovies().catchError((_) => <String, dynamic>{}),
+      _tmdb.topRatedTv().catchError((_) => <String, dynamic>{}),
+    ]);
 
     final candidates = buildCandidates(
       watchlist: watchlist,
       redditMentions: redditRows,
-      trendingPayload: trendingPayload,
-      trendingCap: trendingCap,
+      trendingMoviesPayload: results[0],
+      trendingTvPayload: results[1],
+      topRatedMoviesPayload: results[2],
+      topRatedTvPayload: results[3],
+      tmdbCap: tmdbCap,
     );
 
     if (candidates.isEmpty) return;
@@ -103,17 +112,23 @@ class RecommendationsService {
 }
 
 /// Pure candidate-list builder — exposed for testing. Merges watchlist,
-/// Reddit mentions, and TMDB trending rows into the payload shape the
-/// `scoreRecommendations` CF expects. Handles genre resolution (id → name)
-/// so the mood-pill filter has something to match against.
+/// Reddit mentions, and four TMDB sources (trending movies + TV, top-rated
+/// movies + TV) into the payload shape the `scoreRecommendations` CF
+/// expects. Handles genre resolution (id → name) so the mood-pill filter
+/// has something to match against.
 ///
-/// Order: watchlist first, then Reddit, then trending. Dedup by
-/// `{mediaType}:{tmdbId}`.
+/// Order: watchlist first, then Reddit, then TMDB sources in declaration
+/// order. Dedup by `{mediaType}:{tmdbId}`. Each TMDB source is capped to
+/// [tmdbCap] rows individually so one noisy source can't crowd out the
+/// others.
 List<Map<String, dynamic>> buildCandidates({
   required List<WatchlistItem> watchlist,
   List<Map<String, dynamic>> redditMentions = const [],
-  Map<String, dynamic> trendingPayload = const {},
-  int trendingCap = 20,
+  Map<String, dynamic> trendingMoviesPayload = const {},
+  Map<String, dynamic> trendingTvPayload = const {},
+  Map<String, dynamic> topRatedMoviesPayload = const {},
+  Map<String, dynamic> topRatedTvPayload = const {},
+  int tmdbCap = 20,
 }) {
   final candidates = <Map<String, dynamic>>[];
   final seen = <String>{};
@@ -154,27 +169,38 @@ List<Map<String, dynamic>> buildCandidates({
     });
   }
 
-  final rows = (trendingPayload['results'] as List? ?? const [])
-      .cast<Map<String, dynamic>>();
-  for (final m in rows.take(trendingCap)) {
-    final id = (m['id'] as num?)?.toInt();
-    if (id == null) continue;
-    final mediaType = (m['media_type'] as String?) ?? 'movie';
-    final key = '$mediaType:$id';
-    if (!seen.add(key)) continue;
-    final date = (m['release_date'] ?? m['first_air_date']) as String?;
-    candidates.add({
-      'media_type': mediaType,
-      'tmdb_id': id,
-      'title': (m['title'] ?? m['name']) as String? ?? 'Untitled',
-      'year': (date != null && date.length >= 4)
-          ? int.tryParse(date.substring(0, 4))
-          : null,
-      'poster_path': m['poster_path'] as String?,
-      'genres': coerceGenres(m['genre_ids'], mediaType: mediaType),
-      'overview': m['overview'] as String?,
-      'source': 'trending',
-    });
+  // TMDB sources: each has a default media_type (used when the row shape
+  // doesn't carry one) and a source tag so the UI can badge it.
+  final tmdbSources = <(Map<String, dynamic>, String, String)>[
+    (trendingMoviesPayload, 'movie', 'trending'),
+    (trendingTvPayload, 'tv', 'trending'),
+    (topRatedMoviesPayload, 'movie', 'top_rated'),
+    (topRatedTvPayload, 'tv', 'top_rated'),
+  ];
+
+  for (final (payload, defaultMediaType, source) in tmdbSources) {
+    final rows = (payload['results'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
+    for (final m in rows.take(tmdbCap)) {
+      final id = (m['id'] as num?)?.toInt();
+      if (id == null) continue;
+      final mediaType = (m['media_type'] as String?) ?? defaultMediaType;
+      final key = '$mediaType:$id';
+      if (!seen.add(key)) continue;
+      final date = (m['release_date'] ?? m['first_air_date']) as String?;
+      candidates.add({
+        'media_type': mediaType,
+        'tmdb_id': id,
+        'title': (m['title'] ?? m['name']) as String? ?? 'Untitled',
+        'year': (date != null && date.length >= 4)
+            ? int.tryParse(date.substring(0, 4))
+            : null,
+        'poster_path': m['poster_path'] as String?,
+        'genres': coerceGenres(m['genre_ids'], mediaType: mediaType),
+        'overview': m['overview'] as String?,
+        'source': source,
+      });
+    }
   }
 
   return candidates;
