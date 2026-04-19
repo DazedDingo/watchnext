@@ -60,12 +60,14 @@ service cloud.firestore {
       match /trustedCircle/{friendUid}    { allow read, write: if isMember(householdId); }
       match /friendSuggestions/{sid}      { allow read, write: if isMember(householdId); }
 
-      // "Fix this" issue queue. Batches are per-submitter: you can only see
-      // or cancel your own. Creation happens server-side via the submitIssue
-      // callable; clients can only flip status to 'cancelled'.
+      // "Fix this" issue queue. Creation happens server-side via the
+      // submitIssue callable; read is household-scoped (two-person households
+      // are fine with partners seeing each other's queued reports, and the
+      // resource.data.uid constraint on read was producing spurious
+      // PERMISSION_DENIED on the list query). Cancel still enforces that
+      // only the submitter can flip a batch to 'cancelled'.
       match /issueBatches/{batchId} {
-        allow read: if isMember(householdId)
-          && resource.data.uid == request.auth.uid;
+        allow read: if isMember(householdId);
         allow create: if false;
         allow update: if isMember(householdId)
           && resource.data.uid == request.auth.uid

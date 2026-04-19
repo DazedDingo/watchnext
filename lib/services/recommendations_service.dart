@@ -66,10 +66,13 @@ class RecommendationsService {
   ///
   /// Each TMDB source is fetched independently and best-effort: a failure
   /// in one (e.g. TMDB rate-limit on top-rated) doesn't blank the pool.
+  /// [tmdbCap] defaults to 10 per source — with four sources that's up to 40
+  /// TMDB candidates, which plus watchlist + Reddit stays comfortably inside
+  /// the server-side MAX_CANDIDATES=50 slice the scoring CF enforces.
   Future<void> refresh(
     String householdId, {
     required List<WatchlistItem> watchlist,
-    int tmdbCap = 20,
+    int tmdbCap = 10,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
     try {
@@ -83,13 +86,15 @@ class RecommendationsService {
       // Best-effort; no Reddit data is fine.
     }
 
-    // Four TMDB sources fetched in parallel. Each is best-effort — the
-    // watchlist alone is still a valid pool.
+    // Four TMDB sources fetched in parallel. Each is wrapped in a typed
+    // try/catch helper — the bare `.catchError(fn)` chain is untyped
+    // (takes `Function`) and was silently letting exceptions escape
+    // `Future.wait`, blanking the whole pool when any one source failed.
     final results = await Future.wait([
-      _tmdb.trendingMovies().catchError((_) => <String, dynamic>{}),
-      _tmdb.trendingTv().catchError((_) => <String, dynamic>{}),
-      _tmdb.topRatedMovies().catchError((_) => <String, dynamic>{}),
-      _tmdb.topRatedTv().catchError((_) => <String, dynamic>{}),
+      _safeTmdb(() => _tmdb.trendingMovies()),
+      _safeTmdb(() => _tmdb.trendingTv()),
+      _safeTmdb(() => _tmdb.topRatedMovies()),
+      _safeTmdb(() => _tmdb.topRatedTv()),
     ]);
 
     final candidates = buildCandidates(
@@ -108,6 +113,18 @@ class RecommendationsService {
       'householdId': householdId,
       'candidates': candidates,
     });
+  }
+
+  /// Runs a TMDB fetch and swallows any error into an empty payload so
+  /// `Future.wait` never rejects on a single transient TMDB failure.
+  Future<Map<String, dynamic>> _safeTmdb(
+    Future<Map<String, dynamic>> Function() fetch,
+  ) async {
+    try {
+      return await fetch();
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
   }
 }
 

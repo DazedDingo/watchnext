@@ -1,7 +1,7 @@
 # WatchNext — Build Roadmap
 
 Source of truth for the full 11-phase build plan from the original design spec.
-**Status as of 2026-04-18** audited from the live codebase. Each phase marked
+**Status as of 2026-04-19** audited from the live codebase. Each phase marked
 Shipped ✅ / Partial 🟡 / Not started ⬜ with explicit gaps listed where the
 shipped implementation diverges from the original intent.
 
@@ -102,7 +102,7 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 - **Claude API batch scoring** — `scoreRecommendations` callable (`functions/src/scoreRecommendations.ts`, model `claude-sonnet-4-6`). Writes `match_score`/`match_score_solo` and `ai_blurb`/`ai_blurb_solo` to `/recommendations`. Invoked on-demand (no scheduled trigger).
 - **Home screen** — Tonight's Pick hero (top rec from local sort, not a dedicated CF doc), mood selector pills (8 moods → TMDB genre map), runtime pills (`<90 / 90–120 / >2h`), year pills (2020s / 2010s / 2000s / 90s / Classic, per-mode persisted under `wn_year_solo`/`wn_year_together`), live title search field, "Surprise me" random-from-top, "Because you loved X" chip (`utils/rec_explainer.dart`). Mood filter is graceful on empty-genre recs — it keeps them in the pool instead of dropping pre-`coerceGenres` docs entirely.
 - **Recommendation list** — poster + title + match score badge + AI blurb + source badge. Stream limit is 120 so the chained mood+runtime+year+search filters have room to breathe.
-- **Candidate pool** — four parallel TMDB sources per refresh (trending movies, trending TV, top-rated movies, top-rated TV) plus watchlist + Reddit. Each TMDB source is capped separately via `tmdbCap` (default 20) so one noisy source can't crowd out the others; dedup by `{mediaType}:{tmdbId}` keeps the earlier source (watchlist > reddit > trending > top_rated).
+- **Candidate pool** — four parallel TMDB sources per refresh (trending movies, trending TV, top-rated movies, top-rated TV) plus watchlist + Reddit. Each TMDB source is capped separately via `tmdbCap` (default 10 on the client → up to 40 TMDB + watchlist + Reddit, comfortably inside the CF's MAX_CANDIDATES=50 slice) so one noisy source can't crowd out the others; dedup by `{mediaType}:{tmdbId}` keeps the earlier source (watchlist > reddit > trending > top_rated). Each source fetch is wrapped in a typed `_safeTmdb` try/catch — the earlier `.catchError(fn)` chain was untyped and silently let exceptions escape `Future.wait`, blanking the whole pool when any one source failed.
 
 **Gaps vs spec:**
 - **Tonight's Pick Cloud Function** — the daily Cloud Scheduler-driven pick that Phase 10's widget is supposed to consume is not exported from `functions/src/index.ts`. Home screen picks locally instead.

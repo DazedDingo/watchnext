@@ -104,9 +104,13 @@ class _SplashScreenState extends State<SplashScreen>
                   ),
                 ),
                 // Left curtain — slides off to the left.
+                // Offset is passed positive; the `isLeft` branch inside
+                // _CurtainPanel negates it so the panel slides in the right
+                // direction. Passing `-_curtain.value` here double-negated and
+                // pushed the left panel RIGHT (stuck on-screen) instead of off.
                 _CurtainPanel(
                   alignment: Alignment.centerLeft,
-                  offset: -_curtain.value,
+                  offset: _curtain.value,
                 ),
                 // Right curtain — slides off to the right.
                 _CurtainPanel(
