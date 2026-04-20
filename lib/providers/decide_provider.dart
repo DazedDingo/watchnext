@@ -344,6 +344,52 @@ class DecideController extends StateNotifier<DecideSessionState> {
     );
   }
 
+  /// "Roll again" on the Decided screen. Keeps the current session (picks,
+  /// vetoes, excluded set) but swaps the winner for a different title, trying
+  /// in order: top scored recommendation → similar to pickA → similar to
+  /// pickB → next negotiate-pool candidate. The current winner joins the
+  /// excluded set so we don't loop back to it. If nothing else resolves, we
+  /// surface an error without changing the winner.
+  Future<void> reroll() async {
+    final current = state.winner;
+    if (current == null) return;
+    final exclude = {...state.excluded, current.key};
+
+    DecideCandidate? next = await _chooseFromRecommendations(exclude);
+
+    if (next == null && state.pickA != null) {
+      final sims = await _similar(state.pickA!);
+      for (final c in sims) {
+        if (!exclude.contains(c.key)) { next = c; break; }
+      }
+    }
+    if (next == null && state.pickB != null) {
+      final sims = await _similar(state.pickB!);
+      for (final c in sims) {
+        if (!exclude.contains(c.key)) { next = c; break; }
+      }
+    }
+    if (next == null) {
+      for (final c in state.candidates) {
+        if (!exclude.contains(c.key)) { next = c; break; }
+      }
+    }
+
+    if (next == null) {
+      state = state.copyWith(
+        excluded: exclude,
+        error: 'No more titles to pick from. Add a few to your watchlist first.',
+      );
+      return;
+    }
+
+    state = state.copyWith(
+      excluded: exclude,
+      winner: next,
+      clearError: true,
+    );
+  }
+
   void reset() {
     state = const DecideSessionState();
   }

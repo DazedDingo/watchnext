@@ -484,6 +484,7 @@ class _Decided extends ConsumerStatefulWidget {
 class _DecidedState extends ConsumerState<_Decided> {
   bool _saving = false;
   bool _saved = false;
+  bool _rerolling = false;
 
   @override
   Widget build(BuildContext context) {
@@ -491,10 +492,10 @@ class _DecidedState extends ConsumerState<_Decided> {
     if (winner == null) {
       return const Center(child: Text('No winner?'));
     }
-    return Padding(
+    final error = widget.session.error;
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Icon(Icons.movie_filter, size: 48),
@@ -503,19 +504,37 @@ class _DecidedState extends ConsumerState<_Decided> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
           const SizedBox(height: 16),
-          _CandidateCard(candidate: winner),
+          _WinnerSummary(candidate: winner),
           const SizedBox(height: 24),
-          if (!_saved)
+          if (!_saved) ...[
             FilledButton(
-              onPressed: _saving ? null : _save,
+              onPressed: (_saving || _rerolling) ? null : _save,
               child: _saving
                   ? const SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Save decision'),
-            )
-          else ...[
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: (_saving || _rerolling) ? null : _reroll,
+              icon: _rerolling
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.casino_outlined),
+              label: const Text('Reroll'),
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 12),
+              Text(error,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.error)),
+            ],
+          ] else ...[
             const Center(child: Text('Saved!')),
             const SizedBox(height: 12),
             FilledButton.tonal(
@@ -540,6 +559,15 @@ class _DecidedState extends ConsumerState<_Decided> {
         ],
       ),
     );
+  }
+
+  Future<void> _reroll() async {
+    setState(() => _rerolling = true);
+    try {
+      await ref.read(decideSessionProvider.notifier).reroll();
+    } finally {
+      if (mounted) setState(() => _rerolling = false);
+    }
   }
 
   Future<void> _save() async {
@@ -637,6 +665,61 @@ class _CandidateTile extends StatelessWidget {
           candidate.source,
         ].join(' · ')),
         trailing: trailing,
+      ),
+    );
+  }
+}
+
+/// Compact horizontal card for the Decided screen — keeps the save/reroll
+/// buttons reachable on short phones where the full poster card overflowed.
+class _WinnerSummary extends StatelessWidget {
+  final DecideCandidate candidate;
+  const _WinnerSummary({required this.candidate});
+
+  @override
+  Widget build(BuildContext context) {
+    final poster = TmdbService.imageUrl(candidate.posterPath, size: 'w342');
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: poster != null
+                  ? Image.network(poster,
+                      width: 96,
+                      height: 144,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox(
+                          width: 96,
+                          height: 144,
+                          child: Icon(Icons.movie, size: 48)))
+                  : const SizedBox(
+                      width: 96,
+                      height: 144,
+                      child: Icon(Icons.movie, size: 48)),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(candidate.title,
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w600)),
+                  if (candidate.year != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('${candidate.year}'),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
