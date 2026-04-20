@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/genre_filter_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
 import '../../providers/ratings_provider.dart';
@@ -16,18 +17,21 @@ import '../../services/tmdb_service.dart';
 import '../../utils/rec_explainer.dart';
 import '../../utils/surprise_picker.dart';
 import '../../widgets/async_error.dart';
+import '../../widgets/genre_sheet.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
+import '../../widgets/year_range_slider.dart';
 
 const _homeHelp =
     'WatchNext picks something to watch that works for both of you.\n\n'
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
-    '• Mood pills — filter the list to a vibe (cozy, tense, etc.).\n'
-    '• Year pills — narrow to a decade (2020s, 90s, Classic, etc.).\n'
+    '• Mood pills — one-tap presets that fill the genre picker (tap again to clear).\n'
+    '• Genres — multi-select any TMDB genre. Pull to refresh after changing to expand the candidate pool.\n'
+    '• Year range — slide to narrow to a release window. Drag handles to the ends for "no limit".\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
-    '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz.\n'
+    '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
     '• Ask AI (bottom-right) — chat with the concierge for a bespoke recommendation.\n'
     '• Decide Together — quick tap-through to break a tie with your partner.';
 
@@ -52,40 +56,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.dispose();
   }
 
+  Future<void> _openGenreSheet(
+    BuildContext context,
+    WidgetRef ref,
+    ViewMode mode,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => GenreSheet(mode: mode),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mode = ref.watch(viewModeProvider);
-    final mood = ref.watch(moodProvider);
+    final selectedGenres = ref.watch(selectedGenresProvider);
     final runtime = ref.watch(runtimeFilterProvider);
-    final year = ref.watch(yearFilterProvider);
+    final yearRange = ref.watch(yearRangeProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
     final recsAsync = ref.watch(recommendationsProvider);
     final recs = recsAsync.value ?? const [];
 
-    // Mood filter — if no mood or no genre mapping, show everything.
-    // Graceful on empty genres: recs scored before coerceGenres landed have
-    // genres=[]; dropping them would leave only watchlist candidates visible.
-    final moodGenres = mood?.genres ?? const [];
-    final moodFiltered = moodGenres.isEmpty
+    // Genre filter — if no genres selected, show everything.
+    // Graceful on empty rec.genres: recs scored before coerceGenres landed
+    // have genres=[]; dropping them would leave only watchlist candidates
+    // visible on the list (same contract the old mood filter had).
+    final genreFiltered = selectedGenres.isEmpty
         ? recs
         : recs
             .where((r) =>
-                r.genres.isEmpty || r.genres.any(moodGenres.contains))
+                r.genres.isEmpty || r.genres.any(selectedGenres.contains))
             .toList();
 
     // Runtime filter — null bucket = show everything. An active bucket
     // hides recs whose runtime we don't know (trending sources strip it).
     final runtimeFiltered = runtime == null
-        ? moodFiltered
-        : moodFiltered.where((r) => runtime.matches(r.runtime)).toList();
+        ? genreFiltered
+        : genreFiltered.where((r) => runtime.matches(r.runtime)).toList();
 
-    // Year filter — same contract as runtime: null bucket = show everything,
-    // active bucket drops unknown-year items.
-    final yearFiltered = year == null
+    // Year filter — unbounded range = show everything; any active bound
+    // drops unknown-year items (same "don't mislead under a specific era"
+    // contract the old YearBucket pills had).
+    final yearFiltered = !yearRange.hasAnyBound
         ? runtimeFiltered
-        : runtimeFiltered.where((r) => year.matches(r.year)).toList();
+        : runtimeFiltered.where((r) => yearRange.matches(r.year)).toList();
 
     // Search filter — trimmed case-insensitive substring on title.
     final q = _search.trim().toLowerCase();
@@ -190,20 +207,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
               ),
             ),
-            _MoodPills(
-              selected: mood,
-              onSelect: (m) =>
-                  ref.read(modeMoodProvider.notifier).set(mode, m),
+            _MoodPresetPills(
+              selectedGenres: selectedGenres,
+              onPick: (m) =>
+                  ref.read(modeGenreProvider.notifier).set(mode, m.genres.toSet()),
+              onClear: () =>
+                  ref.read(modeGenreProvider.notifier).clear(mode),
+            ),
+            _GenreChipsRow(
+              selected: selectedGenres,
+              onEdit: () => _openGenreSheet(context, ref, mode),
+              onClear: () =>
+                  ref.read(modeGenreProvider.notifier).clear(mode),
             ),
             _RuntimePills(
               selected: runtime,
               onSelect: (b) =>
                   ref.read(modeRuntimeProvider.notifier).set(mode, b),
             ),
-            _YearPills(
-              selected: year,
-              onSelect: (b) =>
-                  ref.read(modeYearProvider.notifier).set(mode, b),
+            YearRangeSlider(
+              range: yearRange,
+              onChanged: (r) =>
+                  ref.read(modeYearRangeProvider.notifier).set(mode, r),
             ),
             _SearchField(
               controller: _searchCtrl,
@@ -256,32 +281,119 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-// ─── Mood pills ───────────────────────────────────────────────────────────────
+// ─── Mood preset pills ────────────────────────────────────────────────────────
 
-class _MoodPills extends StatelessWidget {
-  final WatchMood? selected;
-  final void Function(WatchMood?) onSelect;
+/// Mood pills are one-tap *presets* that populate the genre multi-select.
+/// A mood reads as "active" when the selected-genres set exactly matches its
+/// preset. Tapping an active mood clears genres; tapping an inactive one
+/// replaces the current selection. `WatchMood.custom` (empty genres) is
+/// skipped since the explicit genre picker covers that case.
+class _MoodPresetPills extends StatelessWidget {
+  final Set<String> selectedGenres;
+  final void Function(WatchMood) onPick;
+  final VoidCallback onClear;
 
-  const _MoodPills({required this.selected, required this.onSelect});
+  const _MoodPresetPills({
+    required this.selectedGenres,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  bool _matches(WatchMood m) {
+    if (m.genres.isEmpty) return false;
+    return selectedGenres.length == m.genres.length &&
+        m.genres.every(selectedGenres.contains);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final moods = WatchMood.values.where((m) => m.genres.isNotEmpty).toList();
     return SizedBox(
       height: 48,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        itemCount: WatchMood.values.length,
+        itemCount: moods.length,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
-          final mood = WatchMood.values[i];
-          final active = selected == mood;
+          final mood = moods[i];
+          final active = _matches(mood);
           return FilterChip(
             label: Text(mood.label),
             selected: active,
-            onSelected: (_) => onSelect(active ? null : mood),
+            onSelected: (_) => active ? onClear() : onPick(mood),
           );
         },
+      ),
+    );
+  }
+}
+
+// ─── Genre chips row ──────────────────────────────────────────────────────────
+
+/// Shows selected genres as removable chips plus an "Edit" action that opens
+/// the full picker sheet. When nothing is selected, reads as a single "Add
+/// genre filter" button so the feature is discoverable.
+class _GenreChipsRow extends ConsumerWidget {
+  final Set<String> selected;
+  final VoidCallback onEdit;
+  final VoidCallback onClear;
+
+  const _GenreChipsRow({
+    required this.selected,
+    required this.onEdit,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (selected.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.tune, size: 16),
+            label: const Text('Add genre filter'),
+            onPressed: onEdit,
+          ),
+        ),
+      );
+    }
+    // Render as a scrollable row so long selections don't wrap into the list.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: SizedBox(
+        height: 40,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [
+            ...selected.map(
+              (g) => Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: InputChip(
+                  label: Text(g),
+                  onDeleted: () {
+                    final next = {...selected}..remove(g);
+                    final mode = ref.read(viewModeProvider);
+                    ref.read(modeGenreProvider.notifier).set(mode, next);
+                  },
+                ),
+              ),
+            ),
+            ActionChip(
+              avatar: const Icon(Icons.tune, size: 16),
+              label: const Text('Edit'),
+              onPressed: onEdit,
+            ),
+            const SizedBox(width: 6),
+            ActionChip(
+              avatar: const Icon(Icons.clear, size: 16),
+              label: const Text('Clear'),
+              onPressed: onClear,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -309,38 +421,6 @@ class _RuntimePills extends StatelessWidget {
           final active = selected == bucket;
           return FilterChip(
             avatar: const Icon(Icons.schedule, size: 16),
-            label: Text(bucket.label),
-            selected: active,
-            onSelected: (_) => onSelect(active ? null : bucket),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ─── Year pills ───────────────────────────────────────────────────────────────
-
-class _YearPills extends StatelessWidget {
-  final YearBucket? selected;
-  final void Function(YearBucket?) onSelect;
-
-  const _YearPills({required this.selected, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        itemCount: YearBucket.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final bucket = YearBucket.values[i];
-          final active = selected == bucket;
-          return FilterChip(
-            avatar: const Icon(Icons.calendar_today, size: 14),
             label: Text(bucket.label),
             selected: active,
             onSelected: (_) => onSelect(active ? null : bucket),

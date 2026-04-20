@@ -3,120 +3,120 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'mode_provider.dart';
 
-/// Era / release-year filter, sitting alongside mood + runtime pills on Home.
+/// Release-year filter expressed as an inclusive [minYear, maxYear] range.
+/// Either bound can be null, which means "unbounded on that side" — we use
+/// null so the slider endpoints round-trip cleanly as "no lower bound" /
+/// "no upper bound" rather than encoding a magic sentinel year.
 ///
-/// Years are stored as `int?` on Recommendation. A null year on a rec means
-/// the source didn't provide a release date (rare; Reddit mentions sometimes
-/// lack it). When a bucket is active we hide null-year recs — mirrors the
-/// runtime bucket contract so the user gets what they asked for.
-enum YearBucket {
-  y2020s,
-  y2010s,
-  y2000s,
-  y90s,
-  classic, // pre-1990
-}
+/// A rec with a null `year` (source didn't provide a release date) is only
+/// shown when both bounds are null. If the user has set either bound they've
+/// asked for a specific era — silently including unknown-era titles would
+/// mislead them. Mirrors the YearBucket contract the slider replaces.
+class YearRange {
+  final int? minYear;
+  final int? maxYear;
 
-extension YearBucketExt on YearBucket {
-  String get label {
-    switch (this) {
-      case YearBucket.y2020s:
-        return "2020s";
-      case YearBucket.y2010s:
-        return "2010s";
-      case YearBucket.y2000s:
-        return "2000s";
-      case YearBucket.y90s:
-        return "90s";
-      case YearBucket.classic:
-        return "Classic";
-    }
-  }
+  const YearRange({this.minYear, this.maxYear});
 
-  /// Returns true iff [year] falls inside this bucket. A null year never
-  /// matches — we'd rather drop mystery-era items than mislead under a
-  /// specific decade pill.
+  const YearRange.unbounded() : minYear = null, maxYear = null;
+
+  bool get hasAnyBound => minYear != null || maxYear != null;
+
   bool matches(int? year) {
+    if (!hasAnyBound) return true;
     if (year == null) return false;
-    switch (this) {
-      case YearBucket.y2020s:
-        return year >= 2020;
-      case YearBucket.y2010s:
-        return year >= 2010 && year <= 2019;
-      case YearBucket.y2000s:
-        return year >= 2000 && year <= 2009;
-      case YearBucket.y90s:
-        return year >= 1990 && year <= 1999;
-      case YearBucket.classic:
-        return year < 1990;
-    }
+    if (minYear != null && year < minYear!) return false;
+    if (maxYear != null && year > maxYear!) return false;
+    return true;
   }
+
+  @override
+  bool operator ==(Object other) =>
+      other is YearRange && other.minYear == minYear && other.maxYear == maxYear;
+
+  @override
+  int get hashCode => Object.hash(minYear, maxYear);
+
+  @override
+  String toString() => 'YearRange($minYear–$maxYear)';
 }
 
-/// Per-mode year-bucket selection, persisted to SharedPreferences under
-/// `wn_year_solo` / `wn_year_together`. Mirrors [moodProvider] /
-/// [modeRuntimeProvider]'s mode-keyed shape.
-class ModeYearController extends StateNotifier<Map<ViewMode, YearBucket?>> {
-  ModeYearController(this._prefs, Map<ViewMode, YearBucket?> initial)
+/// Per-mode year range, persisted across four SharedPreferences keys
+/// (`wn_year_min_solo`, `wn_year_max_solo`, `wn_year_min_together`,
+/// `wn_year_max_together`). Unset bound → key absent.
+class ModeYearRangeController extends StateNotifier<Map<ViewMode, YearRange>> {
+  ModeYearRangeController(this._prefs, Map<ViewMode, YearRange> initial)
       : super(initial);
   final SharedPreferences _prefs;
 
-  static String _keyFor(ViewMode mode) =>
-      mode == ViewMode.solo ? 'wn_year_solo' : 'wn_year_together';
+  static String _minKeyFor(ViewMode mode) =>
+      mode == ViewMode.solo ? 'wn_year_min_solo' : 'wn_year_min_together';
+  static String _maxKeyFor(ViewMode mode) =>
+      mode == ViewMode.solo ? 'wn_year_max_solo' : 'wn_year_max_together';
 
-  static YearBucket? _decode(String? raw) {
-    if (raw == null) return null;
-    for (final b in YearBucket.values) {
-      if (b.name == raw) return b;
-    }
-    return null;
+  static YearRange _decode(SharedPreferences prefs, ViewMode mode) {
+    return YearRange(
+      minYear: prefs.getInt(_minKeyFor(mode)),
+      maxYear: prefs.getInt(_maxKeyFor(mode)),
+    );
   }
 
-  static Map<ViewMode, YearBucket?> readAll(SharedPreferences prefs) => {
-        ViewMode.solo: _decode(prefs.getString(_keyFor(ViewMode.solo))),
-        ViewMode.together: _decode(prefs.getString(_keyFor(ViewMode.together))),
+  static Map<ViewMode, YearRange> readAll(SharedPreferences prefs) => {
+        ViewMode.solo: _decode(prefs, ViewMode.solo),
+        ViewMode.together: _decode(prefs, ViewMode.together),
       };
 
-  Future<void> set(ViewMode mode, YearBucket? bucket) async {
-    state = {...state, mode: bucket};
-    final key = _keyFor(mode);
-    if (bucket == null) {
-      await _prefs.remove(key);
+  Future<void> set(ViewMode mode, YearRange range) async {
+    state = {...state, mode: range};
+    final minKey = _minKeyFor(mode);
+    final maxKey = _maxKeyFor(mode);
+    if (range.minYear == null) {
+      await _prefs.remove(minKey);
     } else {
-      await _prefs.setString(key, bucket.name);
+      await _prefs.setInt(minKey, range.minYear!);
+    }
+    if (range.maxYear == null) {
+      await _prefs.remove(maxKey);
+    } else {
+      await _prefs.setInt(maxKey, range.maxYear!);
     }
   }
+
+  Future<void> clear(ViewMode mode) => set(mode, const YearRange.unbounded());
 }
 
 final _yearPrefsProvider =
     FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
 
-final modeYearProvider =
-    StateNotifierProvider<ModeYearController, Map<ViewMode, YearBucket?>>((ref) {
+final modeYearRangeProvider = StateNotifierProvider<ModeYearRangeController,
+    Map<ViewMode, YearRange>>((ref) {
   final prefs = ref.watch(_yearPrefsProvider).value;
   if (prefs == null) {
-    return ModeYearController(
+    return ModeYearRangeController(
       _UnsetPrefs(),
-      const {ViewMode.solo: null, ViewMode.together: null},
+      const {
+        ViewMode.solo: YearRange.unbounded(),
+        ViewMode.together: YearRange.unbounded(),
+      },
     );
   }
-  return ModeYearController(prefs, ModeYearController.readAll(prefs));
+  return ModeYearRangeController(prefs, ModeYearRangeController.readAll(prefs));
 });
 
-/// Year bucket for the active view mode. null = no filter.
-final yearFilterProvider = Provider<YearBucket?>((ref) {
+/// Active-mode year range. `YearRange.unbounded()` = no filter.
+final yearRangeProvider = Provider<YearRange>((ref) {
   final mode = ref.watch(viewModeProvider);
-  final map = ref.watch(modeYearProvider);
-  return map[mode];
+  final map = ref.watch(modeYearRangeProvider);
+  return map[mode] ?? const YearRange.unbounded();
 });
 
 class _UnsetPrefs implements SharedPreferences {
   @override
-  Future<bool> setString(String key, String value) async => true;
+  Future<bool> setInt(String key, int value) async => true;
   @override
   Future<bool> remove(String key) async => true;
   @override
-  String? getString(String key) => null;
+  int? getInt(String key) => null;
   @override
   dynamic noSuchMethod(Invocation i) => null;
 }
