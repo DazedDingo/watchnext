@@ -17,12 +17,15 @@ class HelpButton extends StatelessWidget {
       tooltip: 'How this works',
       onPressed: () => showDialog<void>(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (dialogCtx) => AlertDialog(
           title: Text(title),
           content: SingleChildScrollView(child: Text(body)),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              // Use the dialog's own context — the outer AppBar context's
+              // nearest Navigator is the go_router shell, so popping that
+              // tore the whole screen down instead of dismissing the dialog.
+              onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('Got it'),
             ),
           ],
