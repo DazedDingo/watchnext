@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/genre_filter_provider.dart';
+import '../../providers/include_watched_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
@@ -105,6 +106,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final runtime = ref.watch(runtimeFilterProvider);
     final yearRange = ref.watch(yearRangeProvider);
     final mediaType = ref.watch(mediaTypeFilterProvider);
+    final includeWatched = ref.watch(includeWatchedProvider);
+    final watchedKeys = ref.watch(watchedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
@@ -168,11 +171,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Search filter — trimmed case-insensitive substring on title.
     final q = _search.trim().toLowerCase();
-    final filtered = q.isEmpty
+    final searchFiltered = q.isEmpty
         ? mediaFiltered
         : mediaFiltered
             .where((r) => r.title.toLowerCase().contains(q))
             .toList();
+
+    // Watched filter — default excludes anything the household (Together) or
+    // current user (Solo) has already watched. User can flip the toggle in the
+    // filter panel to bring them back.
+    final filtered = includeWatched
+        ? searchFiltered
+        : searchFiltered.where((r) => !watchedKeys.contains(r.id)).toList();
 
     final available =
         filtered.where((r) => !_dismissed.contains(r.id)).toList();
@@ -284,6 +294,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               runtime: runtime,
               yearRange: yearRange,
               mediaType: mediaType,
+              includeWatched: includeWatched,
               onEditGenres: () => _openGenreSheet(context, ref, mode),
               onClearGenres: () =>
                   ref.read(modeGenreProvider.notifier).clear(mode),
@@ -293,6 +304,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeYearRangeProvider.notifier).set(mode, r),
               onMediaTypeSelect: (v) =>
                   ref.read(modeMediaTypeProvider.notifier).set(mode, v),
+              onIncludeWatchedChanged: (v) =>
+                  ref.read(includeWatchedProvider.notifier).set(v),
             ),
             _SearchField(
               controller: _searchCtrl,
@@ -373,22 +386,26 @@ class _FiltersPanel extends StatelessWidget {
   final RuntimeBucket? runtime;
   final YearRange yearRange;
   final MediaTypeFilter? mediaType;
+  final bool includeWatched;
   final VoidCallback onEditGenres;
   final VoidCallback onClearGenres;
   final ValueChanged<RuntimeBucket?> onRuntimeSelect;
   final ValueChanged<YearRange> onYearRangeChanged;
   final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
+  final ValueChanged<bool> onIncludeWatchedChanged;
 
   const _FiltersPanel({
     required this.selectedGenres,
     required this.runtime,
     required this.yearRange,
     required this.mediaType,
+    required this.includeWatched,
     required this.onEditGenres,
     required this.onClearGenres,
     required this.onRuntimeSelect,
     required this.onYearRangeChanged,
     required this.onMediaTypeSelect,
+    required this.onIncludeWatchedChanged,
   });
 
   int get _activeCount {
@@ -397,6 +414,10 @@ class _FiltersPanel extends StatelessWidget {
     if (runtime != null) n += 1;
     if (yearRange.hasAnyBound) n += 1;
     if (mediaType != null) n += 1;
+    // "Include watched" is counted as an active filter when it diverges from
+    // the default (hide watched). Most users want the default, so flipping it
+    // on should be visibly flagged.
+    if (includeWatched) n += 1;
     return n;
   }
 
@@ -421,6 +442,7 @@ class _FiltersPanel extends StatelessWidget {
         parts.add('≤$hi');
       }
     }
+    if (includeWatched) parts.add('+ watched');
     return parts.isEmpty ? 'None' : parts.join(' · ');
   }
 
@@ -491,6 +513,17 @@ class _FiltersPanel extends StatelessWidget {
             YearRangeSlider(
               range: yearRange,
               onChanged: onYearRangeChanged,
+            ),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              dense: true,
+              title: const Text('Include watched'),
+              subtitle: const Text(
+                'Show titles you\'ve already seen in recommendations',
+                style: TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              value: includeWatched,
+              onChanged: onIncludeWatchedChanged,
             ),
             const SizedBox(height: 4),
           ],

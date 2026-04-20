@@ -25,6 +25,25 @@ final watchEntriesProvider = StreamProvider<List<WatchEntry>>((ref) async* {
       .map((s) => s.docs.map(WatchEntry.fromDoc).toList());
 });
 
+/// Set of "{mediaType}:{tmdbId}" keys for titles considered *watched* — i.e.
+/// anything in the household's History that isn't still in progress. Matches
+/// the History screen's "Watched" tab exactly: `inProgressStatus != 'watching'`.
+///
+/// Deliberately does NOT gate on `watched_by[uid]` or view mode. When the
+/// household shares a Trakt account (common), imported entries carry only
+/// the importer's uid — a per-user check would leave the partner seeing
+/// already-watched titles in their Solo recs. Treat any history entry as
+/// household-level "seen".
+///
+/// Used by [includeWatchedProvider] to filter suggestion surfaces.
+final watchedKeysProvider = Provider<Set<String>>((ref) {
+  final entries = ref.watch(watchEntriesProvider).value ?? const [];
+  return entries
+      .where((e) => e.inProgressStatus != 'watching')
+      .map((e) => e.id)
+      .toSet();
+});
+
 /// Unrated queue: entries the current user has watched but hasn't rated at
 /// show/movie level. Cheap client join — fine at household scale (≤ few
 /// thousand entries). Episode-level unrated items are computed in Phase 3

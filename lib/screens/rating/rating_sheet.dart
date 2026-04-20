@@ -1,7 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
@@ -112,7 +111,7 @@ class _RatingSheetState extends ConsumerState<RatingSheet> {
             season: widget.season,
             episode: widget.episode,
           );
-      if (mounted) context.pop(true);
+      if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));

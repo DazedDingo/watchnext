@@ -6,8 +6,10 @@ import 'package:go_router/go_router.dart';
 import '../../models/concierge_turn.dart';
 import '../../providers/concierge_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/include_watched_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
+import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
 
 /// Represents one message in the local chat — either user or assistant.
@@ -105,11 +107,21 @@ class _ConciergeSheetState extends ConsumerState<ConciergeSheet> {
 
       _history.add((user: text, assistant: result.text));
 
+      // Drop suggestions for titles already in household history unless the
+      // user opted in. Claude can't see the history, so this is client-side.
+      final includeWatched = ref.read(includeWatchedProvider);
+      final watchedKeys = ref.read(watchedKeysProvider);
+      final titles = includeWatched
+          ? result.titles
+          : result.titles
+              .where((t) => !watchedKeys.contains('${t.mediaType}:${t.tmdbId}'))
+              .toList();
+
       setState(() {
         _messages.add(_ChatMessage(
           isUser: false,
           text: result.text,
-          titles: result.titles,
+          titles: titles,
         ));
         _sending = false;
       });

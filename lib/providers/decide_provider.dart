@@ -149,11 +149,24 @@ class DecideController extends StateNotifier<DecideSessionState> {
 
   /// Builds the negotiate candidate pool from the shared watchlist, topped up
   /// with TMDB trending if the watchlist has fewer than 5 items.
-  Future<void> start(List<WatchlistItem> watchlist) async {
-    state = const DecideSessionState(phase: DecidePhase.loading);
+  ///
+  /// [watchedKeys] (format `{mediaType}:{tmdbId}`) are seeded into the session's
+  /// `excluded` set so every downstream pick path — compromise, similars,
+  /// reroll — skips them without extra plumbing. Watchlist rows are also
+  /// pre-filtered here so a watched entry doesn't eat a negotiate slot.
+  Future<void> start(
+    List<WatchlistItem> watchlist, {
+    Set<String> watchedKeys = const {},
+  }) async {
+    state = DecideSessionState(
+      phase: DecidePhase.loading,
+      excluded: {...watchedKeys},
+    );
     try {
-      final fromWatchlist =
-          watchlist.map(DecideCandidate.fromWatchlist).toList();
+      final fromWatchlist = watchlist
+          .map(DecideCandidate.fromWatchlist)
+          .where((c) => !watchedKeys.contains(c.key))
+          .toList();
 
       List<DecideCandidate> merged = fromWatchlist;
       if (merged.length < 5) {
@@ -161,9 +174,10 @@ class DecideController extends StateNotifier<DecideSessionState> {
         final rows = (trending['results'] as List? ?? const [])
             .cast<Map<String, dynamic>>();
         final extra = rows
-            .take(10)
+            .take(15)
             .map((m) => DecideCandidate.fromTmdb(m,
                 fallbackMediaType: 'movie', source: 'trending'))
+            .where((c) => !watchedKeys.contains(c.key))
             .where((c) => !merged.any((w) => w.key == c.key))
             .take(5 - merged.length)
             .toList();
@@ -178,7 +192,11 @@ class DecideController extends StateNotifier<DecideSessionState> {
     } catch (e) {
       state = state.copyWith(
         phase: DecidePhase.negotiate,
-        candidates: watchlist.take(5).map(DecideCandidate.fromWatchlist).toList(),
+        candidates: watchlist
+            .map(DecideCandidate.fromWatchlist)
+            .where((c) => !watchedKeys.contains(c.key))
+            .take(5)
+            .toList(),
         error: 'Could not load trending titles — using watchlist only.',
       );
     }

@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../models/decision.dart';
 import '../../providers/decide_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/include_watched_provider.dart';
+import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/help_button.dart';
@@ -85,7 +87,16 @@ class _DecideScreenState extends ConsumerState<DecideScreen> {
     // Candidate pool follows the visibility rules for the current mode:
     // Together excludes all solo items; Solo keeps my own solo items.
     final watchlist = ref.read(visibleWatchlistProvider);
-    await ref.read(decideSessionProvider.notifier).start(watchlist);
+    // Unless the user explicitly opted in via the Home filter, skip anything
+    // the household has already watched — Decide is almost always "what
+    // should we watch tonight?", not a rewatch picker.
+    final includeWatched = ref.read(includeWatchedProvider);
+    final watchedKeys = includeWatched
+        ? const <String>{}
+        : ref.read(watchedKeysProvider);
+    await ref
+        .read(decideSessionProvider.notifier)
+        .start(watchlist, watchedKeys: watchedKeys);
   }
 
   @override

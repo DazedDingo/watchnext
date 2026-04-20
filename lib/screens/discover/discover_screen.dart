@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/discover_provider.dart';
+import '../../providers/include_watched_provider.dart';
+import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
@@ -15,8 +17,31 @@ const _discoverHelp =
     '• Trending Movies / TV — what\'s hot this week.\n'
     '• New Releases — upcoming and recent.\n'
     '• Top Rated Movies — all-time TMDB highs.\n'
-    '• Browse by Genre — tap a genre to open a horizontal row.\n\n'
+    '• Browse by Genre — tap a genre to open a horizontal row.\n'
+    '• Include watched — toggle to show titles already in your history.\n\n'
     'Tap any poster to open its detail screen where you can watchlist or rate it.';
+
+/// Pulls the "{mediaType}:{tmdbId}" identifier out of a TMDB JSON row. Shared
+/// between poster sections, genre rows, and search — each passes a fallback
+/// media type since only `/search/multi` carries `media_type` inline.
+String? _rowKey(Map<String, dynamic> row, {required String fallbackMediaType}) {
+  final id = (row['id'] as num?)?.toInt();
+  if (id == null) return null;
+  final mt = (row['media_type'] as String?) ?? fallbackMediaType;
+  return '$mt:$id';
+}
+
+List<Map<String, dynamic>> _filterWatched(
+  List<Map<String, dynamic>> rows,
+  Set<String> watchedKeys, {
+  required String fallbackMediaType,
+}) {
+  if (watchedKeys.isEmpty) return rows;
+  return rows.where((r) {
+    final key = _rowKey(r, fallbackMediaType: fallbackMediaType);
+    return key == null || !watchedKeys.contains(key);
+  }).toList();
+}
 
 const _searchDebounce = Duration(milliseconds: 350);
 
@@ -74,6 +99,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   Widget build(BuildContext context) {
     final query = ref.watch(searchQueryProvider);
     final searching = query.isNotEmpty;
+    final includeWatched = ref.watch(includeWatchedProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -113,6 +139,25 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Row(
+              children: [
+                const Icon(Icons.visibility_outlined,
+                    size: 16, color: Colors.white54),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Include watched',
+                      style: TextStyle(fontSize: 13, color: Colors.white70)),
+                ),
+                Switch(
+                  value: includeWatched,
+                  onChanged: (v) =>
+                      ref.read(includeWatchedProvider.notifier).set(v),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: searching ? const _SearchResults() : const _BrowseContent(),
           ),
@@ -127,27 +172,35 @@ class _BrowseContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final includeWatched = ref.watch(includeWatchedProvider);
+    final watchedKeys = includeWatched
+        ? const <String>{}
+        : ref.watch(watchedKeysProvider);
     return ListView(
       children: [
         _PosterSection(
           title: 'TRENDING MOVIES',
           data: ref.watch(trendingMoviesProvider),
           mediaType: 'movie',
+          watchedKeys: watchedKeys,
         ),
         _PosterSection(
           title: 'TRENDING TV',
           data: ref.watch(trendingTvProvider),
           mediaType: 'tv',
+          watchedKeys: watchedKeys,
         ),
         _PosterSection(
           title: 'NEW RELEASES',
           data: ref.watch(upcomingMoviesProvider),
           mediaType: 'movie',
+          watchedKeys: watchedKeys,
         ),
         _PosterSection(
           title: 'TOP RATED MOVIES',
           data: ref.watch(topRatedMoviesProvider),
           mediaType: 'movie',
+          watchedKeys: watchedKeys,
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
@@ -170,6 +223,10 @@ class _SearchResults extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final data = ref.watch(searchResultsProvider);
+    final includeWatched = ref.watch(includeWatchedProvider);
+    final watchedKeys = includeWatched
+        ? const <String>{}
+        : ref.watch(watchedKeysProvider);
     return data.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -177,7 +234,12 @@ class _SearchResults extends ConsumerWidget {
         child:
             Text('Search failed', style: TextStyle(color: Colors.white38)),
       ),
-      data: (items) {
+      data: (raw) {
+        final items = _filterWatched(
+          raw.cast<Map<String, dynamic>>(),
+          watchedKeys,
+          fallbackMediaType: 'movie',
+        );
         if (items.isEmpty) {
           return const Center(
             child: Text('No matches',
@@ -219,11 +281,13 @@ class _PosterSection extends StatelessWidget {
   final String title;
   final AsyncValue<List<Map<String, dynamic>>> data;
   final String mediaType;
+  final Set<String> watchedKeys;
 
   const _PosterSection({
     required this.title,
     required this.data,
     required this.mediaType,
+    required this.watchedKeys,
   });
 
   @override
@@ -248,26 +312,36 @@ class _PosterSection extends StatelessWidget {
               child: Text('Failed to load',
                   style: TextStyle(color: Colors.white38)),
             ),
-            data: (items) => ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (ctx, i) {
-                final item = items[i];
-                final tmdbId = (item['id'] as num?)?.toInt();
-                final mt =
-                    (item['media_type'] as String?) ?? mediaType;
-                if (tmdbId == null) return const SizedBox.shrink();
-                final poster = TmdbService.imageUrl(
-                    item['poster_path'] as String?,
-                    size: 'w185');
-                return _PosterTile(
-                  poster: poster,
-                  onTap: () => ctx.push('/title/$mt/$tmdbId'),
+            data: (raw) {
+              final items = _filterWatched(raw, watchedKeys,
+                  fallbackMediaType: mediaType);
+              if (items.isEmpty) {
+                return const Center(
+                  child: Text("You've seen them all.",
+                      style: TextStyle(color: Colors.white38, fontSize: 12)),
                 );
-              },
-            ),
+              }
+              return ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (ctx, i) {
+                  final item = items[i];
+                  final tmdbId = (item['id'] as num?)?.toInt();
+                  final mt =
+                      (item['media_type'] as String?) ?? mediaType;
+                  if (tmdbId == null) return const SizedBox.shrink();
+                  final poster = TmdbService.imageUrl(
+                      item['poster_path'] as String?,
+                      size: 'w185');
+                  return _PosterTile(
+                    poster: poster,
+                    onTap: () => ctx.push('/title/$mt/$tmdbId'),
+                  );
+                },
+              );
+            },
           ),
         ),
       ],
@@ -319,6 +393,10 @@ class _GenreRowBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final data = ref.watch(discoverByGenreProvider(genreId));
+    final includeWatched = ref.watch(includeWatchedProvider);
+    final watchedKeys = includeWatched
+        ? const <String>{}
+        : ref.watch(watchedKeysProvider);
     return SizedBox(
       height: 172,
       child: data.when(
@@ -328,29 +406,34 @@ class _GenreRowBody extends ConsumerWidget {
           child:
               Text('Failed to load', style: TextStyle(color: Colors.white38)),
         ),
-        data: (items) => items.isEmpty
-            ? const Center(
-                child: Text('No titles in this genre',
-                    style: TextStyle(color: Colors.white38)),
-              )
-            : ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (ctx, i) {
-                  final item = items[i];
-                  final tmdbId = (item['id'] as num?)?.toInt();
-                  if (tmdbId == null) return const SizedBox.shrink();
-                  final poster = TmdbService.imageUrl(
-                      item['poster_path'] as String?,
-                      size: 'w185');
-                  return _PosterTile(
-                    poster: poster,
-                    onTap: () => ctx.push('/title/movie/$tmdbId'),
-                  );
-                },
-              ),
+        data: (raw) {
+          final items = _filterWatched(raw, watchedKeys,
+              fallbackMediaType: 'movie');
+          if (items.isEmpty) {
+            return const Center(
+              child: Text('No titles in this genre',
+                  style: TextStyle(color: Colors.white38)),
+            );
+          }
+          return ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (ctx, i) {
+              final item = items[i];
+              final tmdbId = (item['id'] as num?)?.toInt();
+              if (tmdbId == null) return const SizedBox.shrink();
+              final poster = TmdbService.imageUrl(
+                  item['poster_path'] as String?,
+                  size: 'w185');
+              return _PosterTile(
+                poster: poster,
+                onTap: () => ctx.push('/title/movie/$tmdbId'),
+              );
+            },
+          );
+        },
       ),
     );
   }

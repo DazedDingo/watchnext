@@ -8,8 +8,10 @@ import 'package:go_router/go_router.dart';
 import '../../models/concierge_turn.dart';
 import '../../providers/concierge_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/include_watched_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/tmdb_provider.dart';
+import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
 
 /// "More like these" — the user picks a small list of seed titles and the
@@ -170,9 +172,17 @@ class _LikeTheseSheetState extends ConsumerState<LikeTheseSheet> {
             history: const [],
           );
       if (!mounted) return;
+      final includeWatched = ref.read(includeWatchedProvider);
+      final watchedKeys = ref.read(watchedKeysProvider);
+      final titles = includeWatched
+          ? result.titles
+          : result.titles
+              .where((t) =>
+                  !watchedKeys.contains('${t.mediaType}:${t.tmdbId}'))
+              .toList();
       setState(() {
         _resultText = result.text;
-        _resultTitles = result.titles;
+        _resultTitles = titles;
         _submitting = false;
       });
     } catch (e) {

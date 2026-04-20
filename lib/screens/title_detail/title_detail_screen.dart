@@ -8,6 +8,7 @@ import '../../models/watch_entry.dart';
 import '../../models/watchlist_item.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/include_watched_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/prediction_provider.dart';
@@ -524,7 +525,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 /// `mediaType` of its parent (TMDB's `/similar` only returns same-type rows).
 /// Tapping a card pushes a new TitleDetail onto the stack so the user can
 /// drill in, then back out to the original.
-class _SimilarTitlesSection extends StatelessWidget {
+class _SimilarTitlesSection extends ConsumerWidget {
   final String mediaType;
   final List<dynamic> similar;
 
@@ -534,8 +535,18 @@ class _SimilarTitlesSection extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final rows = similar.whereType<Map<String, dynamic>>().toList();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final includeWatched = ref.watch(includeWatchedProvider);
+    final watchedKeys =
+        includeWatched ? const <String>{} : ref.watch(watchedKeysProvider);
+    final rows = similar
+        .whereType<Map<String, dynamic>>()
+        .where((r) {
+          final id = (r['id'] as num?)?.toInt();
+          if (id == null) return false;
+          return !watchedKeys.contains('$mediaType:$id');
+        })
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
