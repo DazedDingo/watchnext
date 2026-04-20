@@ -20,14 +20,16 @@ const _watchlistHelp =
     '• Solo / Together toggle — top-right. Together shows only shared items; '
     'Solo shows shared + your own solo-saved items (your partner\'s solo list '
     'is never visible to you).\n'
-    '• Watched filter — Unwatched (default) hides titles you\'ve already seen; '
-    'Watched shows only those; All shows everything. In Together mode a title '
-    'counts as watched when either member has watched it.\n'
-    '• Remove — swipe left on any row.\n'
+    '• Filter — Unwatched (default) hides titles you\'ve already seen; '
+    'Watching shows TV in progress (sourced from History, not the saved list); '
+    'Watched shows finished titles; All shows everything on the list. In '
+    'Together mode a title counts as watched when either member has watched it.\n'
+    '• Remove — swipe left on any row (Watching rows aren\'t swipe-removable; '
+    'update progress from the title\'s detail screen instead).\n'
     '• Tap a row to open the title and rate, predict, or start watching.\n\n'
     'The recommender uses your watchlist as its primary candidate pool.';
 
-enum _WatchedFilter { unwatched, watched, all }
+enum _WatchedFilter { unwatched, watching, watched, all }
 
 class WatchlistScreen extends ConsumerStatefulWidget {
   const WatchlistScreen({super.key});
@@ -60,11 +62,18 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
       return entry.watchedBy.values.any((v) => v);
     }
 
+    // Watching pulls from History directly — a show can be in progress
+    // without ever being on the saved watchlist.
+    final watchingEntries = entries
+        .where((e) => e.inProgressStatus == 'watching')
+        .toList();
+
     final filtered = items.where((w) {
       switch (_filter) {
         case _WatchedFilter.unwatched: return !isWatched(w);
         case _WatchedFilter.watched:   return isWatched(w);
         case _WatchedFilter.all:       return true;
+        case _WatchedFilter.watching:  return false;
       }
     }).toList();
 
@@ -94,6 +103,10 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                       label: Text('Unwatched'),
                       icon: Icon(Icons.visibility_off_outlined)),
                   ButtonSegment(
+                      value: _WatchedFilter.watching,
+                      label: Text('Watching'),
+                      icon: Icon(Icons.play_circle_outline)),
+                  ButtonSegment(
                       value: _WatchedFilter.watched,
                       label: Text('Watched'),
                       icon: Icon(Icons.check_circle_outline)),
@@ -106,7 +119,11 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                 onSelectionChanged: (s) => setState(() => _filter = s.first),
               ),
             ),
-            Expanded(child: _buildList(filtered)),
+            Expanded(
+              child: _filter == _WatchedFilter.watching
+                  ? _buildWatchingList(watchingEntries)
+                  : _buildList(filtered),
+            ),
           ]);
         },
       ),
@@ -126,6 +143,8 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                 'Nothing here has been marked watched yet.',
               _WatchedFilter.all =>
                 'Nothing saved yet. Add titles from their detail screen.',
+              _WatchedFilter.watching =>
+                '', // unreachable — _buildWatchingList owns this state
             },
             textAlign: TextAlign.center,
           ),
@@ -169,6 +188,49 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                 : null,
             onTap: () => context.push('/title/${w.mediaType}/${w.tmdbId}'),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWatchingList(List<WatchEntry> entries) {
+    if (entries.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            'No shows in progress. Shows appear here once Trakt reports activity or you mark them "Watching" from their detail screen.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      itemCount: entries.length,
+      separatorBuilder: (_, _) => const Divider(height: 0),
+      itemBuilder: (_, i) {
+        final e = entries[i];
+        final poster = TmdbService.imageUrl(e.posterPath, size: 'w185');
+        final progress = (e.lastSeason != null && e.lastEpisode != null)
+            ? 'S${e.lastSeason!.toString().padLeft(2, '0')}E${e.lastEpisode!.toString().padLeft(2, '0')}'
+            : null;
+        return ListTile(
+          leading: poster != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.network(poster, width: 48, height: 72, fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox(width: 48, height: 72, child: Icon(Icons.movie))),
+                )
+              : const SizedBox(width: 48, height: 72, child: Icon(Icons.movie)),
+          title: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text([
+            if (e.year != null) '${e.year}',
+            ?progress,
+            if (e.genres.isNotEmpty) e.genres.first,
+          ].join(' · ')),
+          trailing: const Icon(Icons.play_circle_outline,
+              size: 18, color: Colors.white54),
+          onTap: () => context.push('/title/${e.mediaType}/${e.tmdbId}'),
         );
       },
     );

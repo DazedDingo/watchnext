@@ -25,9 +25,10 @@ final watchEntriesProvider = StreamProvider<List<WatchEntry>>((ref) async* {
       .map((s) => s.docs.map(WatchEntry.fromDoc).toList());
 });
 
-/// Set of "{mediaType}:{tmdbId}" keys for titles considered *watched* — i.e.
-/// anything in the household's History that isn't still in progress. Matches
-/// the History screen's "Watched" tab exactly: `inProgressStatus != 'watching'`.
+/// Set of "{mediaType}:{tmdbId}" keys for titles to skip when generating
+/// suggestions. Covers BOTH watched history and currently-watching shows —
+/// recommending something the household is already partway through is just
+/// as useless as recommending something they've finished.
 ///
 /// Deliberately does NOT gate on `watched_by[uid]` or view mode. When the
 /// household shares a Trakt account (common), imported entries carry only
@@ -38,10 +39,7 @@ final watchEntriesProvider = StreamProvider<List<WatchEntry>>((ref) async* {
 /// Used by [includeWatchedProvider] to filter suggestion surfaces.
 final watchedKeysProvider = Provider<Set<String>>((ref) {
   final entries = ref.watch(watchEntriesProvider).value ?? const [];
-  return entries
-      .where((e) => e.inProgressStatus != 'watching')
-      .map((e) => e.id)
-      .toSet();
+  return entries.map((e) => e.id).toSet();
 });
 
 /// Unrated queue: entries the current user has watched but hasn't rated at
