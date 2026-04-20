@@ -62,7 +62,6 @@ final _router = GoRouter(
         );
       },
     ),
-    GoRoute(path: '/watchlist', builder: (_, _) => const WatchlistScreen()),
     GoRoute(path: '/decide', builder: (_, _) => const DecideScreen()),
     GoRoute(
       path: '/reveal/:mediaType/:tmdbId',
@@ -80,6 +79,7 @@ final _router = GoRouter(
       routes: [
         GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
         GoRoute(path: '/discover', builder: (_, _) => const DiscoverScreen()),
+        GoRoute(path: '/watchlist', builder: (_, _) => const WatchlistScreen()),
         GoRoute(path: '/history', builder: (_, _) => const HistoryScreen()),
         GoRoute(path: '/stats', builder: (_, _) => const StatsScreen()),
         GoRoute(
@@ -222,23 +222,28 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
     final location = GoRouterState.of(context).uri.toString();
     int selectedIndex = 0;
     if (location.startsWith('/discover')) selectedIndex = 1;
-    if (location.startsWith('/history')) selectedIndex = 2;
-    if (location.startsWith('/stats')) selectedIndex = 3;
-    if (location.startsWith('/profile')) selectedIndex = 4;
+    if (location.startsWith('/watchlist')) selectedIndex = 2;
+    if (location.startsWith('/history')) selectedIndex = 3;
+    if (location.startsWith('/stats')) selectedIndex = 4;
+    if (location.startsWith('/profile')) selectedIndex = 5;
 
     return Scaffold(
       body: widget.child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
+        // 6 destinations — hide labels on unselected tabs so icons stay legible
+        // on 360dp-wide phones (otherwise labels clip).
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Discover'),
+          NavigationDestination(icon: Icon(Icons.bookmark_outline), selectedIcon: Icon(Icons.bookmark), label: 'Watchlist'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
           NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Stats'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
         ],
         onDestinationSelected: (i) {
-          const routes = ['/home', '/discover', '/history', '/stats', '/profile'];
+          const routes = ['/home', '/discover', '/watchlist', '/history', '/stats', '/profile'];
           context.go(routes[i]);
         },
       ),

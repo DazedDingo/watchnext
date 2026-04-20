@@ -62,58 +62,90 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 
   bool _watchlistBusy = false;
 
-  Future<void> _addToWatchlist(Map<String, dynamic> d, {required String scope}) async {
+  /// Diffs current-vs-desired scope states and applies add/remove deltas so a
+  /// single sheet can promote a title from "nothing" → "both lists" (or any
+  /// other combination) in one round-trip.
+  Future<void> _applyWatchlistScopes(
+    Map<String, dynamic> d, {
+    required bool wantShared,
+    required bool wantSolo,
+    required WatchlistItem? currentShared,
+    required WatchlistItem? currentSolo,
+  }) async {
     if (_watchlistBusy) return;
     setState(() => _watchlistBusy = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final householdId = await ref.read(householdIdProvider.future);
       if (!mounted || householdId == null) return;
-      await ref.read(watchlistServiceProvider).add(
-            householdId: householdId,
-            uid: uid,
-            mediaType: widget.mediaType == 'movie' ? 'movie' : 'tv',
-            tmdbId: widget.tmdbId,
-            title: (d['title'] ?? d['name']) as String,
-            year: _parseYear(d),
-            posterPath: d['poster_path'] as String?,
-            genres: ((d['genres'] as List?) ?? const []).map((g) => (g as Map)['name'] as String).toList(),
-            runtime: _parseRuntime(d),
-            overview: d['overview'] as String?,
-            scope: scope,
-          );
+      final svc = ref.read(watchlistServiceProvider);
+      final mt = widget.mediaType == 'movie' ? 'movie' : 'tv';
+      final title = (d['title'] ?? d['name']) as String;
+      final year = _parseYear(d);
+      final poster = d['poster_path'] as String?;
+      final genres = ((d['genres'] as List?) ?? const [])
+          .map((g) => (g as Map)['name'] as String)
+          .toList();
+      final runtime = _parseRuntime(d);
+      final overview = d['overview'] as String?;
+
+      final ops = <Future<void>>[];
+      if (wantShared && currentShared == null) {
+        ops.add(svc.add(
+          householdId: householdId, uid: uid, mediaType: mt,
+          tmdbId: widget.tmdbId, title: title, year: year,
+          posterPath: poster, genres: genres, runtime: runtime,
+          overview: overview, scope: 'shared',
+        ));
+      } else if (!wantShared && currentShared != null) {
+        ops.add(svc.remove(householdId: householdId, id: currentShared.id));
+      }
+      if (wantSolo && currentSolo == null) {
+        ops.add(svc.add(
+          householdId: householdId, uid: uid, mediaType: mt,
+          tmdbId: widget.tmdbId, title: title, year: year,
+          posterPath: poster, genres: genres, runtime: runtime,
+          overview: overview, scope: 'solo',
+        ));
+      } else if (!wantSolo && currentSolo != null) {
+        ops.add(svc.remove(householdId: householdId, id: currentSolo.id));
+      }
+      await Future.wait(ops);
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(scope == 'solo'
-                ? 'Added to your Solo watchlist'
-                : 'Added to shared watchlist')));
+        final msg = !wantShared && !wantSolo
+            ? 'Removed from watchlist'
+            : 'Watchlist updated';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Watchlist update failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _watchlistBusy = false);
     }
   }
 
-  Future<void> _removeFromWatchlist(WatchlistItem entry) async {
-    if (_watchlistBusy) return;
-    setState(() => _watchlistBusy = true);
-    try {
-      final householdId = await ref.read(householdIdProvider.future);
-      if (!mounted || householdId == null) return;
-      await ref.read(watchlistServiceProvider).remove(
-            householdId: householdId,
-            id: entry.id,
-          );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Remove failed: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _watchlistBusy = false);
-    }
+  Future<void> _openScopeSheet(
+    Map<String, dynamic> d, {
+    required WatchlistItem? currentShared,
+    required WatchlistItem? currentSolo,
+  }) async {
+    final result = await WatchlistScopeSheet.show(
+      context,
+      initialShared: currentShared != null,
+      initialSolo: currentSolo != null,
+    );
+    if (result == null || !mounted) return;
+    await _applyWatchlistScopes(
+      d,
+      wantShared: result.shared,
+      wantSolo: result.solo,
+      currentShared: currentShared,
+      currentSolo: currentSolo,
+    );
   }
 
   Future<void> _openRatingSheet(Map<String, dynamic> d) async {
@@ -266,11 +298,6 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                   w.tmdbId == widget.tmdbId,
               orElse: () => null,
             );
-    // Show "Remove" when this title is on any list visible in the current mode.
-    final WatchlistItem? activeEntry = mode == ViewMode.solo
-        ? (mySoloEntry ?? sharedEntry)
-        : sharedEntry;
-    final onWatchlist = activeEntry != null;
     final rec = ref.watch(singleRecProvider(_entryId)).value;
     final prediction = ref.watch(predictionProvider(_entryId)).value;
     final myPredEntry = uid != null ? prediction?.entryFor(uid) : null;
@@ -348,23 +375,16 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Wrap(spacing: 8, children: [
-                  if (onWatchlist)
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.bookmark_remove),
-                      label: Text(activeEntry.scope == 'solo' ? 'On Solo list' : 'On watchlist'),
-                      onPressed: _watchlistBusy ? null : () => _removeFromWatchlist(activeEntry),
-                    )
-                  else
-                    FilledButton.icon(
-                      icon: const Icon(Icons.bookmark_add),
-                      label: Text(mode == ViewMode.solo ? 'Add to Solo list' : 'Add to watchlist'),
-                      onPressed: _watchlistBusy
-                          ? null
-                          : () => _addToWatchlist(
-                                d,
-                                scope: mode == ViewMode.solo ? 'solo' : 'shared',
-                              ),
+                  _WatchlistButton(
+                    onShared: sharedEntry != null,
+                    onSolo: mySoloEntry != null,
+                    busy: _watchlistBusy,
+                    onTap: () => _openScopeSheet(
+                      d,
+                      currentShared: sharedEntry,
+                      currentSolo: mySoloEntry,
                     ),
+                  ),
                   FilledButton.tonalIcon(
                     icon: const Icon(Icons.star_outline),
                     label: const Text('Rate'),
@@ -554,6 +574,159 @@ class _SimilarTitlesSection extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Watchlist add/manage button ──────────────────────────────────────────────
+
+/// Single button that reflects the title's combined state across both scopes
+/// and opens the scope picker sheet. Replaces the previous split add/remove
+/// button so users can toggle Shared and Solo independently.
+class _WatchlistButton extends StatelessWidget {
+  final bool onShared;
+  final bool onSolo;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _WatchlistButton({
+    required this.onShared,
+    required this.onSolo,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final anyScope = onShared || onSolo;
+    final icon = anyScope ? Icons.bookmark : Icons.bookmark_add_outlined;
+    final label = switch ((onShared, onSolo)) {
+      (true, true) => 'On both lists',
+      (true, false) => 'On Shared list',
+      (false, true) => 'On Solo list',
+      (false, false) => 'Add to watchlist',
+    };
+    if (anyScope) {
+      return OutlinedButton.icon(
+        icon: Icon(icon),
+        label: Text(label),
+        onPressed: busy ? null : onTap,
+      );
+    }
+    return FilledButton.icon(
+      icon: Icon(icon),
+      label: Text(label),
+      onPressed: busy ? null : onTap,
+    );
+  }
+}
+
+// ─── Scope picker sheet ──────────────────────────────────────────────────────
+
+class WatchlistScopeResult {
+  final bool shared;
+  final bool solo;
+  const WatchlistScopeResult({required this.shared, required this.solo});
+}
+
+/// Bottom sheet that lets the user pick which watchlists (Shared, Solo, or
+/// both) a title should appear on. Returns null if dismissed without saving
+/// so the caller can skip the diff/apply step.
+class WatchlistScopeSheet extends StatefulWidget {
+  final bool initialShared;
+  final bool initialSolo;
+
+  const WatchlistScopeSheet({
+    super.key,
+    required this.initialShared,
+    required this.initialSolo,
+  });
+
+  static Future<WatchlistScopeResult?> show(
+    BuildContext context, {
+    required bool initialShared,
+    required bool initialSolo,
+  }) =>
+      showModalBottomSheet<WatchlistScopeResult>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => WatchlistScopeSheet(
+          initialShared: initialShared,
+          initialSolo: initialSolo,
+        ),
+      );
+
+  @override
+  State<WatchlistScopeSheet> createState() => _WatchlistScopeSheetState();
+}
+
+class _WatchlistScopeSheetState extends State<WatchlistScopeSheet> {
+  late bool _shared = widget.initialShared;
+  late bool _solo = widget.initialSolo;
+
+  bool get _dirty =>
+      _shared != widget.initialShared || _solo != widget.initialSolo;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 4),
+              child: Text('Save to watchlist',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            const Text(
+              'Pick one or both. Shared is visible to both members. '
+              'Solo is visible only to you, only in Solo mode.',
+              style: TextStyle(fontSize: 12, color: Colors.white54),
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: _shared,
+              onChanged: (v) => setState(() => _shared = v ?? false),
+              title: const Text('Shared watchlist'),
+              subtitle: const Text('Both members see it'),
+              secondary: const Icon(Icons.group),
+              controlAffinity: ListTileControlAffinity.trailing,
+            ),
+            CheckboxListTile(
+              value: _solo,
+              onChanged: (v) => setState(() => _solo = v ?? false),
+              title: const Text('Solo watchlist'),
+              subtitle: const Text('Only you see it, only in Solo mode'),
+              secondary: const Icon(Icons.person_outline),
+              controlAffinity: ListTileControlAffinity.trailing,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _dirty
+                      ? () => Navigator.of(context).pop(
+                            WatchlistScopeResult(shared: _shared, solo: _solo),
+                          )
+                      : null,
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

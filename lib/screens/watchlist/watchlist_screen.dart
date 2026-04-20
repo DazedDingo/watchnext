@@ -6,10 +6,15 @@ import '../../providers/household_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/help_button.dart';
+import '../../widgets/mode_toggle.dart';
 
 const _watchlistHelp =
     'A shared queue of titles both members have saved.\n\n'
-    '• Add — from a title\'s detail screen, tap "Add to watchlist".\n'
+    '• Add — from a title\'s detail screen, tap "Add to watchlist". Pick '
+    'Shared (both members), Solo (only you), or both.\n'
+    '• Solo / Together toggle — top-right. Together shows only shared items; '
+    'Solo shows shared + your own solo-saved items (your partner\'s solo list '
+    'is never visible to you).\n'
     '• Remove — swipe left on any row.\n'
     '• Tap a row to open the title and rate, predict, or start watching.\n\n'
     'The recommender uses your watchlist as its primary candidate pool.';
@@ -23,9 +28,14 @@ class WatchlistScreen extends ConsumerWidget {
     final items = ref.watch(visibleWatchlistProvider);
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
         title: const Text('Watchlist'),
-        actions: const [HelpButton(title: 'Watchlist', body: _watchlistHelp)],
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(right: 4),
+            child: Center(child: ModeToggle()),
+          ),
+          HelpButton(title: 'Watchlist', body: _watchlistHelp),
+        ],
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
