@@ -48,12 +48,19 @@ class ConciergeService {
           .toList(),
     });
 
-    final data = result.data as Map<String, dynamic>;
-    final rawTitles =
-        (data['titles'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    // Android's platform channel returns Map<Object?, Object?> for callable
+    // responses, so `as Map<String, dynamic>` blows up with
+    // "type Map<Object?, Object?> is not a subtype of Map<String, dynamic>".
+    // Convert defensively at both the top level and for each inner title map.
+    final data = Map<String, dynamic>.from(result.data as Map);
+    final rawTitles = (data['titles'] as List?) ?? const [];
+    final titles = rawTitles
+        .whereType<Map>()
+        .map((m) => TitleSuggestion.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
     return (
       text: data['text'] as String? ?? '',
-      titles: rawTitles.map(TitleSuggestion.fromMap).toList(),
+      titles: titles,
     );
   }
 
