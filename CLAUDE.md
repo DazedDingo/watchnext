@@ -187,6 +187,10 @@ households/{householdId}/badges/{badgeId}
 
 20. **Claude hallucinates tmdb_ids**: the concierge prompt asks for a `tmdb_id` per suggestion, but Claude will confidently emit an id that belongs to a different movie — we've seen "The Shining" come back with Ice Age's id, so the poster rendered Ice Age and taps opened Ice Age. `ConciergeService.chat` runs every suggestion through `TmdbService.searchMulti(title)` client-side, prefers year+media_type-matching results, and replaces `tmdbId` + captures `posterPath` with real TMDB data. Suggestions that don't resolve are dropped rather than shown as broken rows. No server-side fix because the Cloud Function doesn't have a TMDB key configured (redditScraper's `process.env.TMDB_API_KEY` lookup is a silent no-op without it).
 
+21. **Stremio / IMDb deep links**: TitleDetail shows "Stremio" + "IMDb" buttons when an imdb_id resolves. Movies carry `imdb_id` at the top level of TMDB's `/movie/:id` payload; TV does **not** — we append `external_ids` to `tvDetails` so `external_ids.imdb_id` is available. Schemes: `stremio:///detail/{movie|series}/{imdb_id}/{imdb_id}` (path repeats per Stremio's routing) and `imdb:///title/{imdb_id}/`; both fall back to `https://web.stremio.com/#/detail/...` / `https://www.imdb.com/title/...` when the app isn't installed. AndroidManifest declares both schemes under `<queries>` — without it `canLaunchUrl` always returns false on Android 11+. `url_launcher` is the only dep added.
+
+22. **"Watching" definition duality**: `watchedKeysProvider` (used by `includeWatchedProvider` to hide titles from suggestion surfaces) treats ANY watchEntry as "seen" — finished AND in-progress. The rationale: don't recommend a show the household is partway through. Separately, the Watchlist screen's `Watching` segment pulls directly from `watchEntriesProvider.where((e) => e.inProgressStatus == 'watching')` so in-progress TV surfaces there even when it was never saved to the watchlist. Don't confuse the two: the provider is a *skip set*, the watchlist segment is a *display list*.
+
 ## Phases
 
 - **Phase 1–4**: Complete (Foundation, Trakt Integration, Core UX, Solo/Together + Share-to-Save)

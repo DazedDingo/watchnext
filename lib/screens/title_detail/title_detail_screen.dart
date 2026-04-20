@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/rating.dart';
 import '../../models/watch_entry.dart';
@@ -28,6 +29,8 @@ const _titleDetailHelp =
     '• Rate — rate 1–5 stars once you\'ve watched. Trakt-linked? Ratings push automatically.\n'
     '• Predict — guess how many stars you\'ll give it before watching, for the prediction game.\n'
     '• See Reveal — shown when you\'ve both predicted and rated, to see who was closer.\n'
+    '• Stremio — opens the title in the Stremio app so you can play it (falls back to the web player if the app isn\'t installed).\n'
+    '• IMDb — opens the title in the IMDb app or website.\n'
     '• AI blurb — a one-liner from the recommender explaining why this one landed on your list.\n'
     '• Household ratings — what each member gave it.';
 
@@ -63,6 +66,70 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 
   bool _watchlistBusy = false;
   bool _watchedBusy = false;
+
+  /// Movies carry `imdb_id` at the top level; TV carries it under
+  /// `external_ids.imdb_id` (tvDetails appends `external_ids` to pick it up).
+  String? _imdbIdFor(Map<String, dynamic> d) {
+    final topLevel = d['imdb_id'] as String?;
+    if (topLevel != null && topLevel.isNotEmpty) return topLevel;
+    final ext = d['external_ids'] as Map<String, dynamic>?;
+    final tvImdb = ext?['imdb_id'] as String?;
+    return (tvImdb != null && tvImdb.isNotEmpty) ? tvImdb : null;
+  }
+
+  Future<void> _openInStremio(Map<String, dynamic> d) async {
+    final imdb = _imdbIdFor(d);
+    if (imdb == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No IMDb id — can\'t open in Stremio.')),
+      );
+      return;
+    }
+    // Stremio's URL scheme uses "series" for TV, "movie" for movies. The app
+    // registers stremio:// on Android; if it isn't installed we fall back to
+    // the web player so the user at least lands on the title.
+    final type = widget.mediaType == 'tv' ? 'series' : 'movie';
+    final appUri = Uri.parse('stremio:///detail/$type/$imdb/$imdb');
+    final webUri = Uri.parse('https://web.stremio.com/#/detail/$type/$imdb/$imdb');
+    try {
+      if (await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Open in Stremio failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _openOnImdb(Map<String, dynamic> d) async {
+    final imdb = _imdbIdFor(d);
+    if (imdb == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No IMDb id available.')),
+      );
+      return;
+    }
+    final appUri = Uri.parse('imdb:///title/$imdb/');
+    final webUri = Uri.parse('https://www.imdb.com/title/$imdb/');
+    try {
+      if (await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Open in IMDb failed: $e')),
+      );
+    }
+  }
 
   Future<void> _toggleWatched(Map<String, dynamic> d, {required bool currentlyWatched}) async {
     if (_watchedBusy) return;
@@ -447,6 +514,18 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                       onPressed: () => context.push(
                           '/reveal/${widget.mediaType}/${widget.tmdbId}'),
                     ),
+                  if (_imdbIdFor(d) != null) ...[
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.play_circle_outline),
+                      label: const Text('Stremio'),
+                      onPressed: () => _openInStremio(d),
+                    ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('IMDb'),
+                      onPressed: () => _openOnImdb(d),
+                    ),
+                  ],
                 ]),
               ),
               if (overview != null && overview.isNotEmpty) ...[

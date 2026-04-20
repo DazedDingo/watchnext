@@ -106,7 +106,7 @@ void main() {
       final url = rec.calls.single.url;
       expect(url.path, endsWith('/tv/1399'));
       expect(url.queryParameters['append_to_response'],
-          'credits,keywords,similar');
+          'credits,keywords,similar,external_ids');
     });
 
     test('tvSeason hits /tv/:id/season/:n', () async {

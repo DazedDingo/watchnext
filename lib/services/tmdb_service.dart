@@ -43,7 +43,8 @@ class TmdbService {
       _get(_uri('/movie/$tmdbId', {'append_to_response': 'credits,keywords,similar'}));
 
   Future<Map<String, dynamic>> tvDetails(int tmdbId) =>
-      _get(_uri('/tv/$tmdbId', {'append_to_response': 'credits,keywords,similar'}));
+      _get(_uri('/tv/$tmdbId',
+          {'append_to_response': 'credits,keywords,similar,external_ids'}));
 
   Future<Map<String, dynamic>> tvSeason(int tmdbId, int seasonNumber) =>
       _get(_uri('/tv/$tmdbId/season/$seasonNumber'));

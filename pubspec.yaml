@@ -1,7 +1,7 @@
 name: watchnext
 description: "Shared movie & TV recommender for two-person households."
 publish_to: 'none'
-version: 0.4.49+54
+version: 0.4.50+55
 
 environment:
   sdk: ^3.11.4
@@ -40,6 +40,7 @@ dependencies:
   # Utilities
   intl: ^0.19.0
   package_info_plus: ^9.0.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

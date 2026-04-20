@@ -199,6 +199,26 @@ scorer and Phase 9 stats depend on, so they come before any new feature work.
 
 ---
 
+## Stremio integration — optimisation track
+
+Deep-link to Stremio shipped 2026-04-20 (title detail → "Stremio" button,
+`stremio:///detail/{type}/{imdb_id}` with web fallback). Next step up the
+ladder, pencilled in to tackle soon:
+
+- [ ] **WatchNext-as-Stremio-addon.** Publish a Stremio addon exposing three
+  catalogs: "Our Watchlist" (shared), "Your Recommendations" (per-user, mode-
+  aware), "Next Up" (in-progress TV). Stremio addon SDK is a small Node/
+  Express service returning JSON per the manifest. Needs a public HTTPS
+  endpoint and per-household auth tokens baked into the addon URL so each
+  user installs their own link. Cloud Run + Firebase Hosting rewrites are
+  the obvious home; Firestore holds the token→householdId map. Value: lets
+  us browse/play WatchNext picks inside Stremio instead of bouncing through
+  the deep link. Skip catalogs that would duplicate Trakt addon output
+  (generic "recently watched" etc.) — only expose surfaces unique to
+  WatchNext.
+
+---
+
 ## Out of scope (for reference)
 
 These features from the spec are deliberately not in any phase above:
