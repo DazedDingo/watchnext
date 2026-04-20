@@ -157,7 +157,9 @@ class TmdbService {
           final totalPages = (payload['total_pages'] as num?)?.toInt() ?? 1;
           if (page >= totalPages) return;
         } catch (_) {
-          return; // give up this rung on error; later rungs can still fire
+          // A single page failure (timeout, rate-limit blip) shouldn't kill
+          // the whole rung — remaining pages are usually fine. Continue.
+          continue;
         }
       }
     }

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -50,10 +53,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchCtrl = TextEditingController();
   String _search = '';
 
+  // Debounces filter-change → auto-refresh so tapping through chip
+  // combinations only fires one request. 700ms is tight enough to feel
+  // immediate and loose enough to coalesce bursts.
+  Timer? _autoRefreshDebounce;
+
   @override
   void dispose() {
+    _autoRefreshDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// Kicks off a non-forcing refresh after the debounce window elapses.
+  /// Non-forcing = don't regenerate the taste profile; just rebuild the pool
+  /// with the currently selected filters. Errors are surfaced via snackbar.
+  void _scheduleAutoRefresh() {
+    _autoRefreshDebounce?.cancel();
+    _autoRefreshDebounce = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      ref.invalidate(refreshRecommendationsProvider);
+      unawaited(
+        ref.read(refreshRecommendationsProvider(false).future).catchError((e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Refresh failed: $e')),
+            );
+          }
+        }),
+      );
+    });
   }
 
   Future<void> _openGenreSheet(
@@ -77,6 +106,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final mediaType = ref.watch(mediaTypeFilterProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
+
+    // Any filter change schedules a debounced auto-refresh so the pool is
+    // rebuilt against the current filter state. Without this, narrowing to a
+    // combination the current pool doesn't cover would show an empty list
+    // until the user manually pulled to refresh. `ref.listen` only fires on
+    // actual change, so the initial build (prev = null) is a no-op.
+    ref.listen<Set<String>>(selectedGenresProvider, (prev, curr) {
+      if (prev != null && !setEquals(prev, curr)) _scheduleAutoRefresh();
+    });
+    ref.listen<RuntimeBucket?>(runtimeFilterProvider, (prev, curr) {
+      if (prev != curr) _scheduleAutoRefresh();
+    });
+    ref.listen<YearRange>(yearRangeProvider, (prev, curr) {
+      if (prev != null && prev != curr) _scheduleAutoRefresh();
+    });
+    ref.listen<MediaTypeFilter?>(mediaTypeFilterProvider, (prev, curr) {
+      if (prev != curr) _scheduleAutoRefresh();
+    });
 
     final recsAsync = ref.watch(recommendationsProvider);
     final recs = recsAsync.value ?? const [];
@@ -281,6 +328,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     SizedBox(height: 12),
                     Text(
                       'Pull down to generate recommendations.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  ],
+                ),
+              )
+            else if (available.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+                child: Column(
+                  children: [
+                    Icon(Icons.filter_alt_off_outlined,
+                        size: 56, color: Colors.white24),
+                    SizedBox(height: 12),
+                    Text(
+                      'No matches for your current filters.\nWiden genre, year, runtime, or media type — '
+                      'or pull down to rebuild the pool.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white54),
                     ),

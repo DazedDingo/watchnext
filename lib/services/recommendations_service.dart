@@ -49,10 +49,16 @@ class RecommendationsService {
   CollectionReference<Map<String, dynamic>> _col(String hh) =>
       _db.collection('households/$hh/recommendations');
 
+  /// Stream window is deliberately wide (300) because Phase A writes
+  /// newly-discovered rows at `match_score=50` — if legacy Claude-scored
+  /// recs fill the first 120 slots, a narrow filter (e.g. "Comedy + 1975-
+  /// 2000 + 90-120min") would see nothing until Claude finishes scoring the
+  /// new batch and bumps some above 50. Wider window keeps the new rows
+  /// visible to the client-side filter from the moment Phase A lands.
   Stream<List<Recommendation>> stream(String householdId) {
     return _col(householdId)
         .orderBy('match_score', descending: true)
-        .limit(120)
+        .limit(300)
         .snapshots()
         .map((s) => s.docs.map(Recommendation.fromDoc).toList());
   }
@@ -234,9 +240,9 @@ class RecommendationsService {
     final col = _col(householdId);
 
     // Look up which candidate ids are already scored so we preserve their
-    // score on merge. Cap the read at a generous 500 — the stream shows 120,
-    // and older recs get overwritten on subsequent refreshes anyway.
-    final existingSnap = await col.limit(500).get();
+    // score on merge. Cap matches the stream window so we don't accidentally
+    // reset scores on recs the UI is actively showing.
+    final existingSnap = await col.limit(800).get();
     final existingIds = existingSnap.docs.map((d) => d.id).toSet();
 
     const chunkSize = 450; // stay below Firestore's 500-op batch limit
