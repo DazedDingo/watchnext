@@ -4,8 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/episode.dart';
 import '../models/rating.dart';
 import '../models/watch_entry.dart';
+import '../services/watch_entry_service.dart';
 import 'auth_provider.dart';
 import 'household_provider.dart';
+
+final watchEntryServiceProvider =
+    Provider<WatchEntryService>((_) => WatchEntryService());
 
 /// All watch entries for the household, newest first.
 final watchEntriesProvider = StreamProvider<List<WatchEntry>>((ref) async* {

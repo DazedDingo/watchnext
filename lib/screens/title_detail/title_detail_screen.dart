@@ -61,6 +61,43 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
   String get _ratingLevel => widget.mediaType == 'movie' ? 'movie' : 'show';
 
   bool _watchlistBusy = false;
+  bool _watchedBusy = false;
+
+  Future<void> _toggleWatched(Map<String, dynamic> d, {required bool currentlyWatched}) async {
+    if (_watchedBusy) return;
+    setState(() => _watchedBusy = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final householdId = await ref.read(householdIdProvider.future);
+      if (!mounted || uid == null || householdId == null) return;
+      final svc = ref.read(watchEntryServiceProvider);
+      final mt = widget.mediaType == 'movie' ? 'movie' : 'tv';
+      if (currentlyWatched) {
+        await svc.unmarkWatched(
+          householdId: householdId, uid: uid,
+          mediaType: mt, tmdbId: widget.tmdbId,
+        );
+      } else {
+        await svc.markWatched(
+          householdId: householdId, uid: uid,
+          mediaType: mt, tmdbId: widget.tmdbId,
+          details: d,
+        );
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(currentlyWatched ? 'Marked as unwatched' : 'Marked as watched'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Mark watched failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _watchedBusy = false);
+    }
+  }
 
   /// Diffs current-vs-desired scope states and applies add/remove deltas so a
   /// single sheet can promote a title from "nothing" → "both lists" (or any
@@ -301,7 +338,8 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     final rec = ref.watch(singleRecProvider(_entryId)).value;
     final prediction = ref.watch(predictionProvider(_entryId)).value;
     final myPredEntry = uid != null ? prediction?.entryFor(uid) : null;
-    final hasWatched = watchEntry != null;
+    final watchedByMe = uid != null && (watchEntry?.watchedBy[uid] ?? false);
+    final hasWatched = watchedByMe;
     // Show Predict button when: not yet watched AND no prediction submitted yet.
     final canPredict = !hasWatched && myPredEntry == null;
     // Show Reveal button when: user predicted (not skipped), has rated, hasn't seen reveal.
@@ -364,9 +402,9 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                         if (runtime != null) '${runtime}m',
                         if (genres.isNotEmpty) genres.take(2).join(' · '),
                       ].join(' · '), style: Theme.of(context).textTheme.labelMedium),
-                      if (watchEntry != null) ...[
+                      if (watchEntry != null && watchEntry.inProgressStatus == 'watching') ...[
                         const SizedBox(height: 8),
-                        Chip(label: Text(watchEntry.inProgressStatus == 'watching' ? 'In progress' : 'Watched')),
+                        const Chip(label: Text('In progress')),
                       ],
                     ]),
                   ),
@@ -384,6 +422,11 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                       currentShared: sharedEntry,
                       currentSolo: mySoloEntry,
                     ),
+                  ),
+                  _WatchedButton(
+                    watched: watchedByMe,
+                    busy: _watchedBusy,
+                    onTap: () => _toggleWatched(d, currentlyWatched: watchedByMe),
                   ),
                   FilledButton.tonalIcon(
                     icon: const Icon(Icons.star_outline),
@@ -616,6 +659,36 @@ class _WatchlistButton extends StatelessWidget {
     return FilledButton.icon(
       icon: Icon(icon),
       label: Text(label),
+      onPressed: busy ? null : onTap,
+    );
+  }
+}
+
+// ─── Mark-as-watched button ──────────────────────────────────────────────────
+
+class _WatchedButton extends StatelessWidget {
+  final bool watched;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _WatchedButton({
+    required this.watched,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (watched) {
+      return OutlinedButton.icon(
+        icon: const Icon(Icons.check_circle),
+        label: const Text('Watched'),
+        onPressed: busy ? null : onTap,
+      );
+    }
+    return FilledButton.tonalIcon(
+      icon: const Icon(Icons.visibility_outlined),
+      label: const Text('Mark watched'),
       onPressed: busy ? null : onTap,
     );
   }
