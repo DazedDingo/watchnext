@@ -228,4 +228,446 @@ void main() {
       );
     });
   });
+
+  // ─── discoverPaged fallback ladder ────────────────────────────────────────
+  //
+  // The narrow-filter problem: "War, 1970-1989" would return ~2 hits if we
+  // only asked `/discover/movie?with_genres=10752&primary_release_date.gte=…`
+  // once. `discoverPaged` has three rungs:
+  //   1. OR-join genres + year bounds, paginate until [poolFloor] or [maxPages]
+  //   2. If still below floor and multiple genres → per-genre retry
+  //   3. If still below floor and year active → drop year and retry
+  //
+  // These tests script the mock server to simulate each rung being the one
+  // that finally fills the pool, asserting the right queries fire + results
+  // merge + dedup across rungs.
+  group('TmdbService.discoverPaged — rung 1 (happy path)', () {
+    test('single query paginates until pool floor is hit', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          final page = int.parse(req.url.queryParameters['page'] ?? '1');
+          final start = (page - 1) * 2;
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': start + 1, 'title': 'M${start + 1}'},
+                {'id': start + 2, 'title': 'M${start + 2}'},
+              ],
+              'total_pages': 5,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752], // War
+        minYear: 1970,
+        maxYear: 1989,
+        poolFloor: 4,
+      );
+      expect((res['results'] as List), hasLength(4));
+      // Paginated twice: 2 + 2 = 4, should stop once floor reached.
+      expect(calls.length, 2);
+      // Genre OR-join + year range on the first call.
+      final q1 = calls.first.queryParameters;
+      expect(q1['with_genres'], '10752');
+      expect(q1['primary_release_date.gte'], '1970-01-01');
+      expect(q1['primary_release_date.lte'], '1989-12-31');
+      expect(q1['sort_by'], 'vote_average.desc');
+      expect(q1['vote_count.gte'], '50');
+    });
+
+    test('tv uses first_air_date for bounds', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': List.generate(
+                  30, (i) => {'id': i + 1, 'name': 'T${i + 1}'}),
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'tv',
+        genreIds: const [10768], // War & Politics
+        minYear: 2000,
+        maxYear: 2010,
+      );
+      final q = calls.first.queryParameters;
+      expect(q['first_air_date.gte'], '2000-01-01');
+      expect(q['first_air_date.lte'], '2010-12-31');
+      expect(q.containsKey('primary_release_date.gte'), isFalse);
+    });
+
+    test('OR-joins multiple genre ids with the pipe delimiter', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({
+              'results': List.generate(
+                  30, (i) => {'id': i + 1, 'title': 'X${i + 1}'}),
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752, 36, 18], // War | History | Drama
+      );
+      expect(captured!.queryParameters['with_genres'], '10752|36|18');
+    });
+
+    test('stops paginating once total_pages reached even below poolFloor',
+        () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'Only One'},
+              ],
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [99],
+        poolFloor: 100,
+        maxPages: 10,
+      );
+      // Rung 1: exhausted pages=1 at total_pages=1, then rung 3 won't fire
+      // because no year bounds were set and rung 2 needs >1 genre.
+      expect(calls, hasLength(1));
+      expect((res['results'] as List), hasLength(1));
+    });
+  });
+
+  group('TmdbService.discoverPaged — rung 2 (per-genre fallback)', () {
+    test('fires per-genre retries when OR-join is sparse with >1 genre',
+        () async {
+      // Script: OR-join returns 1 row; single-genre retries each return more.
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          final genres = req.url.queryParameters['with_genres']!;
+          if (genres.contains('|')) {
+            return http.Response(
+              json.encode({
+                'results': [
+                  {'id': 1, 'title': 'union'},
+                ],
+                'total_pages': 1,
+              }),
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }
+          // Per-genre: return 10 rows each, ids offset by genre id
+          final id = int.parse(genres);
+          return http.Response(
+            json.encode({
+              'results': List.generate(
+                  10, (i) => {'id': id * 1000 + i, 'title': 'g$id r$i'}),
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752, 36, 18],
+        poolFloor: 15,
+      );
+      final unionCalls =
+          calls.where((u) => u.queryParameters['with_genres']!.contains('|'));
+      final perGenreCalls =
+          calls.where((u) => !u.queryParameters['with_genres']!.contains('|'));
+      expect(unionCalls.length, greaterThanOrEqualTo(1));
+      expect(perGenreCalls.length, greaterThanOrEqualTo(1),
+          reason: 'rung 2 must fire at least one per-genre discover');
+      // Pool should include union row + per-genre rows.
+      final ids = (res['results'] as List)
+          .map((r) => (r as Map)['id'])
+          .toSet();
+      expect(ids, contains(1));
+      expect(ids.any((i) => (i as int) >= 10752000), isTrue);
+    });
+
+    test('per-genre rung does not fire with a single genre id', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'lonely'},
+              ],
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752],
+        poolFloor: 20,
+      );
+      // Only one call — rung 2 should not run because there's only one genre.
+      // (Rung 3 won't run either: no year bounds.)
+      expect(calls, hasLength(1));
+    });
+
+    test('per-genre results dedup against union rung', () async {
+      // Rung 1 (OR) returns id=1; rung 2 per-genre also returns id=1 — the
+      // final merged list must contain id=1 only once.
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          final g = req.url.queryParameters['with_genres']!;
+          final payload = g.contains('|')
+              ? {
+                  'results': [
+                    {'id': 1, 'title': 'shared'},
+                  ],
+                  'total_pages': 1,
+                }
+              : {
+                  'results': [
+                    {'id': 1, 'title': 'shared again'},
+                    {'id': 99, 'title': 'unique to per-genre'},
+                  ],
+                  'total_pages': 1,
+                };
+          return http.Response(json.encode(payload), 200,
+              headers: const {'content-type': 'application/json'});
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752, 36],
+        poolFloor: 20,
+      );
+      final ids =
+          (res['results'] as List).map((r) => (r as Map)['id']).toList();
+      expect(ids.toSet(), {1, 99});
+      expect(ids.length, 2, reason: 'id=1 should not be double-counted');
+    });
+  });
+
+  group('TmdbService.discoverPaged — rung 3 (drop-year fallback)', () {
+    test('retries without year constraint when pool still short', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          final hasYear = req.url.queryParameters
+              .containsKey('primary_release_date.gte');
+          if (hasYear) {
+            return http.Response(
+              json.encode({
+                'results': [
+                  {'id': 1, 'title': 'in-bounds'},
+                ],
+                'total_pages': 1,
+              }),
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(
+            json.encode({
+              'results': List.generate(
+                  20, (i) => {'id': 1000 + i, 'title': 'any year'}),
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752], // single genre → skip rung 2
+        minYear: 1970,
+        maxYear: 1989,
+        poolFloor: 15,
+      );
+      final yearedCalls = calls.where((u) =>
+          u.queryParameters.containsKey('primary_release_date.gte')).toList();
+      final unYearedCalls = calls.where((u) =>
+          !u.queryParameters.containsKey('primary_release_date.gte')).toList();
+      expect(yearedCalls, isNotEmpty);
+      expect(unYearedCalls, isNotEmpty,
+          reason: 'rung 3 must fire a query without year bounds');
+      // Pool should include the in-bounds id=1 plus any-year rows.
+      final ids =
+          (res['results'] as List).map((r) => (r as Map)['id']).toList();
+      expect(ids, contains(1));
+      expect(ids.any((id) => (id as int) >= 1000), isTrue);
+    });
+
+    test('drop-year rung does not fire when no year bounds were set',
+        () async {
+      int callCount = 0;
+      final tmdb = TmdbService(
+        client: MockClient((_) async {
+          callCount++;
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'x'},
+              ],
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752],
+        poolFloor: 20,
+      );
+      // Rung 1 fires once, no rung 2 (single genre), no rung 3 (no year).
+      expect(callCount, 1);
+    });
+
+    test('pool below floor after all rungs still returns partial results',
+        () async {
+      // All rungs fail to reach the floor — we return what we have.
+      final tmdb = TmdbService(
+        client: MockClient((_) async {
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'lonely'},
+              ],
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752],
+        minYear: 1900,
+        maxYear: 1905,
+        poolFloor: 50,
+      );
+      expect((res['results'] as List), hasLength(1));
+    });
+  });
+
+  group('TmdbService.discoverPaged — defensive paths', () {
+    test('rung 1 HTTP error is swallowed; later rungs can still fire',
+        () async {
+      // First call (rung 1) errors. Rung 3 (drop year) should succeed.
+      bool firstCall = true;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          if (firstCall) {
+            firstCall = false;
+            return http.Response('boom', 503);
+          }
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 7, 'title': 'rung-3'},
+              ],
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752],
+        minYear: 1970,
+        maxYear: 1989,
+        poolFloor: 50,
+      );
+      final ids =
+          (res['results'] as List).map((r) => (r as Map)['id']).toList();
+      expect(ids, [7]);
+    });
+
+    test('empty genre list still queries by year alone', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({'results': [], 'total_pages': 1}),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        minYear: 1970,
+        maxYear: 1989,
+      );
+      expect(captured!.queryParameters.containsKey('with_genres'), isFalse);
+      expect(captured!.queryParameters['primary_release_date.gte'],
+          '1970-01-01');
+    });
+
+    test('result payload shape matches the normal discover response', () async {
+      final tmdb = TmdbService(
+        client: MockClient((_) async {
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'x'},
+              ],
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final res = await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [10752],
+      );
+      // buildCandidates reads payload['results'] so that key must exist and
+      // be a List of Maps just like the raw /discover response.
+      expect(res.keys, contains('results'));
+      expect(res['results'], isA<List>());
+      expect((res['results'] as List).first, isA<Map>());
+    });
+  });
 }

@@ -73,6 +73,98 @@ class TmdbService {
   Future<Map<String, dynamic>> discoverTv(Map<String, String> params) =>
       _get(_uri('/discover/tv', params));
 
+  /// Fills a candidate pool via `/discover` with a fallback ladder so narrow
+  /// filters (e.g. "War, 1970-1989") don't produce ~0 results.
+  ///
+  /// Ladder:
+  ///  1. OR-join all genre ids (`|` delimiter) + year bounds. Paginate until
+  ///     the pool hits [poolFloor] or [maxPages].
+  ///  2. If still below [poolFloor] and there are multiple genres, fire one
+  ///     discover per genre and merge (catches obscure genres starved by
+  ///     popularity sort).
+  ///  3. If still below [poolFloor] and year bounds were applied, drop the
+  ///     year constraint and retry step 1.
+  ///
+  /// All results are deduped by `id` and returned in the normal
+  /// `{results: [...]}` shape so [buildCandidates] treats them uniformly.
+  /// [mediaType] is either `'movie'` or `'tv'`; the date field name and
+  /// pagination endpoint differ but the response shape matches.
+  Future<Map<String, dynamic>> discoverPaged({
+    required String mediaType,
+    List<int> genreIds = const [],
+    int? minYear,
+    int? maxYear,
+    int minVoteCount = 50,
+    int poolFloor = 20,
+    int maxPages = 3,
+  }) async {
+    final isTv = mediaType == 'tv';
+    final dateGte = isTv ? 'first_air_date.gte' : 'primary_release_date.gte';
+    final dateLte = isTv ? 'first_air_date.lte' : 'primary_release_date.lte';
+
+    final seen = <int>{};
+    final merged = <Map<String, dynamic>>[];
+
+    void consume(Map<String, dynamic> payload) {
+      final rows = (payload['results'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>();
+      for (final r in rows) {
+        final id = (r['id'] as num?)?.toInt();
+        if (id == null || !seen.add(id)) continue;
+        merged.add(r);
+      }
+    }
+
+    Map<String, String> baseParams({
+      required List<int> ids,
+      required bool withYear,
+    }) {
+      final p = <String, String>{
+        'sort_by': 'vote_average.desc',
+        'vote_count.gte': '$minVoteCount',
+      };
+      if (ids.isNotEmpty) p['with_genres'] = ids.join('|');
+      if (withYear && minYear != null) p[dateGte] = '$minYear-01-01';
+      if (withYear && maxYear != null) p[dateLte] = '$maxYear-12-31';
+      return p;
+    }
+
+    Future<void> drainPages(List<int> ids, {required bool withYear}) async {
+      for (var page = 1; page <= maxPages; page++) {
+        if (merged.length >= poolFloor) return;
+        final params = {...baseParams(ids: ids, withYear: withYear), 'page': '$page'};
+        try {
+          final payload = isTv ? await discoverTv(params) : await discoverMovies(params);
+          consume(payload);
+          // TMDB returns a `total_pages` hint; stop if we've exhausted it.
+          final totalPages = (payload['total_pages'] as num?)?.toInt() ?? 1;
+          if (page >= totalPages) return;
+        } catch (_) {
+          return; // give up this rung on error; later rungs can still fire
+        }
+      }
+    }
+
+    // Rung 1: OR-joined genres with year bounds.
+    await drainPages(genreIds, withYear: true);
+
+    // Rung 2: per-genre fallback if multi-genre query was sparse.
+    if (merged.length < poolFloor && genreIds.length > 1) {
+      for (final id in genreIds) {
+        if (merged.length >= poolFloor) break;
+        await drainPages([id], withYear: true);
+      }
+    }
+
+    // Rung 3: drop year entirely if the year constraint was the limiter.
+    final hasYear = minYear != null || maxYear != null;
+    if (merged.length < poolFloor && hasYear) {
+      await drainPages(genreIds, withYear: false);
+    }
+
+    return {'results': merged};
+  }
+
   /// Cross-reference an external ID (IMDb `tt…`, TVDB id, etc.) to TMDB ids.
   /// Used by the share-sheet flow to resolve IMDb/Letterboxd/generic links.
   Future<Map<String, dynamic>> findByExternalId(String externalId, {String source = 'imdb_id'}) =>

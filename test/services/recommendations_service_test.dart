@@ -597,6 +597,189 @@ void main() {
     });
   });
 
+  // ─── Discover payload wiring ──────────────────────────────────────────────
+  //
+  // When the user narrows with genre filters or a year range, the service
+  // fires `discoverPaged()` and passes the result into `buildCandidates` via
+  // `discoverMoviesPayload` / `discoverTvPayload`. These tests pin down:
+  //  - discover rows land with source=discover
+  //  - they get the larger discoverCap (40 default) not the tmdbCap
+  //  - they dedup across the baseline pool so a trending+discover overlap
+  //    doesn't double-book the same title
+  group('buildCandidates — discover payloads', () {
+    test('discover movie payload produces source=discover candidates', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: const {
+          'results': [
+            {
+              'id': 1,
+              'title': 'Apocalypse Now',
+              'genre_ids': [10752, 18], // War, Drama
+              'release_date': '1979-08-15',
+            },
+          ],
+        },
+      );
+      expect(out, hasLength(1));
+      expect(out.first['source'], 'discover');
+      expect(out.first['media_type'], 'movie');
+      expect(out.first['genres'], ['War', 'Drama']);
+      expect(out.first['year'], 1979);
+    });
+
+    test('discover tv payload uses the tv genre map', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverTvPayload: const {
+          'results': [
+            {
+              'id': 2,
+              'name': 'Band of Brothers',
+              'genre_ids': [10768, 18], // War & Politics, Drama
+              'first_air_date': '2001-09-09',
+            },
+          ],
+        },
+      );
+      expect(out.first['source'], 'discover');
+      expect(out.first['media_type'], 'tv');
+      expect(out.first['genres'], ['War & Politics', 'Drama']);
+      expect(out.first['year'], 2001);
+    });
+
+    test('discover gets a larger cap than the baseline tmdbCap', () {
+      // tmdbCap=5 caps each baseline TMDB source, but discoverCap=40 applies
+      // to discover specifically — the whole point of discover is to fill
+      // the pool when the user narrowed the query.
+      final discover = {
+        'results':
+            List.generate(50, (i) => {'id': 1000 + i, 'title': 'D$i'}),
+      };
+      final trending = {
+        'results':
+            List.generate(50, (i) => {'id': 2000 + i, 'title': 'T$i'}),
+      };
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: trending,
+        discoverMoviesPayload: discover,
+        tmdbCap: 5,
+        discoverCap: 40,
+      );
+      final discoverCount =
+          out.where((c) => c['source'] == 'discover').length;
+      final trendingCount =
+          out.where((c) => c['source'] == 'trending').length;
+      expect(discoverCount, 40);
+      expect(trendingCount, 5);
+    });
+
+    test('discover dedups against baseline trending — first source wins', () {
+      // Same id appears in both trending and discover. Baseline fires first
+      // so the row should read as trending, and discover must not duplicate.
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: const {
+          'results': [
+            {'id': 42, 'title': 'Shared', 'genre_ids': [18]},
+          ],
+        },
+        discoverMoviesPayload: const {
+          'results': [
+            {'id': 42, 'title': 'Shared (from discover)', 'genre_ids': [18]},
+          ],
+        },
+      );
+      expect(out, hasLength(1));
+      expect(out.first['source'], 'trending');
+    });
+
+    test('discover dedups within itself — movie + tv using same id', () {
+      // Different media_types namespace the key so the same numeric id on
+      // movie vs tv should both show up.
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: const {
+          'results': [
+            {'id': 10, 'title': 'Movie', 'genre_ids': [10752]},
+          ],
+        },
+        discoverTvPayload: const {
+          'results': [
+            {'id': 10, 'name': 'Show', 'genre_ids': [10768]},
+          ],
+        },
+      );
+      expect(out, hasLength(2));
+      expect(out.map((c) => c['media_type']).toList(), ['movie', 'tv']);
+    });
+
+    test('order: baseline TMDB sources come before discover', () {
+      // Declaration order in the service:
+      //   trending movies → trending tv → top-rated movies → top-rated tv →
+      //   discover movies → discover tv
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: const {
+          'results': [
+            {'id': 1, 'title': 'TM'},
+          ],
+        },
+        topRatedMoviesPayload: const {
+          'results': [
+            {'id': 2, 'title': 'RM'},
+          ],
+        },
+        discoverMoviesPayload: const {
+          'results': [
+            {'id': 3, 'title': 'DM'},
+          ],
+        },
+      );
+      expect(out.map((c) => c['source']).toList(),
+          ['trending', 'top_rated', 'discover']);
+    });
+
+    test('empty discover payloads are tolerated', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: const {},
+        discoverTvPayload: const {'status': 'no results'},
+      );
+      expect(out, isEmpty);
+    });
+
+    test('war-in-70s-80s regression: a narrow filter pool is still built',
+        () {
+      // Simulates the scenario the user flagged: "war movies, 70s-80s".
+      // The baseline pool is empty (no war films in trending this week) but
+      // discoverPaged returned 20 matches — they should all land as candidates
+      // so the scorer has real data to rank.
+      final discover = {
+        'results': List.generate(
+            20,
+            (i) => {
+                  'id': 3000 + i,
+                  'title': 'War flick ${1970 + (i % 20)}',
+                  'genre_ids': const [10752, 18],
+                  'release_date': '${1970 + (i % 20)}-01-01',
+                }),
+      };
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: discover,
+      );
+      expect(out, hasLength(20));
+      expect(
+          out.every((c) =>
+              (c['genres'] as List).contains('War') &&
+              (c['year'] as int) >= 1970 &&
+              (c['year'] as int) <= 1989),
+          isTrue);
+    });
+  });
+
   group('buildCandidates — runtime passthrough', () {
     test('watchlist candidates carry runtime from the WatchlistItem', () {
       final out = buildCandidates(watchlist: [

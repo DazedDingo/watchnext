@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recommendation.dart';
 import '../services/recommendations_service.dart';
+import 'genre_filter_provider.dart';
 import 'household_provider.dart';
 import 'watchlist_provider.dart';
+import 'year_filter_provider.dart';
 
 final recommendationsServiceProvider =
     Provider<RecommendationsService>((_) => RecommendationsService());
@@ -47,5 +49,12 @@ final refreshRecommendationsProvider =
   if (force) {
     await service.refreshTasteProfile(householdId);
   }
-  await service.refresh(householdId, watchlist: watchlist);
+  final genres = ref.read(selectedGenresProvider);
+  final year = ref.read(yearRangeProvider);
+  await service.refresh(
+    householdId,
+    watchlist: watchlist,
+    genreFilters: genres,
+    yearRange: year,
+  );
 });

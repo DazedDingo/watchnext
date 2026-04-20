@@ -64,6 +64,20 @@ List<String> genreNamesFromIds(Iterable<int> ids, {required String mediaType}) {
   return out;
 }
 
+/// Resolves genre *names* to TMDB ids for a given media type. Used by
+/// `/discover` calls which want ids, not names. Unknown names are skipped
+/// — e.g. a movie-only genre name will not resolve under mediaType='tv'.
+List<int> genreIdsFromNames(Iterable<String> names, {required String mediaType}) {
+  final lookup = mediaType == 'tv' ? tmdbTvGenres : tmdbMovieGenres;
+  final inverted = <String, int>{for (final e in lookup.entries) e.value: e.key};
+  final out = <int>[];
+  for (final n in names) {
+    final id = inverted[n];
+    if (id != null) out.add(id);
+  }
+  return out;
+}
+
 /// Coerces whatever shape a caller has (`List<int>`, `List<num>`,
 /// `List<dynamic>`) into genre names. Returns an empty list if the input is
 /// null or has no resolvable ids. Accepts either int ids or already-resolved

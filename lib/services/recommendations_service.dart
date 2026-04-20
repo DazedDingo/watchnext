@@ -3,6 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/recommendation.dart';
 import '../models/watchlist_item.dart';
+import '../providers/year_filter_provider.dart';
 import '../utils/tmdb_genres.dart';
 import 'tmdb_service.dart';
 
@@ -73,6 +74,8 @@ class RecommendationsService {
     String householdId, {
     required List<WatchlistItem> watchlist,
     int tmdbCap = 10,
+    Set<String> genreFilters = const {},
+    YearRange yearRange = const YearRange.unbounded(),
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
     try {
@@ -86,24 +89,51 @@ class RecommendationsService {
       // Best-effort; no Reddit data is fine.
     }
 
-    // Four TMDB sources fetched in parallel. Each is wrapped in a typed
-    // try/catch helper — the bare `.catchError(fn)` chain is untyped
-    // (takes `Function`) and was silently letting exceptions escape
-    // `Future.wait`, blanking the whole pool when any one source failed.
-    final results = await Future.wait([
+    // Baseline four sources are always fetched — they give us a broad pool
+    // even when the user hasn't picked filters.
+    final baseline = await Future.wait([
       _safeTmdb(() => _tmdb.trendingMovies()),
       _safeTmdb(() => _tmdb.trendingTv()),
       _safeTmdb(() => _tmdb.topRatedMovies()),
       _safeTmdb(() => _tmdb.topRatedTv()),
     ]);
 
+    // Discover sources fire only when the user has narrowed the request.
+    // Unfiltered state gets the same pool as before, so we don't spend
+    // TMDB quota / latency on queries that won't improve relevance.
+    Map<String, dynamic> discoverMovies = const {};
+    Map<String, dynamic> discoverTv = const {};
+    final hasFilters = genreFilters.isNotEmpty || yearRange.hasAnyBound;
+    if (hasFilters) {
+      final movieIds = genreIdsFromNames(genreFilters, mediaType: 'movie');
+      final tvIds = genreIdsFromNames(genreFilters, mediaType: 'tv');
+      final discoverResults = await Future.wait([
+        _safeTmdb(() => _tmdb.discoverPaged(
+              mediaType: 'movie',
+              genreIds: movieIds,
+              minYear: yearRange.minYear,
+              maxYear: yearRange.maxYear,
+            )),
+        _safeTmdb(() => _tmdb.discoverPaged(
+              mediaType: 'tv',
+              genreIds: tvIds,
+              minYear: yearRange.minYear,
+              maxYear: yearRange.maxYear,
+            )),
+      ]);
+      discoverMovies = discoverResults[0];
+      discoverTv = discoverResults[1];
+    }
+
     final candidates = buildCandidates(
       watchlist: watchlist,
       redditMentions: redditRows,
-      trendingMoviesPayload: results[0],
-      trendingTvPayload: results[1],
-      topRatedMoviesPayload: results[2],
-      topRatedTvPayload: results[3],
+      trendingMoviesPayload: baseline[0],
+      trendingTvPayload: baseline[1],
+      topRatedMoviesPayload: baseline[2],
+      topRatedTvPayload: baseline[3],
+      discoverMoviesPayload: discoverMovies,
+      discoverTvPayload: discoverTv,
       tmdbCap: tmdbCap,
     );
 
@@ -145,7 +175,10 @@ List<Map<String, dynamic>> buildCandidates({
   Map<String, dynamic> trendingTvPayload = const {},
   Map<String, dynamic> topRatedMoviesPayload = const {},
   Map<String, dynamic> topRatedTvPayload = const {},
+  Map<String, dynamic> discoverMoviesPayload = const {},
+  Map<String, dynamic> discoverTvPayload = const {},
   int tmdbCap = 20,
+  int discoverCap = 40,
 }) {
   final candidates = <Map<String, dynamic>>[];
   final seen = <String>{};
@@ -187,18 +220,23 @@ List<Map<String, dynamic>> buildCandidates({
   }
 
   // TMDB sources: each has a default media_type (used when the row shape
-  // doesn't carry one) and a source tag so the UI can badge it.
-  final tmdbSources = <(Map<String, dynamic>, String, String)>[
-    (trendingMoviesPayload, 'movie', 'trending'),
-    (trendingTvPayload, 'tv', 'trending'),
-    (topRatedMoviesPayload, 'movie', 'top_rated'),
-    (topRatedTvPayload, 'tv', 'top_rated'),
+  // doesn't carry one), a source tag so the UI can badge it, and a per-
+  // source row cap. Discover sources get a larger cap because the user
+  // explicitly narrowed the query — crowding out baseline pool by up to
+  // `discoverCap` rows each is the whole point.
+  final tmdbSources = <(Map<String, dynamic>, String, String, int)>[
+    (trendingMoviesPayload, 'movie', 'trending', tmdbCap),
+    (trendingTvPayload, 'tv', 'trending', tmdbCap),
+    (topRatedMoviesPayload, 'movie', 'top_rated', tmdbCap),
+    (topRatedTvPayload, 'tv', 'top_rated', tmdbCap),
+    (discoverMoviesPayload, 'movie', 'discover', discoverCap),
+    (discoverTvPayload, 'tv', 'discover', discoverCap),
   ];
 
-  for (final (payload, defaultMediaType, source) in tmdbSources) {
+  for (final (payload, defaultMediaType, source, cap) in tmdbSources) {
     final rows = (payload['results'] as List? ?? const [])
         .cast<Map<String, dynamic>>();
-    for (final m in rows.take(tmdbCap)) {
+    for (final m in rows.take(cap)) {
       final id = (m['id'] as num?)?.toInt();
       if (id == null) continue;
       final mediaType = (m['media_type'] as String?) ?? defaultMediaType;
