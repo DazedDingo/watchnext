@@ -1,7 +1,13 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:watchnext/models/concierge_turn.dart';
 import 'package:watchnext/services/concierge_service.dart';
+import 'package:watchnext/services/tmdb_service.dart';
 
 /// Covers the Firestore-only surface of ConciergeService. The CF-backed
 /// `chat` method is exercised via the functions/test suite (helpers) and
@@ -75,6 +81,113 @@ void main() {
       await sub.cancel();
       final last = events.last as List;
       expect(last.map((t) => t.message), ['first', 'second']);
+    });
+
+    test('verifyTitles replaces hallucinated tmdb_id with real search hit',
+        () async {
+      // Claude claims "The Shining" with the wrong id (e.g., Ice Age's).
+      // TMDB search should return the real Shining id + poster.
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          expect(req.url.path, endsWith('/search/multi'));
+          return http.Response(
+            json.encode({
+              'results': [
+                {
+                  'id': 694,
+                  'media_type': 'movie',
+                  'title': 'The Shining',
+                  'release_date': '1980-05-23',
+                  'poster_path': '/shining.jpg',
+                },
+                {
+                  'id': 12345,
+                  'media_type': 'movie',
+                  'title': 'Shining Unrelated',
+                  'release_date': '2001-01-01',
+                  'poster_path': '/other.jpg',
+                },
+              ],
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final svc = ConciergeService(db: db, tmdb: tmdb);
+      final verified = await svc.verifyTitles(const [
+        TitleSuggestion(
+          tmdbId: 8425,
+          mediaType: 'movie',
+          title: 'The Shining',
+          year: 1980,
+          reason: 'classic horror',
+        ),
+      ]);
+      expect(verified, hasLength(1));
+      expect(verified.first.tmdbId, 694);
+      expect(verified.first.posterPath, '/shining.jpg');
+      expect(verified.first.title, 'The Shining');
+    });
+
+    test('verifyTitles drops suggestions TMDB cannot resolve', () async {
+      final tmdb = TmdbService(
+        client: MockClient((_) async => http.Response(
+              json.encode({'results': []}),
+              200,
+              headers: const {'content-type': 'application/json'},
+            )),
+      );
+      final svc = ConciergeService(db: db, tmdb: tmdb);
+      final verified = await svc.verifyTitles(const [
+        TitleSuggestion(
+          tmdbId: 1,
+          mediaType: 'movie',
+          title: 'Nonsense Title 9q8w7e',
+          year: 2099,
+          reason: '',
+        ),
+      ]);
+      expect(verified, isEmpty);
+    });
+
+    test('verifyTitles prefers year-matching result when available', () async {
+      final tmdb = TmdbService(
+        client: MockClient((_) async => http.Response(
+              json.encode({
+                'results': [
+                  {
+                    'id': 10,
+                    'media_type': 'movie',
+                    'title': 'Dune',
+                    'release_date': '1984-12-14',
+                    'poster_path': '/old.jpg',
+                  },
+                  {
+                    'id': 438631,
+                    'media_type': 'movie',
+                    'title': 'Dune',
+                    'release_date': '2021-09-15',
+                    'poster_path': '/new.jpg',
+                  },
+                ],
+              }),
+              200,
+              headers: const {'content-type': 'application/json'},
+            )),
+      );
+      final svc = ConciergeService(db: db, tmdb: tmdb);
+      final verified = await svc.verifyTitles(const [
+        TitleSuggestion(
+          tmdbId: 999,
+          mediaType: 'movie',
+          title: 'Dune',
+          year: 2021,
+          reason: '',
+        ),
+      ]);
+      expect(verified.single.tmdbId, 438631);
+      expect(verified.single.posterPath, '/new.jpg');
     });
 
     test('new message mid-stream propagates', () async {

@@ -422,7 +422,8 @@ class _TitleCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 child: _PosterImage(
                     mediaType: suggestion.mediaType,
-                    tmdbId: suggestion.tmdbId),
+                    tmdbId: suggestion.tmdbId,
+                    posterPath: suggestion.posterPath),
               ),
             ),
             const SizedBox(height: 4),
@@ -449,39 +450,52 @@ class _TitleCard extends StatelessWidget {
   }
 }
 
-/// Lazily fetches a poster path from TMDB then shows it.
+/// Renders a poster. If [posterPath] was resolved during the concierge's
+/// verification pass we render directly; otherwise we fall back to fetching
+/// details for [tmdbId].
 class _PosterImage extends StatefulWidget {
   final String mediaType;
   final int tmdbId;
+  final String? posterPath;
 
-  const _PosterImage({required this.mediaType, required this.tmdbId});
+  const _PosterImage({
+    required this.mediaType,
+    required this.tmdbId,
+    this.posterPath,
+  });
 
   @override
   State<_PosterImage> createState() => _PosterImageState();
 }
 
 class _PosterImageState extends State<_PosterImage> {
-  final _tmdb = TmdbService();
+  TmdbService? _tmdb;
   String? _posterUrl;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadPoster();
+    if (widget.posterPath != null) {
+      _posterUrl = TmdbService.imageUrl(widget.posterPath, size: 'w342');
+      _loading = false;
+    } else {
+      _tmdb = TmdbService();
+      _loadPoster();
+    }
   }
 
   @override
   void dispose() {
-    _tmdb.dispose();
+    _tmdb?.dispose();
     super.dispose();
   }
 
   Future<void> _loadPoster() async {
     try {
       final data = widget.mediaType == 'tv'
-          ? await _tmdb.tvDetails(widget.tmdbId)
-          : await _tmdb.movieDetails(widget.tmdbId);
+          ? await _tmdb!.tvDetails(widget.tmdbId)
+          : await _tmdb!.movieDetails(widget.tmdbId);
       final path = data['poster_path'] as String?;
       if (mounted && path != null) {
         setState(() {

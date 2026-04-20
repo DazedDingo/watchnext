@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../models/concierge_turn.dart';
+import 'tmdb_service.dart';
 
 /// Client for Phase 8's conversational concierge.
 ///
@@ -13,10 +15,13 @@ class ConciergeService {
   ConciergeService({
     FirebaseFirestore? db,
     FirebaseFunctions? fns,
+    TmdbService? tmdb,
   })  : _db = db ?? FirebaseFirestore.instance,
-        _fnsField = fns;
+        _fnsField = fns,
+        _tmdb = tmdb ?? TmdbService();
 
   final FirebaseFirestore _db;
+  final TmdbService _tmdb;
 
   // Lazy so historyStream (Firestore only) can be unit-tested without a
   // live FirebaseFunctions instance.
@@ -58,10 +63,66 @@ class ConciergeService {
         .whereType<Map>()
         .map((m) => TitleSuggestion.fromMap(Map<String, dynamic>.from(m)))
         .toList();
+    final verified = await _verifyTitles(titles);
     return (
       text: data['text'] as String? ?? '',
-      titles: titles,
+      titles: verified,
     );
+  }
+
+  /// Claude hallucinates tmdb_ids — we've seen it say "The Shining" and
+  /// return an id that actually belongs to Ice Age. Run each suggestion
+  /// through TMDB search and replace the id with the real match; also
+  /// capture the poster path so the card renders without a second detail
+  /// fetch. Suggestions that fail to resolve are dropped rather than shown
+  /// as broken rows.
+  @visibleForTesting
+  Future<List<TitleSuggestion>> verifyTitles(List<TitleSuggestion> raw) =>
+      _verifyTitles(raw);
+
+  Future<List<TitleSuggestion>> _verifyTitles(List<TitleSuggestion> raw) async {
+    if (raw.isEmpty) return const [];
+    final resolved = await Future.wait(raw.map(_verifyOne));
+    return resolved.whereType<TitleSuggestion>().toList();
+  }
+
+  Future<TitleSuggestion?> _verifyOne(TitleSuggestion s) async {
+    try {
+      final data = await _tmdb.searchMulti(s.title);
+      final results = (data['results'] as List?) ?? const [];
+      final candidates = results
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .where((r) {
+            final mt = r['media_type'] as String?;
+            return mt == 'movie' || mt == 'tv';
+          })
+          .toList();
+      if (candidates.isEmpty) return null;
+
+      Map<String, dynamic>? pick;
+      if (s.year != null) {
+        for (final r in candidates) {
+          final mt = r['media_type'] as String;
+          if (mt != s.mediaType) continue;
+          final date =
+              (r['release_date'] ?? r['first_air_date']) as String? ?? '';
+          if (date.startsWith('${s.year}')) { pick = r; break; }
+        }
+      }
+      pick ??= candidates.firstWhere(
+        (r) => (r['media_type'] as String) == s.mediaType,
+        orElse: () => candidates.first,
+      );
+
+      return s.copyWith(
+        tmdbId: (pick['id'] as num).toInt(),
+        mediaType: pick['media_type'] as String,
+        posterPath: pick['poster_path'] as String?,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Streams persisted turns for [sessionId] ordered oldest-first.
