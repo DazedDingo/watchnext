@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -114,10 +115,19 @@ class _ConciergeSheetState extends ConsumerState<ConciergeSheet> {
       });
       _scrollToBottom();
     } catch (e) {
+      // Surface the actual reason — "Something went wrong" alone gives us no
+      // signal when the CF is broken (bad model id, missing secret, auth).
+      // Firebase wraps CF HttpsError as FirebaseFunctionsException with a
+      // structured code + message; everything else falls through to toString.
+      final reason = switch (e) {
+        FirebaseFunctionsException(:final code, :final message) =>
+          '[$code] ${message ?? "AI call failed."}',
+        _ => e.toString(),
+      };
       setState(() {
         _messages.add(_ChatMessage(
           isUser: false,
-          text: 'Something went wrong. Try again.',
+          text: 'Sorry — $reason\nTry again?',
         ));
         _sending = false;
       });

@@ -438,11 +438,114 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                     trailing: Text(r.uid == FirebaseAuth.instance.currentUser?.uid ? 'You' : 'Partner'),
                   ),
               ],
+              // TMDB ships `similar.results` when the detail call uses
+              // `append_to_response=similar`, so this is free — no extra fetch.
+              _SimilarTitlesSection(
+                mediaType: widget.mediaType,
+                similar: (d['similar'] as Map<String, dynamic>?)?['results']
+                        as List? ??
+                    const [],
+              ),
               const SizedBox(height: 40),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+// ─── Similar titles carousel ──────────────────────────────────────────────────
+
+/// Horizontal poster carousel of titles TMDB considers similar. Shares the
+/// `mediaType` of its parent (TMDB's `/similar` only returns same-type rows).
+/// Tapping a card pushes a new TitleDetail onto the stack so the user can
+/// drill in, then back out to the original.
+class _SimilarTitlesSection extends StatelessWidget {
+  final String mediaType;
+  final List<dynamic> similar;
+
+  const _SimilarTitlesSection({
+    required this.mediaType,
+    required this.similar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = similar.whereType<Map<String, dynamic>>().toList();
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 24),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text('Similar titles',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 210,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: rows.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
+            itemBuilder: (_, i) {
+              final row = rows[i];
+              final id = (row['id'] as num?)?.toInt();
+              if (id == null) return const SizedBox.shrink();
+              final title = (row['title'] ?? row['name']) as String? ?? '';
+              final poster = TmdbService.imageUrl(
+                  row['poster_path'] as String?,
+                  size: 'w342');
+              final date = (row['release_date'] ?? row['first_air_date'])
+                  as String?;
+              final year = (date != null && date.length >= 4)
+                  ? date.substring(0, 4)
+                  : null;
+              return GestureDetector(
+                onTap: () => context.push('/title/$mediaType/$id'),
+                child: SizedBox(
+                  width: 110,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: poster != null
+                              ? Image.network(poster,
+                                  fit: BoxFit.cover,
+                                  width: 110,
+                                  errorBuilder: (_, _, _) => Container(
+                                        color: Colors.white10,
+                                        child: const Icon(
+                                            Icons.broken_image_outlined,
+                                            color: Colors.white30),
+                                      ))
+                              : Container(
+                                  color: Colors.white10,
+                                  child: const Icon(Icons.movie_outlined,
+                                      color: Colors.white30)),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        year != null ? '$title ($year)' : title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

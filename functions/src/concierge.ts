@@ -228,23 +228,22 @@ export const concierge = onCall(
 
     const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
 
-    const res = await anthropic.beta.promptCaching.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      system: [
-        {
-          type: "text",
-          text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
-        {
-          type: "text",
-          text: `HOUSEHOLD CONTEXT:\n${contextBlock}`,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: claudeMessages,
-    });
+    // Stable `messages.create` — concierge is low-frequency (one chat at a
+    // time), so dropping `cache_control` costs nothing user-visible and
+    // avoids SDK-version drift on the deprecated beta.promptCaching path.
+    let res: Anthropic.Message;
+    try {
+      res = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 1024,
+        system: `${SYSTEM_PROMPT}\n\nHOUSEHOLD CONTEXT:\n${contextBlock}`,
+        messages: claudeMessages,
+      });
+    } catch (err) {
+      console.error("concierge: Claude call failed", { err, model: MODEL });
+      const msg = err instanceof Error ? err.message : "AI call failed.";
+      throw new HttpsError("internal", msg);
+    }
 
     const block = res.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") {

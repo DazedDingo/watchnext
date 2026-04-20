@@ -17,6 +17,7 @@ import '../../providers/runtime_filter_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
+import '../../screens/like_these/like_these_sheet.dart';
 import '../../services/tmdb_service.dart';
 import '../../utils/rec_explainer.dart';
 import '../../utils/surprise_picker.dart';
@@ -264,6 +265,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context.push(
                                 '/title/${pick.mediaType}/${pick.tmdbId}');
                           },
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.group_work_outlined),
+                    label: const Text('Like these'),
+                    onPressed: () => LikeTheseSheet.show(context),
                   ),
                 ],
               ),
