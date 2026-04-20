@@ -27,8 +27,7 @@ const _homeHelp =
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
     '• Mood pills — one-tap presets that fill the genre picker (tap again to clear).\n'
-    '• Genres — multi-select any TMDB genre. Pull to refresh after changing to expand the candidate pool.\n'
-    '• Year range — slide to narrow to a release window. Drag handles to the ends for "no limit".\n'
+    '• Filters — tap to expand. Genres (multi-select), runtime bucket, and year range live here. The header summarises what\'s active.\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
@@ -92,10 +91,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .toList();
 
     // Runtime filter — null bucket = show everything. An active bucket
-    // hides recs whose runtime we don't know (trending sources strip it).
+    // keeps recs whose runtime matches, plus unknown-runtime recs (trending /
+    // top-rated / discover strip runtime from their payloads). Dropping
+    // unknowns meant any filter + a narrowed pool returned an empty list —
+    // matches the graceful contract the genre filter already uses.
     final runtimeFiltered = runtime == null
         ? genreFiltered
-        : genreFiltered.where((r) => runtime.matches(r.runtime)).toList();
+        : genreFiltered
+            .where((r) => r.runtime == null || runtime.matches(r.runtime))
+            .toList();
 
     // Year filter — unbounded range = show everything; any active bound
     // drops unknown-year items (same "don't mislead under a specific era"
@@ -214,20 +218,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onClear: () =>
                   ref.read(modeGenreProvider.notifier).clear(mode),
             ),
-            _GenreChipsRow(
-              selected: selectedGenres,
-              onEdit: () => _openGenreSheet(context, ref, mode),
-              onClear: () =>
+            _FiltersPanel(
+              selectedGenres: selectedGenres,
+              runtime: runtime,
+              yearRange: yearRange,
+              onEditGenres: () => _openGenreSheet(context, ref, mode),
+              onClearGenres: () =>
                   ref.read(modeGenreProvider.notifier).clear(mode),
-            ),
-            _RuntimePills(
-              selected: runtime,
-              onSelect: (b) =>
+              onRuntimeSelect: (b) =>
                   ref.read(modeRuntimeProvider.notifier).set(mode, b),
-            ),
-            YearRangeSlider(
-              range: yearRange,
-              onChanged: (r) =>
+              onYearRangeChanged: (r) =>
                   ref.read(modeYearRangeProvider.notifier).set(mode, r),
             ),
             _SearchField(
@@ -274,6 +274,134 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ],
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Collapsible filters panel ────────────────────────────────────────────────
+
+/// Collapses the three secondary filters (genres, runtime, year range) into
+/// a single ExpansionTile so the scored rec list is higher up the fold.
+/// Header subtitle summarises what's active so users don't have to expand
+/// to check state.
+class _FiltersPanel extends StatelessWidget {
+  final Set<String> selectedGenres;
+  final RuntimeBucket? runtime;
+  final YearRange yearRange;
+  final VoidCallback onEditGenres;
+  final VoidCallback onClearGenres;
+  final ValueChanged<RuntimeBucket?> onRuntimeSelect;
+  final ValueChanged<YearRange> onYearRangeChanged;
+
+  const _FiltersPanel({
+    required this.selectedGenres,
+    required this.runtime,
+    required this.yearRange,
+    required this.onEditGenres,
+    required this.onClearGenres,
+    required this.onRuntimeSelect,
+    required this.onYearRangeChanged,
+  });
+
+  int get _activeCount {
+    var n = 0;
+    if (selectedGenres.isNotEmpty) n += 1;
+    if (runtime != null) n += 1;
+    if (yearRange.hasAnyBound) n += 1;
+    return n;
+  }
+
+  String _summary() {
+    final parts = <String>[];
+    if (selectedGenres.isNotEmpty) {
+      final list = selectedGenres.toList()..sort();
+      parts.add(list.length <= 2
+          ? list.join(', ')
+          : '${list.length} genres');
+    }
+    if (runtime != null) parts.add(runtime!.label);
+    if (yearRange.hasAnyBound) {
+      final lo = yearRange.minYear;
+      final hi = yearRange.maxYear;
+      if (lo != null && hi != null) {
+        parts.add('$lo–$hi');
+      } else if (lo != null) {
+        parts.add('$lo+');
+      } else if (hi != null) {
+        parts.add('≤$hi');
+      }
+    }
+    return parts.isEmpty ? 'None' : parts.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = _activeCount;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+      child: Theme(
+        // ExpansionTile adds its own divider lines by default; strip them
+        // so the panel reads as part of the Home surface, not a section break.
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+          childrenPadding: EdgeInsets.zero,
+          leading: Icon(
+            Icons.tune,
+            size: 20,
+            color: active > 0 ? Theme.of(context).colorScheme.primary : null,
+          ),
+          title: Row(
+            children: [
+              const Text('Filters'),
+              if (active > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$active',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Text(
+            _summary(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: Colors.white54),
+          ),
+          children: [
+            _GenreChipsRow(
+              selected: selectedGenres,
+              onEdit: onEditGenres,
+              onClear: onClearGenres,
+            ),
+            _RuntimePills(
+              selected: runtime,
+              onSelect: onRuntimeSelect,
+            ),
+            YearRangeSlider(
+              range: yearRange,
+              onChanged: onYearRangeChanged,
+            ),
+            const SizedBox(height: 4),
           ],
         ),
       ),

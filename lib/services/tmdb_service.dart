@@ -8,8 +8,16 @@ class TmdbService {
   static const String _imageBase = 'https://image.tmdb.org/t/p';
   static const String _apiKey = String.fromEnvironment('TMDB_API_KEY');
 
+  /// Per-request timeout. `discoverPaged` can fan out to ~18 TMDB calls in a
+  /// single pull-to-refresh, and `http.Client` has no default timeout — one
+  /// stuck request would hang the whole refresh spinner forever.
+  static const Duration kRequestTimeout = Duration(seconds: 15);
+
   final http.Client _client;
-  TmdbService({http.Client? client}) : _client = client ?? http.Client();
+  final Duration _timeout;
+  TmdbService({http.Client? client, Duration? timeout})
+      : _client = client ?? http.Client(),
+        _timeout = timeout ?? kRequestTimeout;
 
   Uri _uri(String path, [Map<String, String>? params]) => Uri.parse('$_base$path').replace(
         queryParameters: {
@@ -20,7 +28,7 @@ class TmdbService {
       );
 
   Future<Map<String, dynamic>> _get(Uri uri) async {
-    final res = await _client.get(uri);
+    final res = await _client.get(uri).timeout(_timeout);
     if (res.statusCode != 200) {
       throw Exception('TMDB ${res.statusCode}: ${res.body}');
     }

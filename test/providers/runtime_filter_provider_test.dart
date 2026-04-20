@@ -37,9 +37,30 @@ void main() {
     });
 
     test('null runtime matches nothing (unknown length is filtered out)', () {
+      // `matches(null)` stays strict — the bucket itself reports "no,
+      // unknown doesn't pass". The Home filter is now the layer that
+      // chooses whether to keep unknowns (it does, to avoid blanking the
+      // list when discover/trending candidates lack runtime metadata).
+      // See home_screen.dart `runtimeFiltered`.
       for (final b in RuntimeBucket.values) {
         expect(b.matches(null), isFalse);
       }
+    });
+
+    test('home-screen null-passthrough — matches(rt) || rt == null', () {
+      // Guards the client-side rule the Home filter uses now that null
+      // runtime recs (trending/top_rated/discover) pass through any active
+      // bucket. Regression lock: changing this rule without updating
+      // home_screen.dart will blank the rec list again.
+      bool passes(RuntimeBucket b, int? rt) => rt == null || b.matches(rt);
+
+      expect(passes(RuntimeBucket.short, null), isTrue);
+      expect(passes(RuntimeBucket.medium, null), isTrue);
+      expect(passes(RuntimeBucket.long_, null), isTrue);
+
+      expect(passes(RuntimeBucket.short, 85), isTrue);
+      expect(passes(RuntimeBucket.short, 120), isFalse);
+      expect(passes(RuntimeBucket.long_, 150), isTrue);
     });
 
     test('every bucket has a non-empty label', () {

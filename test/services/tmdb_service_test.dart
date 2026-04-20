@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -225,6 +226,28 @@ void main() {
       expect(
         () => tmdb.movieDetails(99999999),
         throwsA(predicate((e) => e.toString().contains('404'))),
+      );
+    });
+
+    test('hung request throws TimeoutException instead of waiting forever',
+        () async {
+      // Regression guard: `http.Client` has no default timeout. With a
+      // narrow filter set, discoverPaged fans out ~18 TMDB calls per refresh;
+      // one slow response would hang the pull-to-refresh spinner indefinitely.
+      // The service now wraps every request in `.timeout(kRequestTimeout)` so
+      // stuck requests surface as a throwable the caller can swallow.
+      final client = MockClient((_) async {
+        // Never completes — simulates a stuck socket.
+        await Completer<http.Response>().future;
+        return http.Response('unreachable', 200);
+      });
+      final tmdb = TmdbService(
+        client: client,
+        timeout: const Duration(milliseconds: 50),
+      );
+      await expectLater(
+        tmdb.searchMulti('x'),
+        throwsA(isA<TimeoutException>()),
       );
     });
   });
