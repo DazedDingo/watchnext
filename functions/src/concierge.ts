@@ -135,11 +135,40 @@ export function buildContextBlock(
 }
 
 export function parseResponse(text: string): ConciergeResponse {
-  const cleaned = text.trim()
+  // Claude sometimes wraps the required JSON in prose ("Here you go: { ... }")
+  // or adds a trailing sentence. Strip markdown fences first, then extract the
+  // outermost JSON object by scanning for the first top-level { ... } pair —
+  // depth-counted so nested braces inside strings/values don't confuse us.
+  const fenced = text.trim()
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/, "")
     .trim();
-  const parsed = JSON.parse(cleaned) as ConciergeResponse;
+
+  const start = fenced.indexOf("{");
+  if (start < 0) throw new Error("No JSON object in Claude response.");
+
+  let depth = 0;
+  let end = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < fenced.length; i++) {
+    const ch = fenced[i];
+    if (escape) { escape = false; continue; }
+    if (inString) {
+      if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end < 0) throw new Error("Unterminated JSON object in Claude response.");
+
+  const parsed = JSON.parse(fenced.slice(start, end + 1)) as ConciergeResponse;
   return {
     text: parsed.text ?? "",
     titles: Array.isArray(parsed.titles) ? parsed.titles : [],

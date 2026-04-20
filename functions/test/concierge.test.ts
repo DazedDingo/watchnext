@@ -206,4 +206,26 @@ describe("parseResponse", () => {
   test("malformed JSON throws", () => {
     expect(() => parseResponse("not json at all")).toThrow();
   });
+
+  test("preamble prose before JSON object is skipped", () => {
+    const out = parseResponse(
+      'Sure, here are some picks:\n{"text": "pick list", "titles": []}',
+    );
+    expect(out.text).toBe("pick list");
+    expect(out.titles).toEqual([]);
+  });
+
+  test("trailing prose after JSON object is skipped", () => {
+    const out = parseResponse(
+      '{"text": "hi", "titles": []}\n\nLet me know if you want more.',
+    );
+    expect(out.text).toBe("hi");
+  });
+
+  test("nested braces inside string values do not confuse extractor", () => {
+    const out = parseResponse(
+      '{"text": "the { symbol is fine }", "titles": []}',
+    );
+    expect(out.text).toBe("the { symbol is fine }");
+  });
 });

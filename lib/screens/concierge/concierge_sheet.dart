@@ -373,7 +373,7 @@ class _AssistantBubble extends StatelessWidget {
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: Text(text, style: const TextStyle(fontSize: 14)),
+              child: SelectableText(text, style: const TextStyle(fontSize: 14)),
             ),
             if (titles.isNotEmpty) ...[
               const SizedBox(height: 10),

@@ -345,7 +345,9 @@ class _LikeTheseSheetState extends ConsumerState<LikeTheseSheet> {
             const Icon(Icons.error_outline,
                 size: 48, color: Colors.white24),
             const SizedBox(height: 12),
-            Text('Sorry — $_error',
+            // SelectableText so the user can long-press to copy the full error
+            // text for bug reports.
+            SelectableText('Sorry — $_error',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 16),
@@ -366,7 +368,7 @@ class _LikeTheseSheetState extends ConsumerState<LikeTheseSheet> {
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Text(_resultText!),
+            child: SelectableText(_resultText!),
           ),
           const SizedBox(height: 16),
         ],
