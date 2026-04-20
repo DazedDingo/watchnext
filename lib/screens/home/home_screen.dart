@@ -242,18 +242,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Row(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  if (mode == ViewMode.together) ...[
-                    Expanded(
-                      child: FilledButton.icon(
-                        icon: const Icon(Icons.groups),
-                        label: const Text('Decide Together'),
-                        onPressed: () => context.push('/decide'),
-                      ),
+                  if (mode == ViewMode.together)
+                    FilledButton.icon(
+                      icon: const Icon(Icons.groups),
+                      label: const Text('Decide Together'),
+                      onPressed: () => context.push('/decide'),
                     ),
-                    const SizedBox(width: 8),
-                  ],
                   OutlinedButton.icon(
                     icon: const Icon(Icons.casino),
                     label: const Text('Surprise me'),
@@ -266,7 +264,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 '/title/${pick.mediaType}/${pick.tmdbId}');
                           },
                   ),
-                  const SizedBox(width: 8),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.group_work_outlined),
                     label: const Text('Like these'),
@@ -758,67 +755,73 @@ class _TonightsPick extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Stack(
-              alignment: Alignment.bottomLeft,
-              children: [
-                SizedBox(
-                  height: 240,
-                  child: poster != null
-                      ? Image.network(poster,
-                          width: double.infinity, fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Container(
+            // Tapping the poster/title area opens title detail. The action
+            // buttons below live outside this InkWell so "Not tonight" still
+            // dismisses without opening the title.
+            InkWell(
+              onTap: onWatch,
+              child: Stack(
+                alignment: Alignment.bottomLeft,
+                children: [
+                  SizedBox(
+                    height: 240,
+                    child: poster != null
+                        ? Image.network(poster,
+                            width: double.infinity, fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Container(
+                              color: Colors.grey.shade900,
+                              child: const Center(
+                                child: Icon(Icons.movie,
+                                    size: 64, color: Colors.white24),
+                              ),
+                            ))
+                        : Container(
                             color: Colors.grey.shade900,
                             child: const Center(
                               child: Icon(Icons.movie,
                                   size: 64, color: Colors.white24),
                             ),
-                          ))
-                      : Container(
-                          color: Colors.grey.shade900,
-                          child: const Center(
-                            child: Icon(Icons.movie,
-                                size: 64, color: Colors.white24),
                           ),
+                  ),
+                  // Gradient overlay
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0.45, 1.0],
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.85),
+                          ],
                         ),
-                ),
-                // Gradient overlay
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.45, 1.0],
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.85),
-                        ],
                       ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          rec.title,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            rec.title,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      _ScoreBadge(score),
-                    ],
+                        const SizedBox(width: 8),
+                        _ScoreBadge(score),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),

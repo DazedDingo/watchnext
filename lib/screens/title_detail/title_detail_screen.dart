@@ -473,7 +473,6 @@ class _SimilarTitlesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = similar.whereType<Map<String, dynamic>>().toList();
-    if (rows.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -484,9 +483,18 @@ class _SimilarTitlesSection extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          height: 210,
-          child: ListView.separated(
+        if (rows.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'No similar titles from TMDB for this one.',
+              style: TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+          )
+        else
+          SizedBox(
+            height: 210,
+            child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: rows.length,
