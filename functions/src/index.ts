@@ -29,6 +29,11 @@ export {
   onRatingWrittenBadges,
   onDecisionWrittenBadges,
 } from "./gamificationUpdater";
+export {
+  stremio,
+  provisionStremioToken,
+  revokeStremioToken,
+} from "./stremio";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

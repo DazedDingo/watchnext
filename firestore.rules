@@ -105,5 +105,12 @@ service cloud.firestore {
     // entries here; the scheduled drain reads/clears them. Clients must not
     // be able to starve the drain or spoof dirty flags for other households.
     match /rescoreQueue/{householdId} { allow read, write: if false; }
+
+    // Stremio addon tokens. Each doc maps a random token → household/uid so
+    // the public addon endpoint can authorize a request. Written by the
+    // provisionStremioToken callable (admin SDK); never readable or writable
+    // by clients directly — anyone with a household member's token would
+    // otherwise be able to enumerate other households.
+    match /stremioTokens/{token} { allow read, write: if false; }
   }
 }

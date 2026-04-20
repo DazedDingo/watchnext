@@ -201,21 +201,11 @@ scorer and Phase 9 stats depend on, so they come before any new feature work.
 
 ## Stremio integration — optimisation track
 
-Deep-link to Stremio shipped 2026-04-20 (title detail → "Stremio" button,
-`stremio:///detail/{type}/{imdb_id}` with web fallback). Next step up the
-ladder, pencilled in to tackle soon:
-
-- [ ] **WatchNext-as-Stremio-addon.** Publish a Stremio addon exposing three
-  catalogs: "Our Watchlist" (shared), "Your Recommendations" (per-user, mode-
-  aware), "Next Up" (in-progress TV). Stremio addon SDK is a small Node/
-  Express service returning JSON per the manifest. Needs a public HTTPS
-  endpoint and per-household auth tokens baked into the addon URL so each
-  user installs their own link. Cloud Run + Firebase Hosting rewrites are
-  the obvious home; Firestore holds the token→householdId map. Value: lets
-  us browse/play WatchNext picks inside Stremio instead of bouncing through
-  the deep link. Skip catalogs that would duplicate Trakt addon output
-  (generic "recently watched" etc.) — only expose surfaces unique to
-  WatchNext.
+- [x] **Deep-link from title detail** — shipped 2026-04-20. `stremio:///detail/{type}/{imdb_id}` button on the title screen with web fallback.
+- [x] **WatchNext-as-Stremio-addon (watchlist catalog)** — shipped 2026-04-20. `functions/src/stremio.ts` exposes an HTTP endpoint implementing the Stremio addon protocol (manifest / catalog / meta). Profile → Stremio mints a per-household token via the `provisionStremioToken` callable; the resulting URL installs a household-private catalog of the shared watchlist into Stremio. Imdb ids missing from watchlist docs are resolved on demand via TMDB `external_ids` and cached back onto the doc.
+- [ ] **Recommendations + Next Up catalogs** — add two more catalog ids (`wn_recs`, `wn_nextup`) sourcing from `/recommendations` (mode-aware per the caller's uid) and `watchEntries where inProgressStatus=='watching'`. Recs catalog needs per-user scoping; the token carries `uid` already, so the addon server just has to read that row.
+- [ ] **Pretty URL via Firebase Hosting** — today the install URL is the raw CF endpoint. A Hosting rewrite → `https://watchnext.web.app/stremio/{token}/manifest.json` would be nicer to share and more durable if we ever migrate regions.
+- [ ] **Write-back actions** — let the user mark-watched / add-to-watchlist from inside Stremio. Stremio's protocol doesn't define these hooks on the addon side; this would have to go through a custom deep-link-out-to-the-app round-trip.
 
 ---
 

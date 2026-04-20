@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
@@ -18,6 +20,7 @@ const _profileHelp =
     '• Default mode — Solo ranks recommendations for you alone; Together ranks for both.\n'
     '• Reveal notifications — optional push when a prediction reveal is ready.\n'
     '• Trakt — link to auto-import history and push ratings.\n'
+    '• Stremio addon — mints a private URL you paste into Stremio; your shared watchlist then appears as a catalog inside the Stremio app.\n'
     '• Sign out — clears your session on this device. Your data stays in the household.';
 
 /// Reads the current app version once and caches it. Kept as a Provider so
@@ -124,6 +127,11 @@ class ProfileScreen extends ConsumerWidget {
             loading: () => const ListTile(title: Text('Loading…')),
             error: (e, _) => ListTile(title: Text('Trakt error: $e')),
           ),
+          const Divider(),
+
+          // ── Stremio ───────────────────────────────────────────────────
+          const _SectionHeader('Stremio'),
+          const _StremioSection(),
           const Divider(),
 
           // ── Help ──────────────────────────────────────────────────────
@@ -249,6 +257,164 @@ class _NotificationToggleState extends State<_NotificationToggle> {
           });
         }
       },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stremio addon section
+// ---------------------------------------------------------------------------
+
+class _StremioSection extends StatefulWidget {
+  const _StremioSection();
+
+  @override
+  State<_StremioSection> createState() => _StremioSectionState();
+}
+
+class _StremioSectionState extends State<_StremioSection> {
+  String? _installUrl;
+  bool _busy = false;
+  String? _error;
+
+  FirebaseFunctions get _fns =>
+      FirebaseFunctions.instanceFor(region: 'europe-west2');
+
+  Future<void> _provision() async {
+    if (_busy) return;
+    setState(() { _busy = true; _error = null; });
+    try {
+      final res = await _fns.httpsCallable('provisionStremioToken').call();
+      final data = Map<String, dynamic>.from(res.data as Map);
+      setState(() => _installUrl = data['installUrl'] as String?);
+    } on FirebaseFunctionsException catch (e) {
+      setState(() => _error = '[${e.code}] ${e.message ?? "provision failed"}');
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _revoke() async {
+    if (_busy) return;
+    setState(() { _busy = true; _error = null; });
+    try {
+      await _fns.httpsCallable('revokeStremioToken').call();
+      setState(() => _installUrl = null);
+    } on FirebaseFunctionsException catch (e) {
+      setState(() => _error = '[${e.code}] ${e.message ?? "revoke failed"}');
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openInStremio() async {
+    final url = _installUrl;
+    if (url == null) return;
+    // Stremio recognises stremio:// URLs pointing at an addon manifest and
+    // prompts to install. Swap the scheme on the public URL.
+    final deep = Uri.parse(url.replaceFirst('https://', 'stremio://'));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      if (await canLaunchUrl(deep)) {
+        await launchUrl(deep, mode: LaunchMode.externalApplication);
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Stremio app not found. Copy the URL and paste it into Stremio → Addons.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Open in Stremio failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_installUrl == null) {
+      return Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.extension_outlined),
+            title: const Text('Stremio addon'),
+            subtitle: const Text(
+              'Expose your shared watchlist as a Stremio catalog.',
+            ),
+            trailing: _busy
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : FilledButton.tonal(
+                    onPressed: _provision,
+                    child: const Text('Generate URL'),
+                  ),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text(_error!,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ),
+        ],
+      );
+    }
+    final url = _installUrl!;
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.link),
+          title: const Text('Install URL'),
+          subtitle: SelectableText(
+            url,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            maxLines: 3,
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.copy),
+            tooltip: 'Copy URL',
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: url));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Install URL copied')),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.play_circle_outline),
+                  label: const Text('Install in Stremio'),
+                  onPressed: _busy ? null : _openInStremio,
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _busy ? null : _revoke,
+                child: const Text('Revoke'),
+              ),
+            ],
+          ),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(_error!,
+                style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+          ),
+      ],
     );
   }
 }
