@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -9,13 +12,22 @@ import 'tmdb_service.dart';
 
 /// Client for Phase 7's scored-recommendations pipeline:
 /// - `refreshTasteProfile` → CF that recomputes `/tasteProfile` from ratings.
-/// - `refresh` → assembles candidates (watchlist + trending) and hands them
-///   to the `scoreRecommendations` CF which writes to `/recommendations`.
+/// - `refresh` → assembles candidates (watchlist + trending), writes them to
+///   `/recommendations` directly with default scores so the Home stream has
+///   a pool to show immediately, then fires the `scoreRecommendations` CF
+///   in the background so Claude can replace the defaults with real scores
+///   asynchronously.
+///
+/// Why the two-phase write: the Claude scorer takes 20–60s end-to-end
+/// (sequential batches of 10 + a taste-profile refresh). Blocking the
+/// pull-to-refresh spinner on that was the "refresh spins forever" UX — now
+/// we return after the Firestore batch write (<5s) and let scoring catch up.
+/// The scheduled `processRescoreQueue` CF mops up any batches that fail.
 ///
 /// Streams + ad-hoc reads are kept here so providers stay thin.
 class RecommendationsService {
   final FirebaseFirestore _db;
-  final FirebaseFunctions _fns;
+  final FirebaseFunctions? _fnsOverride;
   final TmdbService _tmdb;
 
   RecommendationsService({
@@ -23,9 +35,14 @@ class RecommendationsService {
     FirebaseFunctions? fns,
     TmdbService? tmdb,
   })  : _db = db ?? FirebaseFirestore.instance,
-        // Callables live in europe-west2 (co-located with Firestore in London).
-        _fns = fns ?? FirebaseFunctions.instanceFor(region: 'europe-west2'),
+        _fnsOverride = fns,
         _tmdb = tmdb ?? TmdbService();
+
+  // Lazy so pure Firestore-only paths (e.g. `writeCandidateDocs` in tests)
+  // don't spin up a Firebase app just to construct the callables client.
+  // Callables live in europe-west2 (co-located with Firestore in London).
+  FirebaseFunctions get _fns =>
+      _fnsOverride ?? FirebaseFunctions.instanceFor(region: 'europe-west2');
 
   CollectionReference<Map<String, dynamic>> _col(String hh) =>
       _db.collection('households/$hh/recommendations');
@@ -62,20 +79,32 @@ class RecommendationsService {
 
   /// Builds a candidate pool from the shared watchlist plus four TMDB
   /// sources (trending movies + TV, top-rated movies + TV) and Reddit buzz,
-  /// then asks Claude to score them. Result lands in `/recommendations` and
-  /// is picked up by the stream.
+  /// writes them to `/recommendations` with default scores so Home has a
+  /// pool to show, then fires the Claude scorer in the background.
+  ///
+  /// Returns as soon as the Firestore batch write is done (typically <5s),
+  /// so the pull-to-refresh spinner doesn't have to wait on the 20–60s
+  /// Claude scoring loop. Pre-existing scored recs keep their scores
+  /// (we skip score fields on merge for keys already in the collection);
+  /// genuinely new candidates land at `match_score=50, scored=false` and
+  /// get bumped by the background Claude pass.
   ///
   /// Each TMDB source is fetched independently and best-effort: a failure
   /// in one (e.g. TMDB rate-limit on top-rated) doesn't blank the pool.
   /// [tmdbCap] defaults to 10 per source — with four sources that's up to 40
-  /// TMDB candidates, which plus watchlist + Reddit stays comfortably inside
-  /// the server-side MAX_CANDIDATES=50 slice the scoring CF enforces.
+  /// TMDB candidates, plus watchlist + Reddit + discover (when filters are
+  /// active, the bigger `discoverCap` kicks in per source).
+  ///
+  /// When [forceTasteProfile] is true, the taste profile is regenerated
+  /// alongside the background score pass — refresh UX: scores reflect the
+  /// latest ratings on the *next* stream update after this pass.
   Future<void> refresh(
     String householdId, {
     required List<WatchlistItem> watchlist,
     int tmdbCap = 10,
     Set<String> genreFilters = const {},
     YearRange yearRange = const YearRange.unbounded(),
+    bool forceTasteProfile = false,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
     try {
@@ -139,10 +168,103 @@ class RecommendationsService {
 
     if (candidates.isEmpty) return;
 
-    await _fns.httpsCallable('scoreRecommendations').call({
-      'householdId': householdId,
-      'candidates': candidates,
-    });
+    // Phase A — sync: write the pool to Firestore with default scores so
+    // the Home stream lights up immediately. This is the bit the user waits
+    // on. Pre-existing rec keys keep their scores (merge skips score fields).
+    await writeCandidateDocs(householdId, candidates);
+
+    // Phase B — async: taste-profile refresh (if forced) + Claude scoring.
+    // Fire-and-forget: any failure leaves the pool intact at default scores,
+    // and `processRescoreQueue` re-scores on its 10-min sweep anyway.
+    unawaited(_backgroundScore(
+      householdId: householdId,
+      candidates: candidates,
+      forceTasteProfile: forceTasteProfile,
+    ));
+  }
+
+  /// Writes each candidate to `/households/{hh}/recommendations/{key}`. For
+  /// keys already present in the collection we merge only metadata fields —
+  /// `match_score` / `ai_blurb` / `scored` are left alone so a previously
+  /// Claude-scored rec doesn't visibly drop back to 50%. New keys get the
+  /// default score seeded so they sort into the stream's top-120 window.
+  ///
+  /// Chunks writes into Firestore's 500-op batch limit. Exposed for tests.
+  Future<void> writeCandidateDocs(
+    String householdId,
+    List<Map<String, dynamic>> candidates,
+  ) async {
+    if (candidates.isEmpty) return;
+    final col = _col(householdId);
+
+    // Look up which candidate ids are already scored so we preserve their
+    // score on merge. Cap the read at a generous 500 — the stream shows 120,
+    // and older recs get overwritten on subsequent refreshes anyway.
+    final existingSnap = await col.limit(500).get();
+    final existingIds = existingSnap.docs.map((d) => d.id).toSet();
+
+    const chunkSize = 450; // stay below Firestore's 500-op batch limit
+    for (var start = 0; start < candidates.length; start += chunkSize) {
+      final end = (start + chunkSize).clamp(0, candidates.length);
+      final batch = _db.batch();
+      for (var i = start; i < end; i++) {
+        final c = candidates[i];
+        final mediaType = c['media_type'];
+        final tmdbId = c['tmdb_id'];
+        if (mediaType is! String || tmdbId is! int) continue;
+        final key = '$mediaType:$tmdbId';
+
+        final data = <String, dynamic>{
+          'media_type': mediaType,
+          'tmdb_id': tmdbId,
+          'title': c['title'],
+          'year': c['year'],
+          'poster_path': c['poster_path'],
+          'genres': c['genres'] ?? const <String>[],
+          'runtime': c['runtime'],
+          'overview': c['overview'],
+          'source': c['source'] ?? 'unknown',
+          'generated_at': FieldValue.serverTimestamp(),
+        };
+        if (!existingIds.contains(key)) {
+          // Seed default score fields only on first write — protects any
+          // Claude-set match_score on a rec that's already been scored.
+          data['match_score'] = 50;
+          data['match_score_solo'] = const <String, int>{};
+          data['ai_blurb'] = '';
+          data['ai_blurb_solo'] = const <String, String>{};
+          data['scored'] = false;
+        }
+        batch.set(col.doc(key), data, SetOptions(merge: true));
+      }
+      await batch.commit();
+    }
+  }
+
+  Future<void> _backgroundScore({
+    required String householdId,
+    required List<Map<String, dynamic>> candidates,
+    required bool forceTasteProfile,
+  }) async {
+    try {
+      if (forceTasteProfile) {
+        await refreshTasteProfile(householdId);
+      }
+      await _fns.httpsCallable('scoreRecommendations').call({
+        'householdId': householdId,
+        'candidates': candidates,
+      });
+    } catch (err, stack) {
+      // Swallow — the default-scored pool from Phase A is still on screen,
+      // and the scheduled rescore CF will pick up anything we miss. Logged
+      // to devtools so we can spot systemic failures without spamming UI.
+      developer.log(
+        'background scoring failed',
+        name: 'RecommendationsService',
+        error: err,
+        stackTrace: stack,
+      );
+    }
   }
 
   /// Runs a TMDB fetch and swallows any error into an empty payload so

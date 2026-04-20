@@ -36,9 +36,11 @@ final singleRecProvider =
       .map((snap) => snap.exists ? Recommendation.fromDoc(snap) : null);
 });
 
-/// One-shot trigger that refreshes taste profile then kicks off Claude
-/// scoring. Safe to call from a pull-to-refresh or settings action; wrapped
-/// in FutureProvider so the UI can show progress/errors.
+/// One-shot trigger that rebuilds the recommendation pool. Writes the
+/// candidates to Firestore with default scores (so Home lights up fast) and
+/// fires Claude scoring + taste-profile refresh in the background. When
+/// [force] is true, the taste profile is regenerated as part of the
+/// background pass. Safe to call from a pull-to-refresh or settings action.
 final refreshRecommendationsProvider =
     FutureProvider.family<void, bool>((ref, force) async {
   final householdId = await ref.read(householdIdProvider.future);
@@ -46,9 +48,6 @@ final refreshRecommendationsProvider =
   final service = ref.read(recommendationsServiceProvider);
   final watchlist = ref.read(watchlistProvider).value ?? const [];
 
-  if (force) {
-    await service.refreshTasteProfile(householdId);
-  }
   final genres = ref.read(selectedGenresProvider);
   final year = ref.read(yearRangeProvider);
   await service.refresh(
@@ -56,5 +55,6 @@ final refreshRecommendationsProvider =
     watchlist: watchlist,
     genreFilters: genres,
     yearRange: year,
+    forceTasteProfile: force,
   );
 });

@@ -26,7 +26,12 @@ const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const BATCH_SIZE = 10;
-const MAX_CANDIDATES = 50;
+// Upped from 50 → 100 after the client went to two-phase refresh: the
+// spinner no longer blocks on this CF, so scoring ~100 candidates (10
+// sequential batches, ~60–120s) is fine. Wider pool matters when narrow
+// filters (e.g. "War, 1970–1989") thin the candidates the user actually
+// sees after client-side filters run.
+const MAX_CANDIDATES = 100;
 
 export type Candidate = {
   media_type: string;

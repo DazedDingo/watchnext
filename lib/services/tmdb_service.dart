@@ -103,8 +103,8 @@ class TmdbService {
     int? minYear,
     int? maxYear,
     int minVoteCount = 50,
-    int poolFloor = 20,
-    int maxPages = 3,
+    int poolFloor = 40,
+    int maxPages = 5,
   }) async {
     final isTv = mediaType == 'tv';
     final dateGte = isTv ? 'first_air_date.gte' : 'primary_release_date.gte';

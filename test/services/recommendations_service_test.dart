@@ -1,3 +1,4 @@
+import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watchnext/models/watchlist_item.dart';
 import 'package:watchnext/services/recommendations_service.dart';
@@ -827,6 +828,144 @@ void main() {
       );
       expect(out.single.containsKey('runtime'), isFalse,
           reason: 'trending rows should not inject a phantom runtime key');
+    });
+  });
+
+  // ─── writeCandidateDocs ────────────────────────────────────────────────
+  //
+  // The two-phase refresh relies on this method to drop the pool into
+  // Firestore *before* Claude scoring runs so the Home stream can light up
+  // within ~5s. Key invariants: new rec keys get seeded defaults, existing
+  // rec keys keep their Claude-set match_score/ai_blurb on merge, and the
+  // whole thing chunks cleanly past Firestore's 500-op batch cap.
+  group('writeCandidateDocs', () {
+    late FakeFirebaseFirestore db;
+    late RecommendationsService svc;
+    const hh = 'hh1';
+
+    String path(String key) => 'households/$hh/recommendations/$key';
+
+    Map<String, dynamic> candidate(
+      String mediaType,
+      int tmdbId, {
+      String title = 'T',
+      List<String> genres = const ['Drama'],
+      int? runtime,
+      String source = 'trending',
+    }) {
+      return {
+        'media_type': mediaType,
+        'tmdb_id': tmdbId,
+        'title': title,
+        'year': 2024,
+        'poster_path': '/p.jpg',
+        'genres': genres,
+        'runtime': runtime,
+        'overview': 'ov',
+        'source': source,
+      };
+    }
+
+    setUp(() {
+      db = FakeFirebaseFirestore();
+      svc = RecommendationsService(db: db);
+    });
+
+    test('empty candidate list is a no-op', () async {
+      await svc.writeCandidateDocs(hh, const []);
+      final snap = await db.collection('households/$hh/recommendations').get();
+      expect(snap.size, 0);
+    });
+
+    test('new candidates are seeded with default score fields', () async {
+      await svc.writeCandidateDocs(hh, [candidate('movie', 1)]);
+      final doc = await db.doc(path('movie:1')).get();
+      expect(doc.exists, isTrue);
+      final data = doc.data()!;
+      expect(data['match_score'], 50);
+      expect(data['scored'], false);
+      expect(data['ai_blurb'], '');
+      expect(data['match_score_solo'], isEmpty);
+      expect(data['ai_blurb_solo'], isEmpty);
+      expect(data['title'], 'T');
+      expect(data['genres'], ['Drama']);
+      expect(data['source'], 'trending');
+    });
+
+    test('pre-existing scored rec preserves match_score + ai_blurb on merge',
+        () async {
+      // Claude previously scored this one — writing a fresh candidate pool
+      // must not drop it back to 50%.
+      await db.doc(path('movie:1')).set({
+        'media_type': 'movie',
+        'tmdb_id': 1,
+        'title': 'Old title',
+        'match_score': 87,
+        'ai_blurb': 'You will love this.',
+        'scored': true,
+      });
+
+      await svc.writeCandidateDocs(
+          hh, [candidate('movie', 1, title: 'Refreshed title')]);
+
+      final doc = await db.doc(path('movie:1')).get();
+      final data = doc.data()!;
+      expect(data['match_score'], 87);
+      expect(data['ai_blurb'], 'You will love this.');
+      expect(data['scored'], true);
+      // But metadata still refreshes.
+      expect(data['title'], 'Refreshed title');
+      expect(data['source'], 'trending');
+    });
+
+    test('skips candidates missing media_type or tmdb_id (defensive)',
+        () async {
+      await svc.writeCandidateDocs(hh, [
+        {'media_type': 'movie'},
+        {'tmdb_id': 1},
+        candidate('movie', 42),
+      ]);
+      final snap = await db.collection('households/$hh/recommendations').get();
+      expect(snap.size, 1);
+      expect(snap.docs.first.id, 'movie:42');
+    });
+
+    test('stable key is "mediaType:tmdbId" — re-writing same key is idempotent',
+        () async {
+      await svc.writeCandidateDocs(hh, [candidate('movie', 1)]);
+      await svc.writeCandidateDocs(hh, [candidate('movie', 1)]);
+      final snap = await db.collection('households/$hh/recommendations').get();
+      expect(snap.size, 1);
+    });
+
+    test('chunks a 1000-candidate pool past the 500-op batch cap', () async {
+      // Sanity check that the chunking loop handles the Firestore limit.
+      // 1000 unique rows should all land.
+      final big = List.generate(
+          1000, (i) => candidate('movie', i + 1, title: 'T$i'));
+      await svc.writeCandidateDocs(hh, big);
+      final snap = await db.collection('households/$hh/recommendations').get();
+      expect(snap.size, 1000);
+    });
+
+    test('mixed new + existing: existing preserved, new seeded', () async {
+      await db.doc(path('movie:1')).set({
+        'media_type': 'movie',
+        'tmdb_id': 1,
+        'match_score': 91,
+        'ai_blurb': 'Keep me',
+        'scored': true,
+      });
+      await svc.writeCandidateDocs(hh, [
+        candidate('movie', 1),
+        candidate('movie', 2),
+      ]);
+      final existing = (await db.doc(path('movie:1')).get()).data()!;
+      final fresh = (await db.doc(path('movie:2')).get()).data()!;
+      expect(existing['match_score'], 91);
+      expect(existing['ai_blurb'], 'Keep me');
+      expect(fresh['match_score'], 50);
+      expect(fresh['ai_blurb'], '');
     });
   });
 }
