@@ -829,6 +829,27 @@ void main() {
       expect(out.single.containsKey('runtime'), isFalse,
           reason: 'trending rows should not inject a phantom runtime key');
     });
+
+    test('discover rows pass through a stamped runtime', () {
+      // The service stamps `runtime` on discover payloads when a bucket is
+      // active (TMDB /discover filters server-side via with_runtime but
+      // doesn't echo the field). buildCandidates must propagate that stamp so
+      // the home-screen strict filter can match.
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: const {
+          'results': [
+            {
+              'id': 1,
+              'title': 'Short flick',
+              'genre_ids': [18],
+              'runtime': 45, // stamp from service
+            },
+          ],
+        },
+      );
+      expect(out.single['runtime'], 45);
+    });
   });
 
   // ─── writeCandidateDocs ────────────────────────────────────────────────

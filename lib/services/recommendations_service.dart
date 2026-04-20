@@ -6,6 +6,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/recommendation.dart';
 import '../models/watchlist_item.dart';
+import '../providers/media_type_filter_provider.dart';
+import '../providers/runtime_filter_provider.dart';
 import '../providers/year_filter_provider.dart';
 import '../utils/tmdb_genres.dart';
 import 'tmdb_service.dart';
@@ -104,6 +106,8 @@ class RecommendationsService {
     int tmdbCap = 10,
     Set<String> genreFilters = const {},
     YearRange yearRange = const YearRange.unbounded(),
+    RuntimeBucket? runtimeBucket,
+    MediaTypeFilter? mediaTypeFilter,
     bool forceTasteProfile = false,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
@@ -127,31 +131,63 @@ class RecommendationsService {
       _safeTmdb(() => _tmdb.topRatedTv()),
     ]);
 
-    // Discover sources fire only when the user has narrowed the request.
-    // Unfiltered state gets the same pool as before, so we don't spend
-    // TMDB quota / latency on queries that won't improve relevance.
+    // Discover sources fire when the user has narrowed the request in any
+    // way — including picking a runtime bucket or media type. Trending/
+    // top-rated payloads strip runtime, so discover is the only source that
+    // can guarantee a runtime-matching pool (TMDB server-side filters via
+    // `with_runtime.*`). When a media-type filter is active we only fire the
+    // matching discover request — no point spending TMDB quota on rows the
+    // client-side filter will drop anyway.
     Map<String, dynamic> discoverMovies = const {};
     Map<String, dynamic> discoverTv = const {};
-    final hasFilters = genreFilters.isNotEmpty || yearRange.hasAnyBound;
+    final hasFilters = genreFilters.isNotEmpty ||
+        yearRange.hasAnyBound ||
+        runtimeBucket != null ||
+        mediaTypeFilter != null;
+    final fetchMovies = mediaTypeFilter != MediaTypeFilter.tv;
+    final fetchTv = mediaTypeFilter != MediaTypeFilter.movie;
     if (hasFilters) {
       final movieIds = genreIdsFromNames(genreFilters, mediaType: 'movie');
       final tvIds = genreIdsFromNames(genreFilters, mediaType: 'tv');
       final discoverResults = await Future.wait([
-        _safeTmdb(() => _tmdb.discoverPaged(
-              mediaType: 'movie',
-              genreIds: movieIds,
-              minYear: yearRange.minYear,
-              maxYear: yearRange.maxYear,
-            )),
-        _safeTmdb(() => _tmdb.discoverPaged(
-              mediaType: 'tv',
-              genreIds: tvIds,
-              minYear: yearRange.minYear,
-              maxYear: yearRange.maxYear,
-            )),
+        if (fetchMovies)
+          _safeTmdb(() => _tmdb.discoverPaged(
+                mediaType: 'movie',
+                genreIds: movieIds,
+                minYear: yearRange.minYear,
+                maxYear: yearRange.maxYear,
+                minRuntime: runtimeBucket?.minRuntime,
+                maxRuntime: runtimeBucket?.maxRuntime,
+              )),
+        if (fetchTv)
+          _safeTmdb(() => _tmdb.discoverPaged(
+                mediaType: 'tv',
+                genreIds: tvIds,
+                minYear: yearRange.minYear,
+                maxYear: yearRange.maxYear,
+                minRuntime: runtimeBucket?.minRuntime,
+                maxRuntime: runtimeBucket?.maxRuntime,
+              )),
       ]);
-      discoverMovies = discoverResults[0];
-      discoverTv = discoverResults[1];
+      var i = 0;
+      if (fetchMovies) discoverMovies = discoverResults[i++];
+      if (fetchTv) discoverTv = discoverResults[i++];
+
+      // `/discover` filters server-side via `with_runtime.*` but doesn't echo
+      // `runtime` in its result rows. Stamp a representative runtime so the
+      // Home-screen runtime filter (strict mode when a bucket is active) can
+      // match these candidates. The stamp is a server-truth: TMDB already
+      // confirmed the runtime is in-bounds before returning the row.
+      if (runtimeBucket != null) {
+        final synthetic =
+            runtimeBucket.minRuntime ?? (runtimeBucket.maxRuntime ?? 90) - 1;
+        for (final payload in [discoverMovies, discoverTv]) {
+          final rows = payload['results'] as List? ?? const [];
+          for (final r in rows) {
+            if (r is Map<String, dynamic>) r.putIfAbsent('runtime', () => synthetic);
+          }
+        }
+      }
     }
 
     final candidates = buildCandidates(
@@ -365,7 +401,7 @@ List<Map<String, dynamic>> buildCandidates({
       final key = '$mediaType:$id';
       if (!seen.add(key)) continue;
       final date = (m['release_date'] ?? m['first_air_date']) as String?;
-      candidates.add({
+      final row = <String, dynamic>{
         'media_type': mediaType,
         'tmdb_id': id,
         'title': (m['title'] ?? m['name']) as String? ?? 'Untitled',
@@ -376,7 +412,14 @@ List<Map<String, dynamic>> buildCandidates({
         'genres': coerceGenres(m['genre_ids'], mediaType: mediaType),
         'overview': m['overview'] as String?,
         'source': source,
-      });
+      };
+      // Runtime comes through on discover payloads when the service stamped
+      // a synthetic value (server confirmed in-bounds via with_runtime.*).
+      // Trending / top-rated don't carry runtime, so the key stays absent
+      // for those rows — matches the existing "null runtime" contract.
+      final runtime = (m['runtime'] as num?)?.toInt();
+      if (runtime != null) row['runtime'] = runtime;
+      candidates.add(row);
     }
   }
 

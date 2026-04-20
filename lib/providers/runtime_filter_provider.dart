@@ -43,6 +43,33 @@ extension RuntimeBucketExt on RuntimeBucket {
         return runtimeMinutes > 120;
     }
   }
+
+  /// Minimum runtime in minutes for this bucket (inclusive). null = no lower
+  /// bound. Used to drive TMDB's `with_runtime.gte` discover param so the
+  /// server-side filter runs before the pool lands on the client.
+  int? get minRuntime {
+    switch (this) {
+      case RuntimeBucket.short:
+        return null;
+      case RuntimeBucket.medium:
+        return 90;
+      case RuntimeBucket.long_:
+        return 121;
+    }
+  }
+
+  /// Maximum runtime in minutes for this bucket (inclusive). null = no upper
+  /// bound. Paired with [minRuntime] for TMDB's `with_runtime.lte`.
+  int? get maxRuntime {
+    switch (this) {
+      case RuntimeBucket.short:
+        return 89;
+      case RuntimeBucket.medium:
+        return 120;
+      case RuntimeBucket.long_:
+        return null;
+    }
+  }
 }
 
 /// Per-mode runtime-bucket selection, persisted to SharedPreferences under

@@ -102,6 +102,8 @@ class TmdbService {
     List<int> genreIds = const [],
     int? minYear,
     int? maxYear,
+    int? minRuntime,
+    int? maxRuntime,
     int minVoteCount = 50,
     int poolFloor = 40,
     int maxPages = 5,
@@ -134,6 +136,13 @@ class TmdbService {
       if (ids.isNotEmpty) p['with_genres'] = ids.join('|');
       if (withYear && minYear != null) p[dateGte] = '$minYear-01-01';
       if (withYear && maxYear != null) p[dateLte] = '$maxYear-12-31';
+      // Runtime bounds are server-side filtered by TMDB — the only way to
+      // guarantee a runtime-aware pool since trending/top_rated strip runtime
+      // from their payloads. On /discover/tv, `with_runtime` targets the
+      // episode runtime (not season length), which matches how our
+      // Recommendation.runtime behaves on the client for TV too.
+      if (minRuntime != null) p['with_runtime.gte'] = '$minRuntime';
+      if (maxRuntime != null) p['with_runtime.lte'] = '$maxRuntime';
       return p;
     }
 

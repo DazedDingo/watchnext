@@ -37,26 +37,28 @@ void main() {
     });
 
     test('null runtime matches nothing (unknown length is filtered out)', () {
-      // `matches(null)` stays strict — the bucket itself reports "no,
-      // unknown doesn't pass". The Home filter is now the layer that
-      // chooses whether to keep unknowns (it does, to avoid blanking the
-      // list when discover/trending candidates lack runtime metadata).
-      // See home_screen.dart `runtimeFiltered`.
+      // `matches(null)` is strict and the Home filter uses it strictly too —
+      // discover rows are stamped with a synthetic runtime by the service
+      // (TMDB already confirmed in-bounds), so the pool has candidates to
+      // match. Trending/top-rated rows lack runtime and intentionally drop
+      // when a bucket is active; "Short" shouldn't surface a random 180-min
+      // pick just because the source didn't include runtime.
       for (final b in RuntimeBucket.values) {
         expect(b.matches(null), isFalse);
       }
     });
 
-    test('home-screen null-passthrough — matches(rt) || rt == null', () {
-      // Guards the client-side rule the Home filter uses now that null
-      // runtime recs (trending/top_rated/discover) pass through any active
-      // bucket. Regression lock: changing this rule without updating
-      // home_screen.dart will blank the rec list again.
-      bool passes(RuntimeBucket b, int? rt) => rt == null || b.matches(rt);
+    test('home-screen strict filter — drops null-runtime when bucket active',
+        () {
+      // Regression lock for the Home filter rule `runtime.matches(r.runtime)`.
+      // Changing the bucket to pass nulls without first confirming the pool
+      // has runtime-tagged candidates would resurrect the "filter does nothing"
+      // bug the user reported.
+      bool passes(RuntimeBucket b, int? rt) => b.matches(rt);
 
-      expect(passes(RuntimeBucket.short, null), isTrue);
-      expect(passes(RuntimeBucket.medium, null), isTrue);
-      expect(passes(RuntimeBucket.long_, null), isTrue);
+      expect(passes(RuntimeBucket.short, null), isFalse);
+      expect(passes(RuntimeBucket.medium, null), isFalse);
+      expect(passes(RuntimeBucket.long_, null), isFalse);
 
       expect(passes(RuntimeBucket.short, 85), isTrue);
       expect(passes(RuntimeBucket.short, 120), isFalse);
@@ -72,6 +74,36 @@ void main() {
     test('labels are unique (no duplicate pills on the home screen)', () {
       final labels = RuntimeBucket.values.map((b) => b.label).toList();
       expect(labels.toSet().length, labels.length);
+    });
+
+    test('minRuntime/maxRuntime drive TMDB with_runtime bounds', () {
+      // These bounds are what we send to `/discover?with_runtime.gte/lte`.
+      // Regression lock: shifting them requires updating the bucket.matches
+      // rule to stay consistent with what TMDB will hand us back.
+      expect(RuntimeBucket.short.minRuntime, isNull);
+      expect(RuntimeBucket.short.maxRuntime, 89);
+
+      expect(RuntimeBucket.medium.minRuntime, 90);
+      expect(RuntimeBucket.medium.maxRuntime, 120);
+
+      expect(RuntimeBucket.long_.minRuntime, 121);
+      expect(RuntimeBucket.long_.maxRuntime, isNull);
+    });
+
+    test('bounds + matches stay consistent at boundaries', () {
+      // Whatever values TMDB returns inside the sent bounds must also pass
+      // the client-side `matches` check — otherwise the strict Home filter
+      // would drop server-filtered rows.
+      for (final b in RuntimeBucket.values) {
+        if (b.minRuntime != null) {
+          expect(b.matches(b.minRuntime), isTrue,
+              reason: '$b.matches(minRuntime) should be true');
+        }
+        if (b.maxRuntime != null) {
+          expect(b.matches(b.maxRuntime), isTrue,
+              reason: '$b.matches(maxRuntime) should be true');
+        }
+      }
     });
   });
 

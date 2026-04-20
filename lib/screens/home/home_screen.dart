@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/genre_filter_provider.dart';
+import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
 import '../../providers/ratings_provider.dart';
@@ -73,6 +74,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final selectedGenres = ref.watch(selectedGenresProvider);
     final runtime = ref.watch(runtimeFilterProvider);
     final yearRange = ref.watch(yearRangeProvider);
+    final mediaType = ref.watch(mediaTypeFilterProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
@@ -90,16 +92,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 r.genres.isEmpty || r.genres.any(selectedGenres.contains))
             .toList();
 
-    // Runtime filter — null bucket = show everything. An active bucket
-    // keeps recs whose runtime matches, plus unknown-runtime recs (trending /
-    // top-rated / discover strip runtime from their payloads). Dropping
-    // unknowns meant any filter + a narrowed pool returned an empty list —
-    // matches the graceful contract the genre filter already uses.
+    // Runtime filter — null bucket = show everything. An active bucket is
+    // strict: unknown-runtime recs drop out. The service fires a runtime-aware
+    // `/discover` pass when a bucket is active, so the pool has candidates
+    // TMDB has confirmed in-bounds (discover rows are stamped with a
+    // representative runtime). Trending/top-rated rows lack runtime and are
+    // intentionally excluded — we can't honestly show them under a specific
+    // length filter.
     final runtimeFiltered = runtime == null
         ? genreFiltered
-        : genreFiltered
-            .where((r) => r.runtime == null || runtime.matches(r.runtime))
-            .toList();
+        : genreFiltered.where((r) => runtime.matches(r.runtime)).toList();
 
     // Year filter — unbounded range = show everything; any active bound
     // drops unknown-year items (same "don't mislead under a specific era"
@@ -108,11 +110,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ? runtimeFiltered
         : runtimeFiltered.where((r) => yearRange.matches(r.year)).toList();
 
+    // Media-type filter — null = show both movies and TV. When active, strict
+    // equality against Recommendation.mediaType.
+    final mediaFiltered = mediaType == null
+        ? yearFiltered
+        : yearFiltered
+            .where((r) => r.mediaType == mediaType.recMediaType)
+            .toList();
+
     // Search filter — trimmed case-insensitive substring on title.
     final q = _search.trim().toLowerCase();
     final filtered = q.isEmpty
-        ? yearFiltered
-        : yearFiltered
+        ? mediaFiltered
+        : mediaFiltered
             .where((r) => r.title.toLowerCase().contains(q))
             .toList();
 
@@ -222,6 +232,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               selectedGenres: selectedGenres,
               runtime: runtime,
               yearRange: yearRange,
+              mediaType: mediaType,
               onEditGenres: () => _openGenreSheet(context, ref, mode),
               onClearGenres: () =>
                   ref.read(modeGenreProvider.notifier).clear(mode),
@@ -229,6 +240,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeRuntimeProvider.notifier).set(mode, b),
               onYearRangeChanged: (r) =>
                   ref.read(modeYearRangeProvider.notifier).set(mode, r),
+              onMediaTypeSelect: (v) =>
+                  ref.read(modeMediaTypeProvider.notifier).set(mode, v),
             ),
             _SearchField(
               controller: _searchCtrl,
@@ -291,19 +304,23 @@ class _FiltersPanel extends StatelessWidget {
   final Set<String> selectedGenres;
   final RuntimeBucket? runtime;
   final YearRange yearRange;
+  final MediaTypeFilter? mediaType;
   final VoidCallback onEditGenres;
   final VoidCallback onClearGenres;
   final ValueChanged<RuntimeBucket?> onRuntimeSelect;
   final ValueChanged<YearRange> onYearRangeChanged;
+  final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
 
   const _FiltersPanel({
     required this.selectedGenres,
     required this.runtime,
     required this.yearRange,
+    required this.mediaType,
     required this.onEditGenres,
     required this.onClearGenres,
     required this.onRuntimeSelect,
     required this.onYearRangeChanged,
+    required this.onMediaTypeSelect,
   });
 
   int get _activeCount {
@@ -311,6 +328,7 @@ class _FiltersPanel extends StatelessWidget {
     if (selectedGenres.isNotEmpty) n += 1;
     if (runtime != null) n += 1;
     if (yearRange.hasAnyBound) n += 1;
+    if (mediaType != null) n += 1;
     return n;
   }
 
@@ -322,6 +340,7 @@ class _FiltersPanel extends StatelessWidget {
           ? list.join(', ')
           : '${list.length} genres');
     }
+    if (mediaType != null) parts.add(mediaType!.label);
     if (runtime != null) parts.add(runtime!.label);
     if (yearRange.hasAnyBound) {
       final lo = yearRange.minYear;
@@ -392,6 +411,10 @@ class _FiltersPanel extends StatelessWidget {
               selected: selectedGenres,
               onEdit: onEditGenres,
               onClear: onClearGenres,
+            ),
+            _MediaTypePills(
+              selected: mediaType,
+              onSelect: onMediaTypeSelect,
             ),
             _RuntimePills(
               selected: runtime,
@@ -522,6 +545,41 @@ class _GenreChipsRow extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Media-type pills ─────────────────────────────────────────────────────────
+
+class _MediaTypePills extends StatelessWidget {
+  final MediaTypeFilter? selected;
+  final void Function(MediaTypeFilter?) onSelect;
+
+  const _MediaTypePills({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: MediaTypeFilter.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final v = MediaTypeFilter.values[i];
+          final active = selected == v;
+          return FilterChip(
+            avatar: Icon(
+              v == MediaTypeFilter.movie ? Icons.movie : Icons.tv,
+              size: 16,
+            ),
+            label: Text(v.label),
+            selected: active,
+            onSelected: (_) => onSelect(active ? null : v),
+          );
+        },
       ),
     );
   }
