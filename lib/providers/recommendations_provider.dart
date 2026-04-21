@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recommendation.dart';
 import '../services/recommendations_service.dart';
+import 'exclude_animation_provider.dart';
 import 'genre_filter_provider.dart';
 import 'household_provider.dart';
 import 'media_type_filter_provider.dart';
@@ -56,6 +57,7 @@ final refreshRecommendationsProvider =
   final runtime = ref.read(runtimeFilterProvider);
   final mediaType = ref.read(mediaTypeFilterProvider);
   final oscarOnly = ref.read(oscarFilterProvider);
+  final excludeAnimation = ref.read(excludeAnimationProvider);
   await service.refresh(
     householdId,
     watchlist: watchlist,
@@ -64,6 +66,7 @@ final refreshRecommendationsProvider =
     runtimeBucket: runtime,
     mediaTypeFilter: mediaType,
     oscarOnly: oscarOnly,
+    excludeAnimation: excludeAnimation,
     forceTasteProfile: force,
   );
 });

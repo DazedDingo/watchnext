@@ -102,6 +102,7 @@ class TmdbService {
     required String mediaType,
     List<int> genreIds = const [],
     List<int> keywordIds = const [],
+    List<int> excludeGenreIds = const [],
     int? minYear,
     int? maxYear,
     int? minRuntime,
@@ -141,6 +142,12 @@ class TmdbService {
       // the whole point of the filter (e.g. an Oscar-only query that fell
       // back to "all genres" would suddenly show non-Oscar fare).
       if (keywordIds.isNotEmpty) p['with_keywords'] = keywordIds.join(',');
+      // Negative genre filter — also preserved across every fallback rung
+      // for the same reason as keywords: the whole point of the toggle is to
+      // keep these titles out even when the pool is thin.
+      if (excludeGenreIds.isNotEmpty) {
+        p['without_genres'] = excludeGenreIds.join(',');
+      }
       if (withYear && minYear != null) p[dateGte] = '$minYear-01-01';
       if (withYear && maxYear != null) p[dateLte] = '$maxYear-12-31';
       // Runtime bounds are server-side filtered by TMDB — the only way to

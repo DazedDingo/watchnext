@@ -1081,6 +1081,64 @@ void main() {
     });
   });
 
+  group('buildCandidates — excludeAnimation', () {
+    test('drops rows carrying genre id 16 from baseline TMDB sources', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: {
+          'results': [
+            {
+              'id': 1,
+              'title': 'Live Action Crime',
+              'release_date': '2020-01-01',
+              'genre_ids': [80, 18],
+            },
+            {
+              'id': 2,
+              'title': 'Animated Crime',
+              'release_date': '2020-01-01',
+              'genre_ids': [16, 80],
+            },
+          ],
+        },
+        trendingTvPayload: {
+          'results': [
+            {
+              'id': 10,
+              'name': 'Animated Show',
+              'first_air_date': '2021-01-01',
+              'genre_ids': [16, 35],
+            },
+          ],
+        },
+        excludeAnimation: true,
+      );
+      final ids = out.map((c) => c['tmdb_id']).toSet();
+      expect(ids, contains(1));
+      expect(ids, isNot(contains(2)),
+          reason: 'animated crime movie must be filtered out');
+      expect(ids, isNot(contains(10)),
+          reason: 'animated TV must be filtered out');
+    });
+
+    test('leaves animation rows in place when excludeAnimation=false', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: {
+          'results': [
+            {
+              'id': 2,
+              'title': 'Animated Crime',
+              'release_date': '2020-01-01',
+              'genre_ids': [16, 80],
+            },
+          ],
+        },
+      );
+      expect(out.map((c) => c['tmdb_id']), contains(2));
+    });
+  });
+
   group('writeCandidateDocs — oscar flag stickiness', () {
     test('writes is_oscar_winner=true on a fresh candidate', () async {
       final db = FakeFirebaseFirestore();

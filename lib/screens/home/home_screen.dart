@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/exclude_animation_provider.dart';
 import '../../providers/genre_filter_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
@@ -34,7 +35,7 @@ const _homeHelp =
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
     '• Mood pills — one-tap presets that fill the genre picker (tap again to clear).\n'
-    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, and Oscar-winners-only live here. The header summarises what\'s active.\n'
+    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, Oscar-winners-only, and Exclude-animation live here. The header summarises what\'s active.\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
@@ -108,6 +109,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final yearRange = ref.watch(yearRangeProvider);
     final mediaType = ref.watch(mediaTypeFilterProvider);
     final oscarOnly = ref.watch(oscarFilterProvider);
+    final excludeAnimation = ref.watch(excludeAnimationProvider);
     final includeWatched = ref.watch(includeWatchedProvider);
     final watchedKeys = ref.watch(watchedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
@@ -131,6 +133,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (prev != curr) _scheduleAutoRefresh();
     });
     ref.listen<bool>(oscarFilterProvider, (prev, curr) {
+      if (prev != curr) _scheduleAutoRefresh();
+    });
+    ref.listen<bool>(excludeAnimationProvider, (prev, curr) {
       if (prev != curr) _scheduleAutoRefresh();
     });
 
@@ -183,11 +188,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ? mediaFiltered
         : mediaFiltered.where((r) => r.isOscarWinner).toList();
 
+    // Exclude-animation filter — drops any rec carrying the Animation genre
+    // name. Applied client-side so the toggle takes effect immediately on the
+    // existing pool; the debounced refresh reshapes the pool server-side too.
+    final animationFiltered = !excludeAnimation
+        ? oscarFiltered
+        : oscarFiltered
+            .where((r) => !r.genres.contains('Animation'))
+            .toList();
+
     // Search filter — trimmed case-insensitive substring on title.
     final q = _search.trim().toLowerCase();
     final searchFiltered = q.isEmpty
-        ? oscarFiltered
-        : oscarFiltered
+        ? animationFiltered
+        : animationFiltered
             .where((r) => r.title.toLowerCase().contains(q))
             .toList();
 
@@ -309,6 +323,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               yearRange: yearRange,
               mediaType: mediaType,
               oscarOnly: oscarOnly,
+              excludeAnimation: excludeAnimation,
               includeWatched: includeWatched,
               onEditGenres: () => _openGenreSheet(context, ref, mode),
               onClearGenres: () =>
@@ -321,6 +336,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeMediaTypeProvider.notifier).set(mode, v),
               onOscarChanged: (v) =>
                   ref.read(modeOscarProvider.notifier).set(mode, v),
+              onExcludeAnimationChanged: (v) =>
+                  ref.read(modeExcludeAnimationProvider.notifier).set(mode, v),
               onIncludeWatchedChanged: (v) =>
                   ref.read(includeWatchedProvider.notifier).set(v),
             ),
@@ -404,6 +421,7 @@ class _FiltersPanel extends StatelessWidget {
   final YearRange yearRange;
   final MediaTypeFilter? mediaType;
   final bool oscarOnly;
+  final bool excludeAnimation;
   final bool includeWatched;
   final VoidCallback onEditGenres;
   final VoidCallback onClearGenres;
@@ -411,6 +429,7 @@ class _FiltersPanel extends StatelessWidget {
   final ValueChanged<YearRange> onYearRangeChanged;
   final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
   final ValueChanged<bool> onOscarChanged;
+  final ValueChanged<bool> onExcludeAnimationChanged;
   final ValueChanged<bool> onIncludeWatchedChanged;
 
   const _FiltersPanel({
@@ -419,6 +438,7 @@ class _FiltersPanel extends StatelessWidget {
     required this.yearRange,
     required this.mediaType,
     required this.oscarOnly,
+    required this.excludeAnimation,
     required this.includeWatched,
     required this.onEditGenres,
     required this.onClearGenres,
@@ -426,6 +446,7 @@ class _FiltersPanel extends StatelessWidget {
     required this.onYearRangeChanged,
     required this.onMediaTypeSelect,
     required this.onOscarChanged,
+    required this.onExcludeAnimationChanged,
     required this.onIncludeWatchedChanged,
   });
 
@@ -436,6 +457,7 @@ class _FiltersPanel extends StatelessWidget {
     if (yearRange.hasAnyBound) n += 1;
     if (mediaType != null) n += 1;
     if (oscarOnly) n += 1;
+    if (excludeAnimation) n += 1;
     // "Include watched" is counted as an active filter when it diverges from
     // the default (hide watched). Most users want the default, so flipping it
     // on should be visibly flagged.
@@ -465,6 +487,7 @@ class _FiltersPanel extends StatelessWidget {
       }
     }
     if (oscarOnly) parts.add('Oscar winners');
+    if (excludeAnimation) parts.add('No animation');
     if (includeWatched) parts.add('+ watched');
     return parts.isEmpty ? 'None' : parts.join(' · ');
   }
@@ -553,6 +576,23 @@ class _FiltersPanel extends StatelessWidget {
               ),
               value: oscarOnly,
               onChanged: onOscarChanged,
+            ),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              dense: true,
+              secondary: Icon(
+                Icons.animation,
+                color: excludeAnimation
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.white54,
+              ),
+              title: const Text('Exclude animation'),
+              subtitle: const Text(
+                'Hide animated films and shows',
+                style: TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              value: excludeAnimation,
+              onChanged: onExcludeAnimationChanged,
             ),
             SwitchListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),

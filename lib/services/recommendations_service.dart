@@ -112,6 +112,12 @@ class RecommendationsService {
   /// caller) so tests can assert the param made it through.
   static const int kOscarKeywordId = 210024;
 
+  /// TMDB's Animation genre id. Same id on movie + TV genre lists. Used by
+  /// the `excludeAnimation` filter to pass `without_genres=16` to
+  /// `/discover` and to drop animation-tagged rows from baseline TMDB
+  /// sources in `buildCandidates`.
+  static const int kAnimationGenreId = 16;
+
   Future<void> refresh(
     String householdId, {
     required List<WatchlistItem> watchlist,
@@ -121,6 +127,7 @@ class RecommendationsService {
     RuntimeBucket? runtimeBucket,
     MediaTypeFilter? mediaTypeFilter,
     bool oscarOnly = false,
+    bool excludeAnimation = false,
     bool forceTasteProfile = false,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
@@ -157,19 +164,27 @@ class RecommendationsService {
         yearRange.hasAnyBound ||
         runtimeBucket != null ||
         mediaTypeFilter != null ||
-        oscarOnly;
+        oscarOnly ||
+        excludeAnimation;
     final fetchMovies = mediaTypeFilter != MediaTypeFilter.tv;
     final fetchTv = mediaTypeFilter != MediaTypeFilter.movie;
     if (hasFilters) {
       final movieIds = genreIdsFromNames(genreFilters, mediaType: 'movie');
       final tvIds = genreIdsFromNames(genreFilters, mediaType: 'tv');
       final keywordIds = oscarOnly ? const [kOscarKeywordId] : const <int>[];
+      // If the user explicitly picked Animation as a genre, the exclude toggle
+      // is self-contradictory — honour the explicit pick and skip the exclude.
+      final excludeIds = (excludeAnimation &&
+              !genreFilters.contains('Animation'))
+          ? const [kAnimationGenreId]
+          : const <int>[];
       final discoverResults = await Future.wait([
         if (fetchMovies)
           _safeTmdb(() => _tmdb.discoverPaged(
                 mediaType: 'movie',
                 genreIds: movieIds,
                 keywordIds: keywordIds,
+                excludeGenreIds: excludeIds,
                 minYear: yearRange.minYear,
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
@@ -180,6 +195,7 @@ class RecommendationsService {
                 mediaType: 'tv',
                 genreIds: tvIds,
                 keywordIds: keywordIds,
+                excludeGenreIds: excludeIds,
                 minYear: yearRange.minYear,
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
@@ -217,6 +233,8 @@ class RecommendationsService {
       discoverMoviesPayload: discoverMovies,
       discoverTvPayload: discoverTv,
       discoverIsOscar: oscarOnly,
+      excludeAnimation:
+          excludeAnimation && !genreFilters.contains('Animation'),
       tmdbCap: tmdbCap,
     );
 
@@ -361,6 +379,7 @@ List<Map<String, dynamic>> buildCandidates({
   Map<String, dynamic> discoverMoviesPayload = const {},
   Map<String, dynamic> discoverTvPayload = const {},
   bool discoverIsOscar = false,
+  bool excludeAnimation = false,
   int tmdbCap = 20,
   int discoverCap = 40,
 }) {
@@ -429,6 +448,17 @@ List<Map<String, dynamic>> buildCandidates({
       if (id == null) continue;
       final mediaType = (m['media_type'] as String?) ?? defaultMediaType;
       final key = '$mediaType:$id';
+      // Drop animation-tagged rows from baseline sources (trending/top_rated)
+      // when the exclude toggle is on. Discover rows already had
+      // `without_genres=16` applied server-side so this is a defensive
+      // belt-and-braces pass. Watchlist + reddit rows skip this loop, which
+      // is intentional — saved titles are user-curated and stay visible.
+      if (excludeAnimation) {
+        final raw = m['genre_ids'];
+        if (raw is List && raw.any((g) => g is num && g.toInt() == 16)) {
+          continue;
+        }
+      }
       if (!seen.add(key)) continue;
       final date = (m['release_date'] ?? m['first_air_date']) as String?;
       final row = <String, dynamic>{

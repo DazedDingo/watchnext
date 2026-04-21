@@ -747,4 +747,79 @@ void main() {
       expect(calls.first.queryParameters.containsKey('with_keywords'), isFalse);
     });
   });
+
+  group('TmdbService.discoverPaged — excludeGenreIds (no-animation etc)', () {
+    test('joins excludeGenreIds into without_genres on every paginated call',
+        () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'A'},
+              ],
+              'total_pages': 3,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [80], // Crime
+        keywordIds: const [210024], // Oscar
+        excludeGenreIds: const [16], // Animation
+        poolFloor: 3,
+      );
+      // Every page request must carry without_genres — dropping it on a
+      // fallback rung would silently let animated titles back into the pool.
+      expect(calls, isNotEmpty);
+      for (final c in calls) {
+        expect(c.queryParameters['without_genres'], '16',
+            reason: 'excludeGenreIds must survive every retry rung');
+      }
+    });
+
+    test('omits without_genres when excludeGenreIds is empty', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({
+              'results': List.generate(40, (i) => {'id': i, 'title': 'X'}),
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(mediaType: 'movie', genreIds: const [28]);
+      expect(captured!.queryParameters.containsKey('without_genres'), isFalse);
+    });
+
+    test('comma-joins multiple exclude ids', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({'results': [], 'total_pages': 1}),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        excludeGenreIds: const [16, 99], // Animation, Documentary
+      );
+      // TMDB's /discover treats without_genres as comma-AND (exclude all).
+      expect(captured!.queryParameters['without_genres'], '16,99');
+    });
+  });
 }
