@@ -66,7 +66,7 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 
 ## Phase 5 — Decide Together ✅
 
-- **Negotiate** — top 5 per user from scored recommendations (mood-filtered). Side-by-side layout. Instant Match highlight on overlap (`decide_provider.dart` line 188).
+- **Negotiate** — top 5 per user from scored recommendations (mood-filtered). Side-by-side layout. Instant Match highlight on overlap (`decide_provider.dart` line 188). "None of these — shuffle" button rerolls the five candidates (`rerollCandidates` in `decide_provider.dart`); exclusions are session-only and cleared on close / new session.
 - Match → suggest. No match → each picks #1.
 - Different picks → **compromise pick**. Three-tier fallback: top scored rec → TMDB `similar` overlap → any similar. Current implementation uses TMDB-similar rather than the Claude-scored compromise the spec described — downgrade-in-place; the Claude upgrade is a straight swap of the candidate source.
 - **Veto** — max 2 per user (`vetoesA >= 2 || vetoesB >= 2 → tiebreak`).

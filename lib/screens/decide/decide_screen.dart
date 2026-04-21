@@ -153,13 +153,36 @@ class _PhaseView extends ConsumerWidget {
 
 // ── Negotiate ───────────────────────────────────────────────────────────────
 
-class _Negotiate extends ConsumerWidget {
+class _Negotiate extends ConsumerStatefulWidget {
   final DecideSessionState session;
   final _Members members;
   const _Negotiate({required this.session, required this.members});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Negotiate> createState() => _NegotiateState();
+}
+
+class _NegotiateState extends ConsumerState<_Negotiate> {
+  bool _shuffling = false;
+
+  Future<void> _shuffle() async {
+    setState(() => _shuffling = true);
+    try {
+      final watchlist = ref.read(visibleWatchlistProvider);
+      final includeWatched = ref.read(includeWatchedProvider);
+      final watchedKeys =
+          includeWatched ? const <String>{} : ref.read(watchedKeysProvider);
+      await ref
+          .read(decideSessionProvider.notifier)
+          .rerollCandidates(watchlist, watchedKeys: watchedKeys);
+    } finally {
+      if (mounted) setState(() => _shuffling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = widget.session;
     if (session.candidates.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(32),
@@ -191,21 +214,49 @@ class _Negotiate extends ConsumerWidget {
               return _CandidateTile(
                 candidate: c,
                 trailing: FilledButton.tonal(
-                  onPressed: () => ref
-                      .read(decideSessionProvider.notifier)
-                      .instantMatch(c),
+                  onPressed: _shuffling
+                      ? null
+                      : () => ref
+                          .read(decideSessionProvider.notifier)
+                          .instantMatch(c),
                   child: const Text('Instant Match'),
                 ),
               );
             },
           ),
         ),
+        if (session.error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              session.error!,
+              textAlign: TextAlign.center,
+              style:
+                  TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: FilledButton(
-            onPressed: () =>
-                ref.read(decideSessionProvider.notifier).proceedToPick(),
+            onPressed: _shuffling
+                ? null
+                : () => ref
+                    .read(decideSessionProvider.notifier)
+                    .proceedToPick(),
             child: const Text("Can't agree — pick separately"),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: OutlinedButton.icon(
+            onPressed: _shuffling ? null : _shuffle,
+            icon: _shuffling
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.casino_outlined),
+            label: const Text('None of these — shuffle'),
           ),
         ),
       ],

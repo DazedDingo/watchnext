@@ -362,6 +362,62 @@ class DecideController extends StateNotifier<DecideSessionState> {
     );
   }
 
+  /// "Shuffle candidates" during Negotiate. Folds the current pool into the
+  /// excluded set and rebuilds a fresh batch from watchlist + TMDB trending,
+  /// same as [start]. Used when neither user likes any of the shown options.
+  ///
+  /// If nothing new can be found, leaves the existing pool intact and sets
+  /// an error so the UI can explain why nothing changed.
+  Future<void> rerollCandidates(
+    List<WatchlistItem> watchlist, {
+    Set<String> watchedKeys = const {},
+  }) async {
+    final exclude = {
+      ...state.excluded,
+      ...watchedKeys,
+      ...state.candidates.map((c) => c.key),
+    };
+
+    final fromWatchlist = watchlist
+        .map(DecideCandidate.fromWatchlist)
+        .where((c) => !exclude.contains(c.key))
+        .toList();
+
+    List<DecideCandidate> merged = fromWatchlist;
+    if (merged.length < 5) {
+      try {
+        final trending = await _tmdb.trendingMovies();
+        final rows = (trending['results'] as List? ?? const [])
+            .cast<Map<String, dynamic>>();
+        final extra = rows
+            .take(30)
+            .map((m) => DecideCandidate.fromTmdb(m,
+                fallbackMediaType: 'movie', source: 'trending'))
+            .where((c) => !exclude.contains(c.key))
+            .where((c) => !merged.any((w) => w.key == c.key))
+            .take(5 - merged.length)
+            .toList();
+        merged = [...merged, ...extra];
+      } catch (_) {
+        // Fall through with whatever watchlist gave us.
+      }
+    }
+
+    if (merged.isEmpty) {
+      state = state.copyWith(
+        excluded: exclude,
+        error: 'No fresh titles left — add a few to your watchlist first.',
+      );
+      return;
+    }
+
+    state = state.copyWith(
+      candidates: merged.take(5).toList(),
+      excluded: exclude,
+      clearError: true,
+    );
+  }
+
   /// "Roll again" on the Decided screen. Keeps the current session (picks,
   /// vetoes, excluded set) but swaps the winner for a different title, trying
   /// in order: top scored recommendation → similar to pickA → similar to
