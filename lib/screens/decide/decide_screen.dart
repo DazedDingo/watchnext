@@ -212,31 +212,37 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
     return Column(
       children: [
         const Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 2),
           child: Text("Tonight's candidates",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         ),
         const Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Text(
-              'Both agree? Tap "Instant Match". Otherwise, pick separately.'),
+            'Both agree? Tap "Match". Otherwise, pick separately.',
+            style: TextStyle(fontSize: 12, color: Colors.white54),
+          ),
         ),
         Expanded(
           child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             itemCount: session.candidates.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (_, i) {
               final c = session.candidates[i];
               return _CandidateTile(
                 candidate: c,
                 trailing: FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
                   onPressed: _shuffling
                       ? null
                       : () => ref
                           .read(decideSessionProvider.notifier)
                           .instantMatch(c),
-                  child: const Text('Instant Match'),
+                  child: const Text('Match'),
                 ),
               );
             },
@@ -253,7 +259,7 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
             ),
           ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
           child: FilledButton(
             onPressed: (_shuffling || _surprising)
                 ? null
@@ -264,29 +270,37 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: OutlinedButton.icon(
-            onPressed: (_shuffling || _surprising) ? null : _shuffle,
-            icon: _shuffling
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.casino_outlined),
-            label: const Text('None of these — shuffle'),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: OutlinedButton.icon(
-            onPressed: (_shuffling || _surprising) ? null : _surprise,
-            icon: _surprising
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.auto_awesome_outlined),
-            label: const Text('Surprise me — fish older catalog'),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed:
+                      (_shuffling || _surprising) ? null : _shuffle,
+                  icon: _shuffling
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.casino_outlined, size: 18),
+                  label: const Text('Shuffle'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed:
+                      (_shuffling || _surprising) ? null : _surprise,
+                  icon: _surprising
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.auto_awesome_outlined, size: 18),
+                  label: const Text('Surprise me'),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -326,25 +340,30 @@ class _PickState extends ConsumerState<_Pick> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
           child: Text('${whoseTurn.displayName}, pick your favorite',
               style: const TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.w600)),
+                  fontSize: 16, fontWeight: FontWeight.w600)),
         ),
         const Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text('Your partner won\'t see this until both pick.'),
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text('Your partner won\'t see this until both pick.',
+              style: TextStyle(fontSize: 12, color: Colors.white54)),
         ),
         Expanded(
           child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             itemCount: session.candidates.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (_, i) {
               final c = session.candidates[i];
               return _CandidateTile(
                 candidate: c,
                 trailing: FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
                   onPressed: () {
                     final ctrl = ref.read(decideSessionProvider.notifier);
                     if (isAPhase) {
@@ -422,23 +441,25 @@ class _CompromiseState extends ConsumerState<_Compromise> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Padding(
-            padding: EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.only(bottom: 4),
             child: Text('Compromise pick',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           ),
           const Padding(
-            padding: EdgeInsets.only(bottom: 16),
+            padding: EdgeInsets.only(bottom: 12),
             child: Text(
-                'A title both of your tastes point toward. Watch it, or one of you can veto.'),
+              'A title both of your tastes point toward. Watch it, or veto.',
+              style: TextStyle(fontSize: 12, color: Colors.white54),
+            ),
           ),
           _CandidateCard(candidate: c),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           FilledButton(
             onPressed: () =>
                 ref.read(decideSessionProvider.notifier).acceptCompromise(),
             child: const Text("Let's watch this"),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
@@ -535,21 +556,22 @@ class _TiebreakState extends ConsumerState<_Tiebreak> {
       return const Center(child: CircularProgressIndicator());
     }
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.emoji_events_outlined, size: 48),
-          const SizedBox(height: 16),
+          const Icon(Icons.emoji_events_outlined, size: 36),
+          const SizedBox(height: 8),
           Text('Tiebreak — ${winner.displayName} picks',
               style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
+                  fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
           const Text('Fewest lifetime wins in this household.',
-              textAlign: TextAlign.center),
-          const SizedBox(height: 24),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.white54)),
+          const SizedBox(height: 16),
           _CandidateCard(candidate: pick),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           FilledButton(
             onPressed: () => ref
                 .read(decideSessionProvider.notifier)
@@ -586,18 +608,18 @@ class _DecidedState extends ConsumerState<_Decided> {
     }
     final error = widget.session.error;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.movie_filter, size: 48),
-          const SizedBox(height: 12),
+          const Icon(Icons.movie_filter, size: 36),
+          const SizedBox(height: 8),
           const Text("Tonight's pick",
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 16),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
           _WinnerSummary(candidate: winner),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           if (!_saved) ...[
             FilledButton(
               onPressed: (_saving || _rerolling) ? null : _save,
@@ -741,29 +763,52 @@ class _CandidateTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final poster = TmdbService.imageUrl(candidate.posterPath, size: 'w185');
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        leading: poster != null
-            ? Image.network(poster, width: 48, height: 72, fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const SizedBox(
-                  width: 48, height: 72, child: Icon(Icons.movie)))
-            : const SizedBox(
-                width: 48, height: 72, child: Icon(Icons.movie)),
-        title:
-            Text(candidate.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text([
-          if (candidate.year != null) '${candidate.year}',
-          candidate.source,
-        ].join(' · ')),
-        trailing: trailing,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: poster != null
+                ? Image.network(poster,
+                    width: 40,
+                    height: 60,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox(
+                        width: 40, height: 60, child: Icon(Icons.movie)))
+                : const SizedBox(
+                    width: 40, height: 60, child: Icon(Icons.movie)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(candidate.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (candidate.year != null) '${candidate.year}',
+                    candidate.source,
+                  ].join(' · '),
+                  style: const TextStyle(fontSize: 12, color: Colors.white54),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          trailing,
+        ],
       ),
     );
   }
 }
 
-/// Compact horizontal card for the Decided screen — keeps the save/reroll
-/// buttons reachable on short phones where the full poster card overflowed.
 class _WinnerSummary extends StatelessWidget {
   final DecideCandidate candidate;
   const _WinnerSummary({required this.candidate});
@@ -771,48 +816,39 @@ class _WinnerSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final poster = TmdbService.imageUrl(candidate.posterPath, size: 'w342');
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: poster != null
-                  ? Image.network(poster,
-                      width: 96,
-                      height: 144,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const SizedBox(
-                          width: 96,
-                          height: 144,
-                          child: Icon(Icons.movie, size: 48)))
-                  : const SizedBox(
-                      width: 96,
-                      height: 144,
-                      child: Icon(Icons.movie, size: 48)),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(candidate.title,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w600)),
-                  if (candidate.year != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text('${candidate.year}'),
-                    ),
-                ],
-              ),
-            ),
-          ],
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: poster != null
+              ? Image.network(poster,
+                  width: 80,
+                  height: 120,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                      width: 80, height: 120, child: Icon(Icons.movie, size: 40)))
+              : const SizedBox(
+                  width: 80, height: 120, child: Icon(Icons.movie, size: 40)),
         ),
-      ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(candidate.title,
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w600)),
+              if (candidate.year != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('${candidate.year}'),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -824,36 +860,41 @@ class _CandidateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final poster = TmdbService.imageUrl(candidate.posterPath, size: 'w342');
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (poster != null)
-            AspectRatio(
-                aspectRatio: 2 / 3,
-                child: Image.network(poster, fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const SizedBox(height: 240, child: Icon(Icons.movie, size: 96))))
-          else
-            const SizedBox(height: 240, child: Icon(Icons.movie, size: 96)),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(candidate.title,
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w600)),
-                if (candidate.year != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text('${candidate.year}'),
-                  ),
-              ],
-            ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: poster != null
+              ? Image.network(poster,
+                  width: 120,
+                  height: 180,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                      width: 120,
+                      height: 180,
+                      child: Icon(Icons.movie, size: 48)))
+              : const SizedBox(
+                  width: 120, height: 180, child: Icon(Icons.movie, size: 48)),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(candidate.title,
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w600)),
+              if (candidate.year != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('${candidate.year}'),
+                ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

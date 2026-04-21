@@ -372,15 +372,14 @@ class _LikeTheseSheetState extends ConsumerState<LikeTheseSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       children: [
         if ((_resultText ?? '').isNotEmpty) ...[
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(14),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: SelectableText(
+              _resultText!,
+              style: const TextStyle(fontSize: 13, color: Colors.white70),
             ),
-            child: SelectableText(_resultText!),
           ),
-          const SizedBox(height: 16),
+          const Divider(height: 16),
         ],
         for (final t in _resultTitles)
           _ResultTile(
@@ -589,38 +588,39 @@ class _ResultTileState extends State<_ResultTile> {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      visualDensity: VisualDensity.compact,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: _loading
             ? Container(
-                width: 48,
-                height: 72,
+                width: 40,
+                height: 60,
                 color: Colors.white10,
                 child: const Center(
                     child: SizedBox(
-                        width: 16,
-                        height: 16,
+                        width: 14,
+                        height: 14,
                         child: CircularProgressIndicator(strokeWidth: 1.5))))
             : _posterUrl != null
                 ? Image.network(_posterUrl!,
-                    width: 48,
-                    height: 72,
+                    width: 40,
+                    height: 60,
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => Container(
-                          width: 48,
-                          height: 72,
+                          width: 40,
+                          height: 60,
                           color: Colors.white10,
                           child: const Icon(Icons.movie_outlined,
-                              color: Colors.white30, size: 20),
+                              color: Colors.white30, size: 18),
                         ))
                 : Container(
-                    width: 48,
-                    height: 72,
+                    width: 40,
+                    height: 60,
                     color: Colors.white10,
                     child: const Icon(Icons.movie_outlined,
-                        color: Colors.white30, size: 20)),
+                        color: Colors.white30, size: 18)),
       ),
       title: Text(
         widget.suggestion.year != null
@@ -631,7 +631,7 @@ class _ResultTileState extends State<_ResultTile> {
       subtitle: Text(
         widget.suggestion.reason,
         style: const TextStyle(fontSize: 12, color: Colors.white54),
-        maxLines: 3,
+        maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
       onTap: widget.onTap,
