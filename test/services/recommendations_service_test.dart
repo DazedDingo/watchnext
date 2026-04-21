@@ -1139,6 +1139,92 @@ void main() {
     });
   });
 
+  group('buildCandidates — fuzz: every flag combo is crash-free', () {
+    // Regression guard: exhaustively exercise the boolean/payload combinations
+    // the service composes when the user stacks filters. A regression that
+    // only triggers under, say, "excludeAnimation=true + discoverIsOscar=true
+    // + empty trending" would otherwise slip through the single-concern tests
+    // above.
+    final samplePayload = {
+      'results': [
+        {
+          'id': 1,
+          'title': 'Live',
+          'release_date': '2020-01-01',
+          'genre_ids': [80, 18],
+        },
+        {
+          'id': 2,
+          'title': 'Animated',
+          'release_date': '2020-01-01',
+          'genre_ids': [16, 80],
+        },
+      ],
+    };
+    final watchlist = [
+      _w(mediaType: 'movie', id: 500, title: 'WL', genres: const ['Animation']),
+    ];
+    final reddit = [
+      {
+        'media_type': 'movie',
+        'tmdb_id': 700,
+        'title': 'R',
+        'genre_ids': const [28],
+      },
+    ];
+
+    for (final excludeAnim in [false, true]) {
+      for (final oscar in [false, true]) {
+        for (final hasBaseline in [false, true]) {
+          for (final hasDiscover in [false, true]) {
+            test(
+                'exclude=$excludeAnim oscar=$oscar baseline=$hasBaseline discover=$hasDiscover',
+                () {
+              final out = buildCandidates(
+                watchlist: watchlist,
+                redditMentions: reddit,
+                trendingMoviesPayload: hasBaseline ? samplePayload : const {},
+                trendingTvPayload: hasBaseline ? samplePayload : const {},
+                topRatedMoviesPayload: hasBaseline ? samplePayload : const {},
+                topRatedTvPayload: hasBaseline ? samplePayload : const {},
+                discoverMoviesPayload: hasDiscover ? samplePayload : const {},
+                discoverTvPayload: hasDiscover ? samplePayload : const {},
+                discoverIsOscar: oscar,
+                excludeAnimation: excludeAnim,
+              );
+              // Watchlist always survives — it bypasses the animation filter
+              // because it's user-curated content (documented contract).
+              expect(out.any((c) => c['tmdb_id'] == 500), isTrue,
+                  reason: 'watchlist bypasses the animation filter');
+              // When any TMDB source fires AND oscar tag is on, the discover
+              // rows must carry is_oscar_winner=true — nothing else should.
+              if (hasDiscover && oscar) {
+                final oscarTagged =
+                    out.where((c) => c['is_oscar_winner'] == true).toList();
+                expect(oscarTagged, isNotEmpty);
+                expect(oscarTagged.every((c) => c['source'] == 'discover'),
+                    isTrue);
+              }
+              // Exclude-animation invariant: no TMDB-source row with Animation
+              // in its resolved genre list should survive. (Watchlist + reddit
+              // bypass by design.)
+              if (excludeAnim) {
+                final animTmdb = out.where((c) =>
+                    (c['source'] == 'discover' ||
+                        c['source'] == 'trending' ||
+                        c['source'] == 'top_rated') &&
+                    (c['genres'] as List?)?.contains('Animation') == true);
+                expect(animTmdb, isEmpty,
+                    reason:
+                        'animation leaked through TMDB source under excludeAnimation=true');
+              }
+            });
+          }
+        }
+      }
+    }
+  });
+
   group('writeCandidateDocs — oscar flag stickiness', () {
     test('writes is_oscar_winner=true on a fresh candidate', () async {
       final db = FakeFirebaseFirestore();
