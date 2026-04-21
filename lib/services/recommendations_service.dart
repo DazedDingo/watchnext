@@ -106,6 +106,12 @@ class RecommendationsService {
   /// When [forceTasteProfile] is true, the taste profile is regenerated
   /// alongside the background score pass — refresh UX: scores reflect the
   /// latest ratings on the *next* stream update after this pass.
+  /// TMDB keyword id for the "oscar-winning-film" keyword. Used to narrow
+  /// the discover pool to Academy-Award-winning titles when the user has
+  /// the Oscar Winners filter on. Constant here (rather than buried in the
+  /// caller) so tests can assert the param made it through.
+  static const int kOscarKeywordId = 210024;
+
   Future<void> refresh(
     String householdId, {
     required List<WatchlistItem> watchlist,
@@ -114,6 +120,7 @@ class RecommendationsService {
     YearRange yearRange = const YearRange.unbounded(),
     RuntimeBucket? runtimeBucket,
     MediaTypeFilter? mediaTypeFilter,
+    bool oscarOnly = false,
     bool forceTasteProfile = false,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
@@ -149,17 +156,20 @@ class RecommendationsService {
     final hasFilters = genreFilters.isNotEmpty ||
         yearRange.hasAnyBound ||
         runtimeBucket != null ||
-        mediaTypeFilter != null;
+        mediaTypeFilter != null ||
+        oscarOnly;
     final fetchMovies = mediaTypeFilter != MediaTypeFilter.tv;
     final fetchTv = mediaTypeFilter != MediaTypeFilter.movie;
     if (hasFilters) {
       final movieIds = genreIdsFromNames(genreFilters, mediaType: 'movie');
       final tvIds = genreIdsFromNames(genreFilters, mediaType: 'tv');
+      final keywordIds = oscarOnly ? const [kOscarKeywordId] : const <int>[];
       final discoverResults = await Future.wait([
         if (fetchMovies)
           _safeTmdb(() => _tmdb.discoverPaged(
                 mediaType: 'movie',
                 genreIds: movieIds,
+                keywordIds: keywordIds,
                 minYear: yearRange.minYear,
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
@@ -169,6 +179,7 @@ class RecommendationsService {
           _safeTmdb(() => _tmdb.discoverPaged(
                 mediaType: 'tv',
                 genreIds: tvIds,
+                keywordIds: keywordIds,
                 minYear: yearRange.minYear,
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
@@ -205,6 +216,7 @@ class RecommendationsService {
       topRatedTvPayload: baseline[3],
       discoverMoviesPayload: discoverMovies,
       discoverTvPayload: discoverTv,
+      discoverIsOscar: oscarOnly,
       tmdbCap: tmdbCap,
     );
 
@@ -268,6 +280,13 @@ class RecommendationsService {
           'source': c['source'] ?? 'unknown',
           'generated_at': FieldValue.serverTimestamp(),
         };
+        // Sticky tag: only write the oscar flag when this batch confirmed
+        // it. A row that came through trending today won't have the field
+        // and Firestore's merge semantics leave any previously-written
+        // `is_oscar_winner=true` untouched.
+        if (c['is_oscar_winner'] == true) {
+          data['is_oscar_winner'] = true;
+        }
         if (!existingIds.contains(key)) {
           // Seed default score fields only on first write — protects any
           // Claude-set match_score on a rec that's already been scored.
@@ -341,6 +360,7 @@ List<Map<String, dynamic>> buildCandidates({
   Map<String, dynamic> topRatedTvPayload = const {},
   Map<String, dynamic> discoverMoviesPayload = const {},
   Map<String, dynamic> discoverTvPayload = const {},
+  bool discoverIsOscar = false,
   int tmdbCap = 20,
   int discoverCap = 40,
 }) {
@@ -388,16 +408,20 @@ List<Map<String, dynamic>> buildCandidates({
   // source row cap. Discover sources get a larger cap because the user
   // explicitly narrowed the query — crowding out baseline pool by up to
   // `discoverCap` rows each is the whole point.
-  final tmdbSources = <(Map<String, dynamic>, String, String, int)>[
-    (trendingMoviesPayload, 'movie', 'trending', tmdbCap),
-    (trendingTvPayload, 'tv', 'trending', tmdbCap),
-    (topRatedMoviesPayload, 'movie', 'top_rated', tmdbCap),
-    (topRatedTvPayload, 'tv', 'top_rated', tmdbCap),
-    (discoverMoviesPayload, 'movie', 'discover', discoverCap),
-    (discoverTvPayload, 'tv', 'discover', discoverCap),
+  // Discover sources lead the TMDB merge order so a hot Oscar winner that
+  // also happens to be trending wins the `is_oscar_winner` tag instead of
+  // getting silently re-labelled as `source: 'trending'` by the dedup. The
+  // user-narrowed query is more informative than a generic trending row.
+  final tmdbSources = <(Map<String, dynamic>, String, String, int, bool)>[
+    (discoverMoviesPayload, 'movie', 'discover', discoverCap, discoverIsOscar),
+    (discoverTvPayload, 'tv', 'discover', discoverCap, discoverIsOscar),
+    (trendingMoviesPayload, 'movie', 'trending', tmdbCap, false),
+    (trendingTvPayload, 'tv', 'trending', tmdbCap, false),
+    (topRatedMoviesPayload, 'movie', 'top_rated', tmdbCap, false),
+    (topRatedTvPayload, 'tv', 'top_rated', tmdbCap, false),
   ];
 
-  for (final (payload, defaultMediaType, source, cap) in tmdbSources) {
+  for (final (payload, defaultMediaType, source, cap, isOscar) in tmdbSources) {
     final rows = (payload['results'] as List? ?? const [])
         .cast<Map<String, dynamic>>();
     for (final m in rows.take(cap)) {
@@ -419,6 +443,10 @@ List<Map<String, dynamic>> buildCandidates({
         'overview': m['overview'] as String?,
         'source': source,
       };
+      // Only stamp the oscar flag when true. False values are intentionally
+      // omitted so `writeCandidateDocs` doesn't reset a previously-set
+      // `is_oscar_winner=true` on a row that's now coming through trending.
+      if (isOscar) row['is_oscar_winner'] = true;
       // Runtime comes through on discover payloads when the service stamped
       // a synthetic value (server confirmed in-bounds via with_runtime.*).
       // Trending / top-rated don't carry runtime, so the key stays absent

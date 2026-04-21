@@ -676,9 +676,12 @@ void main() {
       expect(trendingCount, 5);
     });
 
-    test('discover dedups against baseline trending — first source wins', () {
-      // Same id appears in both trending and discover. Baseline fires first
-      // so the row should read as trending, and discover must not duplicate.
+    test('discover wins dedup against baseline trending', () {
+      // Discover is intentionally placed AHEAD of trending in the merge order
+      // so a user-narrowed query (and any oscar tag stamped on the discover
+      // row) survives dedup. If trending won, an Oscar Best Picture that
+      // happens to be trending this week would lose its `is_oscar_winner`
+      // tag and disappear under the Oscar filter.
       final out = buildCandidates(
         watchlist: const [],
         trendingMoviesPayload: const {
@@ -693,7 +696,7 @@ void main() {
         },
       );
       expect(out, hasLength(1));
-      expect(out.first['source'], 'trending');
+      expect(out.first['source'], 'discover');
     });
 
     test('discover dedups within itself — movie + tv using same id', () {
@@ -716,10 +719,9 @@ void main() {
       expect(out.map((c) => c['media_type']).toList(), ['movie', 'tv']);
     });
 
-    test('order: baseline TMDB sources come before discover', () {
-      // Declaration order in the service:
-      //   trending movies → trending tv → top-rated movies → top-rated tv →
-      //   discover movies → discover tv
+    test('order: discover leads, then trending, then top_rated', () {
+      // Discover is at the head of the TMDB merge so user-narrowed rows
+      // (and oscar tags) win dedup. Baseline sources fill in afterwards.
       final out = buildCandidates(
         watchlist: const [],
         trendingMoviesPayload: const {
@@ -739,7 +741,7 @@ void main() {
         },
       );
       expect(out.map((c) => c['source']).toList(),
-          ['trending', 'top_rated', 'discover']);
+          ['discover', 'trending', 'top_rated']);
     });
 
     test('empty discover payloads are tolerated', () {
@@ -987,6 +989,148 @@ void main() {
       expect(existing['ai_blurb'], 'Keep me');
       expect(fresh['match_score'], 50);
       expect(fresh['ai_blurb'], '');
+    });
+  });
+
+  group('buildCandidates — oscar discover tagging', () {
+    test(
+        'tags discover_movie + discover_tv rows with is_oscar_winner when discoverIsOscar=true',
+        () {
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: {
+          'results': [
+            {'id': 100, 'title': 'Schindler', 'release_date': '1993-12-15'},
+          ],
+        },
+        discoverTvPayload: {
+          'results': [
+            {'id': 200, 'name': 'Crown', 'first_air_date': '2016-11-04'},
+          ],
+        },
+        discoverIsOscar: true,
+      );
+      final byKey = {for (final c in out) '${c['media_type']}:${c['tmdb_id']}': c};
+      expect(byKey['movie:100']?['is_oscar_winner'], true);
+      expect(byKey['tv:200']?['is_oscar_winner'], true);
+    });
+
+    test('omits is_oscar_winner key entirely when discoverIsOscar=false', () {
+      // Important: the key must be ABSENT (not just false) so the writeCandidateDocs
+      // merge doesn't silently overwrite a previously-true flag in Firestore.
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: {
+          'results': [
+            {'id': 100, 'title': 'X', 'release_date': '2010-01-01'},
+          ],
+        },
+        discoverIsOscar: false,
+      );
+      expect(out.first.containsKey('is_oscar_winner'), isFalse);
+    });
+
+    test(
+        'discover wins source dedup over trending so an oscar-tagged hot title keeps the flag',
+        () {
+      // Same title (movie:777) in BOTH the trending and the oscar-discover
+      // payloads. Without putting discover ahead of trending in the merge
+      // order, dedup would keep `source: 'trending'` and drop the oscar tag —
+      // exactly what would happen for a current-year Best Picture winner.
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: {
+          'results': [
+            {'id': 777, 'title': 'Hot Oscar Movie', 'release_date': '2024-12-01'},
+          ],
+        },
+        discoverMoviesPayload: {
+          'results': [
+            {'id': 777, 'title': 'Hot Oscar Movie', 'release_date': '2024-12-01'},
+          ],
+        },
+        discoverIsOscar: true,
+      );
+      final row = out.firstWhere((c) => c['tmdb_id'] == 777);
+      expect(row['source'], 'discover');
+      expect(row['is_oscar_winner'], true);
+    });
+
+    test('non-oscar baseline rows are not tagged even when oscar mode is on',
+        () {
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: {
+          'results': [
+            {'id': 1, 'title': 'Trending only', 'release_date': '2024-01-01'},
+          ],
+        },
+        topRatedMoviesPayload: {
+          'results': [
+            {'id': 2, 'title': 'Top rated only', 'release_date': '2024-01-01'},
+          ],
+        },
+        discoverIsOscar: true,
+      );
+      // Both trending + top_rated rows survive dedup but should NOT carry the
+      // oscar flag — only confirmed-via-discover rows do.
+      for (final r in out) {
+        expect(r.containsKey('is_oscar_winner'), isFalse,
+            reason: 'baseline ${r['source']} rows must not be flagged');
+      }
+    });
+  });
+
+  group('writeCandidateDocs — oscar flag stickiness', () {
+    test('writes is_oscar_winner=true on a fresh candidate', () async {
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db);
+      const hh = 'h1';
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Casablanca',
+          'is_oscar_winner': true,
+        },
+      ]);
+      final doc = await db
+          .doc('households/$hh/recommendations/movie:1')
+          .get();
+      expect(doc.data()!['is_oscar_winner'], true);
+    });
+
+    test('preserves existing is_oscar_winner=true when re-written without flag',
+        () async {
+      // Real-world sequence: oscar refresh tags movie:1 → next refresh has the
+      // oscar toggle off, so movie:1 comes through trending without the flag.
+      // The doc must NOT lose its `is_oscar_winner=true` — a movie doesn't
+      // un-win an Oscar.
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db);
+      const hh = 'h1';
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Casablanca',
+          'is_oscar_winner': true,
+        },
+      ]);
+      // Second pass: same title, oscar flag absent (came through trending).
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Casablanca',
+          'source': 'trending',
+        },
+      ]);
+      final doc = await db
+          .doc('households/$hh/recommendations/movie:1')
+          .get();
+      expect(doc.data()!['is_oscar_winner'], true,
+          reason: 'oscar flag should be sticky across refresh passes');
     });
   });
 }

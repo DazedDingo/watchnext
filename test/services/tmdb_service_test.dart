@@ -693,4 +693,58 @@ void main() {
       expect((res['results'] as List).first, isA<Map>());
     });
   });
+
+  group('TmdbService.discoverPaged — keyword filter (Oscar etc)', () {
+    test('joins keywordIds into with_keywords on every paginated call',
+        () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'A'},
+              ],
+              'total_pages': 3,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        keywordIds: const [210024],
+        poolFloor: 3,
+      );
+      // Every page request must carry with_keywords — dropping it on a
+      // fallback rung would silently widen the pool to non-Oscar titles.
+      expect(calls, isNotEmpty);
+      for (final c in calls) {
+        expect(c.queryParameters['with_keywords'], '210024',
+            reason: 'oscar keyword must survive every retry rung');
+      }
+    });
+
+    test('omits with_keywords when keywordIds is empty (no regression)',
+        () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': List.generate(40, (i) => {'id': i, 'title': 'X'}),
+              'total_pages': 1,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(mediaType: 'movie', genreIds: const [28]);
+      expect(calls.first.queryParameters.containsKey('with_keywords'), isFalse);
+    });
+  });
 }

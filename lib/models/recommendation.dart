@@ -22,6 +22,10 @@ class Recommendation {
   final Map<String, String> aiBlurbSolo;
   final String source;
   final bool scored;
+  /// True if TMDB tagged this title with the oscar-winning-film keyword in
+  /// any past discover pass. Sticky: once true in Firestore, future writes
+  /// don't reset it (a movie doesn't un-win an Oscar).
+  final bool isOscarWinner;
   final DateTime? generatedAt;
 
   const Recommendation({
@@ -39,6 +43,7 @@ class Recommendation {
     this.aiBlurbSolo = const {},
     this.source = 'unknown',
     this.scored = false,
+    this.isOscarWinner = false,
     this.generatedAt,
   });
 
@@ -75,6 +80,7 @@ class Recommendation {
           const {},
       source: d['source'] as String? ?? 'unknown',
       scored: d['scored'] as bool? ?? false,
+      isOscarWinner: d['is_oscar_winner'] as bool? ?? false,
       generatedAt: (d['generated_at'] as Timestamp?)?.toDate(),
     );
   }

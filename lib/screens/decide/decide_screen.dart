@@ -18,6 +18,8 @@ const _decideHelp =
     'Break a tie fast by passing the phone back and forth.\n\n'
     '• Each member independently swipes through candidates (watchlist + top recommendations).\n'
     '• When both have flagged the same title as "want to watch", it pops up as a match.\n'
+    '• "None of these — shuffle" rerolls the five candidates from your watchlist + this week\'s trending.\n'
+    '• "Surprise me" fishes a random pre-2020 decade for older catalog titles when nothing on screen is grabbing either of you.\n'
     '• Close any time — your progress isn\'t saved.\n\n'
     'Pro tip: use Solo mode first if you want personalised ranking before starting.';
 
@@ -164,6 +166,7 @@ class _Negotiate extends ConsumerStatefulWidget {
 
 class _NegotiateState extends ConsumerState<_Negotiate> {
   bool _shuffling = false;
+  bool _surprising = false;
 
   Future<void> _shuffle() async {
     setState(() => _shuffling = true);
@@ -177,6 +180,20 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
           .rerollCandidates(watchlist, watchedKeys: watchedKeys);
     } finally {
       if (mounted) setState(() => _shuffling = false);
+    }
+  }
+
+  Future<void> _surprise() async {
+    setState(() => _surprising = true);
+    try {
+      final includeWatched = ref.read(includeWatchedProvider);
+      final watchedKeys =
+          includeWatched ? const <String>{} : ref.read(watchedKeysProvider);
+      await ref
+          .read(decideSessionProvider.notifier)
+          .rerollExploratory(watchedKeys: watchedKeys);
+    } finally {
+      if (mounted) setState(() => _surprising = false);
     }
   }
 
@@ -238,7 +255,7 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: FilledButton(
-            onPressed: _shuffling
+            onPressed: (_shuffling || _surprising)
                 ? null
                 : () => ref
                     .read(decideSessionProvider.notifier)
@@ -247,9 +264,9 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: OutlinedButton.icon(
-            onPressed: _shuffling ? null : _shuffle,
+            onPressed: (_shuffling || _surprising) ? null : _shuffle,
             icon: _shuffling
                 ? const SizedBox(
                     width: 16,
@@ -257,6 +274,19 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.casino_outlined),
             label: const Text('None of these — shuffle'),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: OutlinedButton.icon(
+            onPressed: (_shuffling || _surprising) ? null : _surprise,
+            icon: _surprising
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.auto_awesome_outlined),
+            label: const Text('Surprise me — fish older catalog'),
           ),
         ),
       ],

@@ -12,6 +12,7 @@ import '../../providers/include_watched_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/mood_provider.dart';
+import '../../providers/oscar_filter_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
@@ -33,7 +34,7 @@ const _homeHelp =
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
     '• Mood pills — one-tap presets that fill the genre picker (tap again to clear).\n'
-    '• Filters — tap to expand. Genres (multi-select), runtime bucket, and year range live here. The header summarises what\'s active.\n'
+    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, and Oscar-winners-only live here. The header summarises what\'s active.\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
@@ -106,6 +107,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final runtime = ref.watch(runtimeFilterProvider);
     final yearRange = ref.watch(yearRangeProvider);
     final mediaType = ref.watch(mediaTypeFilterProvider);
+    final oscarOnly = ref.watch(oscarFilterProvider);
     final includeWatched = ref.watch(includeWatchedProvider);
     final watchedKeys = ref.watch(watchedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
@@ -126,6 +128,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (prev != null && prev != curr) _scheduleAutoRefresh();
     });
     ref.listen<MediaTypeFilter?>(mediaTypeFilterProvider, (prev, curr) {
+      if (prev != curr) _scheduleAutoRefresh();
+    });
+    ref.listen<bool>(oscarFilterProvider, (prev, curr) {
       if (prev != curr) _scheduleAutoRefresh();
     });
 
@@ -169,11 +174,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((r) => r.mediaType == mediaType.recMediaType)
             .toList();
 
+    // Oscar filter — strict: only recs the discover pass tagged with
+    // `is_oscar_winner=true` survive. Trending/top-rated rows that haven't
+    // been confirmed via the oscar discover keyword drop out, even if the
+    // title is a real Oscar winner. The auto-refresh on toggle-on populates
+    // the pool with confirmed winners within a debounce.
+    final oscarFiltered = !oscarOnly
+        ? mediaFiltered
+        : mediaFiltered.where((r) => r.isOscarWinner).toList();
+
     // Search filter — trimmed case-insensitive substring on title.
     final q = _search.trim().toLowerCase();
     final searchFiltered = q.isEmpty
-        ? mediaFiltered
-        : mediaFiltered
+        ? oscarFiltered
+        : oscarFiltered
             .where((r) => r.title.toLowerCase().contains(q))
             .toList();
 
@@ -294,6 +308,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               runtime: runtime,
               yearRange: yearRange,
               mediaType: mediaType,
+              oscarOnly: oscarOnly,
               includeWatched: includeWatched,
               onEditGenres: () => _openGenreSheet(context, ref, mode),
               onClearGenres: () =>
@@ -304,6 +319,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeYearRangeProvider.notifier).set(mode, r),
               onMediaTypeSelect: (v) =>
                   ref.read(modeMediaTypeProvider.notifier).set(mode, v),
+              onOscarChanged: (v) =>
+                  ref.read(modeOscarProvider.notifier).set(mode, v),
               onIncludeWatchedChanged: (v) =>
                   ref.read(includeWatchedProvider.notifier).set(v),
             ),
@@ -386,12 +403,14 @@ class _FiltersPanel extends StatelessWidget {
   final RuntimeBucket? runtime;
   final YearRange yearRange;
   final MediaTypeFilter? mediaType;
+  final bool oscarOnly;
   final bool includeWatched;
   final VoidCallback onEditGenres;
   final VoidCallback onClearGenres;
   final ValueChanged<RuntimeBucket?> onRuntimeSelect;
   final ValueChanged<YearRange> onYearRangeChanged;
   final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
+  final ValueChanged<bool> onOscarChanged;
   final ValueChanged<bool> onIncludeWatchedChanged;
 
   const _FiltersPanel({
@@ -399,12 +418,14 @@ class _FiltersPanel extends StatelessWidget {
     required this.runtime,
     required this.yearRange,
     required this.mediaType,
+    required this.oscarOnly,
     required this.includeWatched,
     required this.onEditGenres,
     required this.onClearGenres,
     required this.onRuntimeSelect,
     required this.onYearRangeChanged,
     required this.onMediaTypeSelect,
+    required this.onOscarChanged,
     required this.onIncludeWatchedChanged,
   });
 
@@ -414,6 +435,7 @@ class _FiltersPanel extends StatelessWidget {
     if (runtime != null) n += 1;
     if (yearRange.hasAnyBound) n += 1;
     if (mediaType != null) n += 1;
+    if (oscarOnly) n += 1;
     // "Include watched" is counted as an active filter when it diverges from
     // the default (hide watched). Most users want the default, so flipping it
     // on should be visibly flagged.
@@ -442,6 +464,7 @@ class _FiltersPanel extends StatelessWidget {
         parts.add('≤$hi');
       }
     }
+    if (oscarOnly) parts.add('Oscar winners');
     if (includeWatched) parts.add('+ watched');
     return parts.isEmpty ? 'None' : parts.join(' · ');
   }
@@ -513,6 +536,23 @@ class _FiltersPanel extends StatelessWidget {
             YearRangeSlider(
               range: yearRange,
               onChanged: onYearRangeChanged,
+            ),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              dense: true,
+              secondary: Icon(
+                Icons.emoji_events,
+                color: oscarOnly
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.white54,
+              ),
+              title: const Text('Oscar winners only'),
+              subtitle: const Text(
+                'Narrow to Academy Award winning titles',
+                style: TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              value: oscarOnly,
+              onChanged: onOscarChanged,
             ),
             SwitchListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),

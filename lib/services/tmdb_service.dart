@@ -101,6 +101,7 @@ class TmdbService {
   Future<Map<String, dynamic>> discoverPaged({
     required String mediaType,
     List<int> genreIds = const [],
+    List<int> keywordIds = const [],
     int? minYear,
     int? maxYear,
     int? minRuntime,
@@ -135,6 +136,11 @@ class TmdbService {
         'vote_count.gte': '$minVoteCount',
       };
       if (ids.isNotEmpty) p['with_genres'] = ids.join('|');
+      // Keywords (e.g. TMDB's "oscar-winning-film" keyword 210024) are
+      // preserved across every fallback rung — dropping them would defeat
+      // the whole point of the filter (e.g. an Oscar-only query that fell
+      // back to "all genres" would suddenly show non-Oscar fare).
+      if (keywordIds.isNotEmpty) p['with_keywords'] = keywordIds.join(',');
       if (withYear && minYear != null) p[dateGte] = '$minYear-01-01';
       if (withYear && maxYear != null) p[dateLte] = '$maxYear-12-31';
       // Runtime bounds are server-side filtered by TMDB — the only way to

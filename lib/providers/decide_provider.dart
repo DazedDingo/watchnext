@@ -1,3 +1,5 @@
+import 'dart:math' show Random;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recommendation.dart';
@@ -12,6 +14,21 @@ import 'tmdb_provider.dart';
 final decideServiceProvider = Provider<DecideService>((_) => DecideService());
 
 enum DecidePhase { loading, negotiate, pick, compromise, tiebreak, decided }
+
+/// Decades the "Surprise me" exploratory rung samples from. Excludes the
+/// current decade — trending and the user's own watchlist already cover
+/// recent content; this rung's job is to surface older catalog titles for
+/// negotiation when neither side is biting on what's on screen.
+const List<(int, int)> kExploratoryDecades = [
+  (1970, 1979),
+  (1980, 1989),
+  (1990, 1999),
+  (2000, 2009),
+  (2010, 2019),
+];
+
+(int, int) _randomDecade() =>
+    kExploratoryDecades[Random().nextInt(kExploratoryDecades.length)];
 
 /// Minimal candidate shape the Decide screen works with. Wraps either a
 /// `WatchlistItem` or a TMDB trending row behind the same fields so the rest
@@ -140,12 +157,18 @@ class DecideSessionState {
 }
 
 class DecideController extends StateNotifier<DecideSessionState> {
-  DecideController(this._tmdb, this._recs, this._householdId)
-      : super(const DecideSessionState());
+  DecideController(
+    this._tmdb,
+    this._recs,
+    this._householdId, {
+    (int, int) Function()? decadePicker,
+  })  : _pickDecade = decadePicker ?? _randomDecade,
+        super(const DecideSessionState());
 
   final TmdbService _tmdb;
   final RecommendationsService _recs;
   final String? _householdId;
+  final (int, int) Function() _pickDecade;
 
   /// Builds the negotiate candidate pool from the shared watchlist, topped up
   /// with TMDB trending if the watchlist has fewer than 5 items.
@@ -416,6 +439,94 @@ class DecideController extends StateNotifier<DecideSessionState> {
       excluded: exclude,
       clearError: true,
     );
+  }
+
+  /// "Surprise me" reroll. Replaces the negotiate pool with a fresh batch
+  /// from a randomly-sampled older decade via TMDB `/discover`. Different
+  /// from [rerollCandidates], which only ever pulls from watchlist + this
+  /// week's trending — that path keeps showing the same current-year fare
+  /// neither user is biting on. Exploratory deliberately fishes outside
+  /// that pool so negotiation has fresh faces to react to.
+  ///
+  /// Opt-in only (button-driven from the Negotiate UI). Excludes the
+  /// existing pool + watched titles so the user actually sees something new.
+  /// Falls back to leaving the current pool intact + an error if TMDB
+  /// returns nothing for the chosen decade.
+  Future<void> rerollExploratory({
+    Set<String> watchedKeys = const {},
+  }) async {
+    final exclude = {
+      ...state.excluded,
+      ...watchedKeys,
+      ...state.candidates.map((c) => c.key),
+    };
+
+    final (minYear, maxYear) = _pickDecade();
+
+    try {
+      // Movies need vote_count.gte=300 to skip forgotten 70s/80s catalog
+      // filler; TV at the same threshold returns almost nothing in older
+      // decades, so it gets a lower floor.
+      final results = await Future.wait([
+        _tmdb.discoverPaged(
+          mediaType: 'movie',
+          minYear: minYear,
+          maxYear: maxYear,
+          minVoteCount: 300,
+          poolFloor: 15,
+          maxPages: 2,
+        ),
+        _tmdb.discoverPaged(
+          mediaType: 'tv',
+          minYear: minYear,
+          maxYear: maxYear,
+          minVoteCount: 100,
+          poolFloor: 15,
+          maxPages: 2,
+        ),
+      ]);
+
+      final movies = (results[0]['results'] as List? ?? const [])
+          .cast<Map<String, dynamic>>();
+      final tv = (results[1]['results'] as List? ?? const [])
+          .cast<Map<String, dynamic>>();
+
+      // Interleave so a TV-light decade doesn't crowd out the pool with all
+      // movies (or vice versa). Negotiation is more interesting with mix.
+      final pool = <DecideCandidate>[];
+      final maxLen = movies.length > tv.length ? movies.length : tv.length;
+      for (var i = 0; i < maxLen; i++) {
+        if (i < movies.length) {
+          pool.add(DecideCandidate.fromTmdb(movies[i],
+              fallbackMediaType: 'movie', source: 'discover'));
+        }
+        if (i < tv.length) {
+          pool.add(DecideCandidate.fromTmdb(tv[i],
+              fallbackMediaType: 'tv', source: 'discover'));
+        }
+      }
+
+      final fresh = pool.where((c) => !exclude.contains(c.key)).take(5).toList();
+
+      if (fresh.isEmpty) {
+        state = state.copyWith(
+          excluded: exclude,
+          error: 'No surprise titles found for ${minYear}s — try shuffle.',
+        );
+        return;
+      }
+
+      state = state.copyWith(
+        candidates: fresh,
+        excluded: exclude,
+        clearError: true,
+      );
+    } catch (_) {
+      state = state.copyWith(
+        excluded: exclude,
+        error: 'Couldn\'t reach TMDB for surprise titles.',
+      );
+    }
   }
 
   /// "Roll again" on the Decided screen. Keeps the current session (picks,

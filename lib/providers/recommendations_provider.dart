@@ -6,6 +6,7 @@ import '../services/recommendations_service.dart';
 import 'genre_filter_provider.dart';
 import 'household_provider.dart';
 import 'media_type_filter_provider.dart';
+import 'oscar_filter_provider.dart';
 import 'runtime_filter_provider.dart';
 import 'watchlist_provider.dart';
 import 'year_filter_provider.dart';
@@ -54,6 +55,7 @@ final refreshRecommendationsProvider =
   final year = ref.read(yearRangeProvider);
   final runtime = ref.read(runtimeFilterProvider);
   final mediaType = ref.read(mediaTypeFilterProvider);
+  final oscarOnly = ref.read(oscarFilterProvider);
   await service.refresh(
     householdId,
     watchlist: watchlist,
@@ -61,6 +63,7 @@ final refreshRecommendationsProvider =
     yearRange: year,
     runtimeBucket: runtime,
     mediaTypeFilter: mediaType,
+    oscarOnly: oscarOnly,
     forceTasteProfile: force,
   );
 });
