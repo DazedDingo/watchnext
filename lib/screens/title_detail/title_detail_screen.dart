@@ -131,8 +131,12 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     }
   }
 
-  Future<void> _toggleWatched(Map<String, dynamic> d, {required bool currentlyWatched}) async {
-    if (_watchedBusy) return;
+  Future<void> _setWatchStatus(
+    Map<String, dynamic> d, {
+    required _WatchStatus target,
+    required _WatchStatus current,
+  }) async {
+    if (_watchedBusy || target == current) return;
     setState(() => _watchedBusy = true);
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -140,22 +144,50 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
       if (!mounted || uid == null || householdId == null) return;
       final svc = ref.read(watchEntryServiceProvider);
       final mt = widget.mediaType == 'movie' ? 'movie' : 'tv';
-      if (currentlyWatched) {
-        await svc.unmarkWatched(
-          householdId: householdId, uid: uid,
-          mediaType: mt, tmdbId: widget.tmdbId,
-        );
-      } else {
-        await svc.markWatched(
-          householdId: householdId, uid: uid,
-          mediaType: mt, tmdbId: widget.tmdbId,
-          details: d,
-        );
+      String message;
+      switch (target) {
+        case _WatchStatus.notWatched:
+          // Coming from "watched" → clear watched_by[uid].
+          // Coming from "watching" → clear in_progress_status.
+          if (current == _WatchStatus.watched) {
+            await svc.unmarkWatched(
+              householdId: householdId, uid: uid,
+              mediaType: mt, tmdbId: widget.tmdbId,
+            );
+          }
+          if (current == _WatchStatus.watching) {
+            await svc.unmarkWatching(
+              householdId: householdId, mediaType: mt, tmdbId: widget.tmdbId,
+            );
+          }
+          message = 'Marked as unwatched';
+          break;
+        case _WatchStatus.watching:
+          await svc.markWatching(
+            householdId: householdId, uid: uid,
+            mediaType: mt, tmdbId: widget.tmdbId,
+            details: d,
+          );
+          message = 'Marked as watching';
+          break;
+        case _WatchStatus.watched:
+          await svc.markWatched(
+            householdId: householdId, uid: uid,
+            mediaType: mt, tmdbId: widget.tmdbId,
+            details: d,
+          );
+          // Finishing a title also clears any in-progress flag.
+          if (current == _WatchStatus.watching) {
+            await svc.unmarkWatching(
+              householdId: householdId, mediaType: mt, tmdbId: widget.tmdbId,
+            );
+          }
+          message = 'Marked as watched';
+          break;
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(currentlyWatched ? 'Marked as unwatched' : 'Marked as watched'),
-        ));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (e) {
       if (mounted) {
@@ -408,6 +440,11 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     final myPredEntry = uid != null ? prediction?.entryFor(uid) : null;
     final watchedByMe = uid != null && (watchEntry?.watchedBy[uid] ?? false);
     final hasWatched = watchedByMe;
+    final watchStatus = watchedByMe
+        ? _WatchStatus.watched
+        : (watchEntry?.inProgressStatus == 'watching'
+            ? _WatchStatus.watching
+            : _WatchStatus.notWatched);
     // Show Predict button when: not yet watched AND no prediction submitted yet.
     final canPredict = !hasWatched && myPredEntry == null;
     // Show Reveal button when: user predicted (not skipped), has rated, hasn't seen reveal.
@@ -491,10 +528,15 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                       currentSolo: mySoloEntry,
                     ),
                   ),
-                  _WatchedButton(
-                    watched: watchedByMe,
+                  _WatchStatusControl(
+                    mediaType: widget.mediaType,
+                    status: watchStatus,
                     busy: _watchedBusy,
-                    onTap: () => _toggleWatched(d, currentlyWatched: watchedByMe),
+                    onSelect: (target) => _setWatchStatus(
+                      d,
+                      target: target,
+                      current: watchStatus,
+                    ),
                   ),
                   FilledButton.tonalIcon(
                     icon: const Icon(Icons.star_outline),
@@ -754,32 +796,70 @@ class _WatchlistButton extends StatelessWidget {
   }
 }
 
-// ─── Mark-as-watched button ──────────────────────────────────────────────────
+// ─── Watch-status control ────────────────────────────────────────────────────
 
-class _WatchedButton extends StatelessWidget {
-  final bool watched;
+enum _WatchStatus { notWatched, watching, watched }
+
+class _WatchStatusControl extends StatelessWidget {
+  final String mediaType;
+  final _WatchStatus status;
   final bool busy;
-  final VoidCallback onTap;
+  final ValueChanged<_WatchStatus> onSelect;
 
-  const _WatchedButton({
-    required this.watched,
+  const _WatchStatusControl({
+    required this.mediaType,
+    required this.status,
     required this.busy,
-    required this.onTap,
+    required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (watched) {
-      return OutlinedButton.icon(
-        icon: const Icon(Icons.check_circle),
-        label: const Text('Watched'),
-        onPressed: busy ? null : onTap,
+    // Movies only have a binary state — "Watching" isn't meaningful for a
+    // single 90-120min sitting, so keep the simple toggle there.
+    if (mediaType != 'tv') {
+      if (status == _WatchStatus.watched) {
+        return OutlinedButton.icon(
+          icon: const Icon(Icons.check_circle),
+          label: const Text('Watched'),
+          onPressed: busy ? null : () => onSelect(_WatchStatus.notWatched),
+        );
+      }
+      return FilledButton.tonalIcon(
+        icon: const Icon(Icons.visibility_outlined),
+        label: const Text('Mark watched'),
+        onPressed: busy ? null : () => onSelect(_WatchStatus.watched),
       );
     }
-    return FilledButton.tonalIcon(
-      icon: const Icon(Icons.visibility_outlined),
-      label: const Text('Mark watched'),
-      onPressed: busy ? null : onTap,
+    return SegmentedButton<_WatchStatus>(
+      segments: const [
+        ButtonSegment(
+          value: _WatchStatus.notWatched,
+          icon: Icon(Icons.radio_button_unchecked, size: 16),
+          label: Text('Not'),
+        ),
+        ButtonSegment(
+          value: _WatchStatus.watching,
+          icon: Icon(Icons.play_circle_outline, size: 16),
+          label: Text('Watching'),
+        ),
+        ButtonSegment(
+          value: _WatchStatus.watched,
+          icon: Icon(Icons.check_circle, size: 16),
+          label: Text('Watched'),
+        ),
+      ],
+      selected: {status},
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+      ),
+      onSelectionChanged: busy
+          ? null
+          : (sel) {
+              if (sel.isEmpty) return;
+              onSelect(sel.first);
+            },
     );
   }
 }

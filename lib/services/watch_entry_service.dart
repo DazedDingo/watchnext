@@ -71,10 +71,12 @@ class WatchEntryService {
       return;
     }
 
-    await ref.set({
+    // Dot notation is only honoured by update(); set(merge:true) would store
+    // the literal key "watched_by.<uid>" with a dot in the name.
+    await ref.update({
       'watched_by.$uid': true,
       'last_watched_at': Timestamp.fromDate(now),
-    }, SetOptions(merge: true));
+    });
   }
 
   /// Clears `watched_by[uid]`. Leaves the entry in place because the partner
@@ -86,8 +88,84 @@ class WatchEntryService {
     required int tmdbId,
   }) async {
     final entryId = WatchEntry.buildId(mediaType, tmdbId);
-    await _ref(householdId, entryId).set({
+    final ref = _ref(householdId, entryId);
+    final snap = await ref.get();
+    if (!snap.exists) return;
+    await ref.update({'watched_by.$uid': false});
+  }
+
+  /// Marks the title as currently-being-watched for the household. Used for
+  /// TV where "in progress" is a real state distinct from "watched".
+  /// Creates the entry on first write the same way `markWatched` does.
+  Future<void> markWatching({
+    required String householdId,
+    required String uid,
+    required String mediaType,
+    required int tmdbId,
+    required Map<String, dynamic> details,
+  }) async {
+    final entryId = WatchEntry.buildId(mediaType, tmdbId);
+    final ref = _ref(householdId, entryId);
+    final existing = await ref.get();
+    final now = DateTime.now();
+
+    if (!existing.exists) {
+      final title =
+          (details['title'] ?? details['name']) as String? ?? 'Untitled';
+      final dateStr =
+          (details['release_date'] ?? details['first_air_date']) as String?;
+      final year = (dateStr == null || dateStr.isEmpty)
+          ? null
+          : int.tryParse(dateStr.split('-').first);
+      final runtime = (details['runtime'] as num?)?.toInt() ??
+          (((details['episode_run_time'] as List?)?.isNotEmpty ?? false)
+              ? ((details['episode_run_time'] as List).first as num).toInt()
+              : null);
+      final genres = ((details['genres'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((g) => g['name'] as String?)
+          .whereType<String>()
+          .toList();
+
+      final entry = WatchEntry(
+        id: entryId,
+        mediaType: mediaType,
+        tmdbId: tmdbId,
+        title: title,
+        year: year,
+        posterPath: details['poster_path'] as String?,
+        backdropPath: details['backdrop_path'] as String?,
+        runtime: runtime,
+        genres: genres,
+        overview: details['overview'] as String?,
+        firstWatchedAt: now,
+        lastWatchedAt: now,
+        watchedBy: {uid: false},
+        inProgressStatus: 'watching',
+        addedSource: 'manual',
+        addedBy: uid,
+        addedAt: now,
+      );
+      await ref.set(entry.toFirestore());
+      return;
+    }
+
+    await ref.update({
       'watched_by.$uid': false,
-    }, SetOptions(merge: true));
+      'in_progress_status': 'watching',
+    });
+  }
+
+  /// Clears the in-progress watching status without touching watched_by.
+  Future<void> unmarkWatching({
+    required String householdId,
+    required String mediaType,
+    required int tmdbId,
+  }) async {
+    final entryId = WatchEntry.buildId(mediaType, tmdbId);
+    final ref = _ref(householdId, entryId);
+    final snap = await ref.get();
+    if (!snap.exists) return;
+    await ref.update({'in_progress_status': FieldValue.delete()});
   }
 }
