@@ -91,11 +91,9 @@ class ProfileScreen extends ConsumerWidget {
           // ── Preferences ────────────────────────────────────────────────
           const _SectionHeader('Preferences'),
           ListTile(
+            dense: true,
             leading: const Icon(Icons.people_outline),
             title: const Text('Default mode'),
-            subtitle: Text(mode == ViewMode.solo
-                ? 'Solo — just my picks'
-                : 'Together — both members'),
             trailing: SegmentedButton<ViewMode>(
               selected: {mode},
               segments: const [
@@ -117,12 +115,13 @@ class ProfileScreen extends ConsumerWidget {
           const _SectionHeader('Trakt'),
           traktAsync.when(
             data: (s) => ListTile(
+              dense: true,
               leading: Icon(s.linked ? Icons.link : Icons.link_off),
               title:
                   Text(s.linked ? 'Trakt linked' : 'Link Trakt account'),
               subtitle: s.linked && s.lastSync != null
-                  ? Text('Last sync: ${DateFormat.MMMd().add_jm().format(s.lastSync!.toLocal())}')
-                  : const Text('Import history and sync ratings'),
+                  ? Text('Synced ${DateFormat.MMMd().add_jm().format(s.lastSync!.toLocal())}')
+                  : const Text('Import history, sync ratings'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => context.push('/profile/trakt'),
             ),
@@ -139,9 +138,10 @@ class ProfileScreen extends ConsumerWidget {
           // ── Help ──────────────────────────────────────────────────────
           const _SectionHeader('Feedback'),
           ListTile(
+            dense: true,
             leading: const Icon(Icons.bug_report_outlined),
             title: const Text('Report an issue'),
-            subtitle: const Text("Submit a bug or idea — Claude files it on GitHub"),
+            subtitle: const Text('Bug or idea → filed on GitHub'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/profile/report-issue'),
           ),
@@ -149,6 +149,7 @@ class ProfileScreen extends ConsumerWidget {
 
           // ── Sign out ───────────────────────────────────────────────────
           ListTile(
+            dense: true,
             leading: const Icon(Icons.logout),
             title: const Text('Sign out'),
             onTap: () async {
@@ -235,10 +236,10 @@ class _NotificationToggleState extends State<_NotificationToggle> {
   Widget build(BuildContext context) {
     if (!_loaded) return const SizedBox.shrink();
     return SwitchListTile(
+      dense: true,
       secondary: const Icon(Icons.notifications_outlined),
       title: const Text('Reveal notifications'),
-      subtitle:
-          const Text('Get notified when your prediction reveal is ready'),
+      subtitle: const Text('When a reveal is ready'),
       value: _enabled,
       onChanged: (_) {
         if (_enabled) {
@@ -345,11 +346,10 @@ class _StremioSectionState extends State<_StremioSection> {
       return Column(
         children: [
           ListTile(
+            dense: true,
             leading: const Icon(Icons.extension_outlined),
             title: const Text('Stremio addon'),
-            subtitle: const Text(
-              'Expose your shared watchlist as a Stremio catalog.',
-            ),
+            subtitle: const Text('Watchlist as a Stremio catalog'),
             trailing: _busy
                 ? const SizedBox(
                     width: 20,
@@ -453,30 +453,80 @@ class _AccentPicker extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final current = ref.watch(accentProvider);
     return ListTile(
+      dense: true,
       leading: const Icon(Icons.palette_outlined),
       title: const Text('Accent color'),
       subtitle: Text(current.label),
-      trailing: Wrap(
-        spacing: 6,
-        children: [
-          for (final a in AppAccent.values)
-            _Swatch(
-              accent: a,
-              selected: a == current,
-              onTap: () => ref.read(accentProvider.notifier).set(a),
+      trailing: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: current.seed,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white24, width: 1),
+        ),
+      ),
+      onTap: () => _AccentPickerSheet.show(context, ref),
+    );
+  }
+}
+
+class _AccentPickerSheet extends ConsumerWidget {
+  const _AccentPickerSheet();
+
+  static Future<void> show(BuildContext context, WidgetRef ref) =>
+      showModalBottomSheet(
+        context: context,
+        showDragHandle: true,
+        builder: (_) => const _AccentPickerSheet(),
+      );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(accentProvider);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Accent color',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Changes the primary swatch across the app.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-        ],
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                for (final a in AppAccent.values)
+                  _AccentOption(
+                    accent: a,
+                    selected: a == current,
+                    onTap: () {
+                      ref.read(accentProvider.notifier).set(a);
+                      Navigator.of(context).pop();
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _Swatch extends StatelessWidget {
+class _AccentOption extends StatelessWidget {
   final AppAccent accent;
   final bool selected;
   final VoidCallback onTap;
 
-  const _Swatch({
+  const _AccentOption({
     required this.accent,
     required this.selected,
     required this.onTap,
@@ -488,18 +538,40 @@ class _Swatch extends StatelessWidget {
       label: accent.label,
       selected: selected,
       button: true,
-      child: GestureDetector(
+      child: InkWell(
         onTap: onTap,
-        child: Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: accent.seed,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: selected ? Colors.white : Colors.white24,
-              width: selected ? 2.5 : 1,
-            ),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: accent.seed,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? Colors.white : Colors.white24,
+                    width: selected ? 3 : 1,
+                  ),
+                ),
+                child: selected
+                    ? const Icon(Icons.check, color: Colors.black, size: 20)
+                    : null,
+              ),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: 64,
+                child: Text(
+                  accent.label,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+            ],
           ),
         ),
       ),
