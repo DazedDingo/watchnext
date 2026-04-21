@@ -1,96 +1,109 @@
 # WatchNext
 
-A shared movie & TV recommender for two-person households. Decide what to watch, together — backed by AI recommendations that learn from both partners' taste.
+A shared movie & TV recommender for two-person households. Decide what to watch — together — backed by Trakt integration and AI recommendations that learn from both partners' taste.
 
-See [ROADMAP.md](ROADMAP.md) for the full 11-phase build plan. This repo currently contains **Phase 1: Foundation**, **Phase 2: Trakt Integration**, **Phase 3: Core UX**, and **Phase 4: Solo/Together + Share-to-Save**.
+For the authoritative phase-by-phase build status, see [ROADMAP.md](ROADMAP.md). Most of phases 1–9 are in the app today; this README is a friendly overview of what actually ships.
 
-Trakt's `client_secret` lives only in Firebase Secrets Manager (`TRAKT_CLIENT_SECRET`); the client calls Cloud Function proxies (`traktExchangeCode`, `traktRefreshToken`, `traktRevoke`) for secret-dependent operations.
+---
 
-## Phase 4 status
+## What's in the app today
 
-| Layer | Status |
-|-------|--------|
-| Solo \| Together segmented control in Home + Discover AppBars | Done |
-| Mode persisted per-device via SharedPreferences (`wn_view_mode`) | Done |
-| Recommendation doc contract (`match_score` + `match_score_solo`, `ai_blurb` + `ai_blurb_solo`) | Reserved for Phase 7 engine |
-| Android `SEND` + `text/plain` intent-filter on MainActivity | Done |
-| Share-sheet URL parser (IMDb, TMDB, Letterboxd, Google, fallback) | Done |
-| Share confirm bottom sheet → "Add to Watchlist" with `added_source: share_sheet` | Done |
-| Warm- and cold-start share listeners in `ScaffoldWithNavBar` | Done |
+### Watching
+- **Home** — Tonight's Pick hero, scored recommendations, live title search, "Surprise me", "Like these" (reuses Claude to suggest titles that fit a group of seed titles).
+- **Discover** — Trending, New Releases, Browse by Genre.
+- **Watchlist** — Shared + solo queues with in-progress "Watching" section for TV.
+- **History** — Watched / In-progress / Unrated tabs; swipe-to-rate on Unrated.
+- **Title detail** — Metadata, similar-titles carousel, watchlist + watch-status controls (2-state for movies, 3-state Not / Watching / Watched for TV), IMDb + Stremio deep links.
+- **Decide together** — Negotiate with top-5 from each member, Match / Compromise / Veto / Tiebreak flow. "Surprise me" fishes a random pre-2020 decade when nothing's landing.
+- **Predict & Rate** — 1–5 star predictions hidden from the partner until both submit; Reveal screen shows who was closer.
+- **Concierge chat** — Claude-backed conversation with full household context. Suggestions land as tappable title cards.
 
-## Phase 2 status
+### Stats & gamification
+- Compatibility %, per-user rating distributions, top genres, watch + rating streaks.
+- Twelve badges — First Watch, Century Club, Genre Explorer, Binge Master, Marathon Mode, Compromise Champ, Show Finisher, Perfect Sync, Prediction Machine, Five-Star Fan, Critic, Tagger. Server-evaluated (`gamificationUpdater` CF) with FCM push when a badge flips.
 
-| Layer | Status |
-|-------|--------|
-| Trakt OAuth 2.0 (browser flow, CSRF-protected state) | Done |
-| Token storage + automatic refresh | Done |
-| `TraktService` (history, ratings, trending, recommendations, push) | Done |
-| `TraktSyncService` — full sync + incremental sync | Done |
-| TMDB cross-ref for entry metadata | Done |
-| Per-episode watch timestamps for TV | Done |
-| App-open incremental sync (>1hr since last) | Done |
-| Unrated queue provider (show/movie level) | Done |
-| Trakt link/unlink UI in Profile | Done |
-| Trakt Client ID + Secret | **Needed — see below** |
+### Integrations
+- **Trakt** — Per-user OAuth, full + incremental sync, two-way rating push. Scope flag (shared / personal / mixed) stamps imported ratings so solo-vs-together taste profiles stay clean.
+- **Stremio** — Profile → Stremio mints a household-private install URL that exposes the shared watchlist as a Stremio catalog.
+- **Android share sheet** — Receive SEND intents from any app that shares a link; `ShareParser` resolves IMDb / TMDB / Letterboxd / Google URLs and offers a "Save to watchlist" sheet.
 
-## Phase 1 status
+### Theming
+- Dark-only Material 3 with a user-selectable accent (seven seeds — Streaming red is default; Amber, Yellow, Teal, Blue, Violet, Neon green). Profile → Preferences surfaces a colour picker; the entire ColorScheme rebuilds on change.
+- Animated `Watch**Next**` wordmark — "Next" has a continuous L→R gradient sweep in the current accent, the forward-motion nod is deliberate.
 
-| Layer | Status |
-|-------|--------|
-| Flutter project scaffold (dark-mode Material 3) | Done |
-| 5-tab bottom nav (Home • Discover • History • Stats • Profile) | Placeholder screens wired up |
-| Firebase Auth (Google Sign-In) | Done |
-| Household create / join with invite code (two-person cap) | Done |
-| Firestore security rules (household-scoped) | Done |
-| TMDB API service | Done (endpoints exposed, needs key) |
-| Cloud Functions TypeScript scaffold | Done (empty placeholder) |
-| Firebase project / Trakt / Claude / TMDB keys | **Needed — see below** |
+### Signal separation — Solo / Together
+Every screen that shows a recommendation or stat respects the segmented Solo ↔ Together control at the top. Ratings, predictions, and watchlist items carry a `context` field so the Phase 7 scoring CF can build separate taste profiles per member per context.
 
-## Tech Stack
+---
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Flutter (Dart) |
-| State management | Riverpod |
-| Routing | go_router |
-| Backend | Firebase (Auth, Firestore, Cloud Functions, Cloud Messaging) |
-| Cloud Functions | TypeScript (Node 22) |
-| Auth | Google Sign-In via Firebase Auth |
-| Movie data | TMDB API |
-| Watch tracking | Trakt API (Phase 2) |
-| Community | Reddit JSON API (Phase 7) |
-| AI | Anthropic Claude API (Phase 7) |
+## Tech stack
 
-## Getting Started
+| Layer | Tech |
+|-------|------|
+| Frontend | Flutter 3.11+ (Dart), Material 3 dark |
+| State management | Riverpod 2.5 |
+| Routing | go_router 14.2 |
+| Backend | Firebase (Auth, Firestore, Cloud Functions `europe-west2`, Messaging) |
+| Cloud Functions | Node 22 TypeScript, firebase-admin 13, Anthropic SDK 0.30 |
+| Movie data | TMDB |
+| Watch tracking | Trakt (OAuth 2.0, history / ratings / recommendations) |
+| Community | Reddit JSON (weekly scraper CF) |
+| AI | Anthropic Claude (Sonnet 4.6 for batch scoring + concierge) |
+
+---
+
+## Project structure
+
+```
+lib/
+├── main.dart                 # Firebase init + SharedPreferences + app entry
+├── app.dart                  # GoRouter routes + 6-tab flat NavigationBar
+├── firebase_options.dart     # Generated by flutterfire CLI
+├── models/                   # WatchEntry, Episode, Rating, Recommendation,
+│                             # Prediction, Decision, ConciergeTurn, WatchlistItem
+├── providers/                # Riverpod providers + StateNotifiers
+├── services/                 # auth, household, trakt, tmdb, recommendations,
+│                             # rating, watch_entry, share_parser, concierge,
+│                             # notification
+├── widgets/                  # WatchNextLogo, HelpButton, ScaffoldWithNavBar,
+│                             # GenreSheet, YearRangeSlider, AsyncErrorView
+├── utils/                    # TMDB genre map, error handling
+└── screens/                  # auth, household, home, discover, history,
+                              # stats, profile, title_detail, watchlist,
+                              # decide, reveal, rating, share_confirm,
+                              # concierge, predict, like_these
+
+functions/src/                # concierge, scoreRecommendations, tasteProfile,
+                              # stremio, redditScraper, notifications,
+                              # rescoreRecommendations, gamificationUpdater,
+                              # submitIssue / issueQueue / processIssueQueue
+firestore.rules               # Household-scoped security rules
+test/                         # 46 Dart test files (unit / widget / routing /
+                              # rules / edge-case / fuzz)
+test-rules/                   # Jest + Firebase Rules Unit Testing (E2E)
+```
+
+---
+
+## Getting started
 
 ### Prerequisites
-- Flutter SDK (^3.11) — already installed on this WSL box
-- A Firebase project with Auth + Firestore + Cloud Functions + Cloud Messaging enabled
-- TMDB API key ([themoviedb.org/settings/api](https://www.themoviedb.org/settings/api))
+- Flutter SDK (^3.11)
+- A Firebase project with Auth, Firestore, Cloud Functions, and Messaging enabled
+- Trakt application (`trakt.tv/oauth/applications`) with redirect URI `com.household.watchnext://trakt-callback`
+- TMDB API key
+- Anthropic API key
 
-### Keys you'll need to supply
+### One-time setup
 
-**Before the app will run**, you need to provide:
-
-1. **`android/app/google-services.json`** — download from Firebase Console → Project settings → Android app
-2. **`lib/firebase_options.dart`** — regenerate with:
+1. `google-services.json` → `android/app/`
+2. Regenerate `lib/firebase_options.dart`:
    ```bash
    dart pub global activate flutterfire_cli
    flutterfire configure --project=<your-firebase-project-id>
    ```
-3. **`.firebaserc`** — replace `PLACEHOLDER_FIREBASE_PROJECT_ID` with your actual project ID
-4. **TMDB API key** — passed at runtime via `--dart-define`:
-   ```bash
-   flutter run --dart-define=TMDB_API_KEY=your_tmdb_key_here
-   ```
-
-**Trakt Client ID + Secret** (Phase 2) — register an application at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications):
-
-1. **Name**: WatchNext (or anything)
-2. **Redirect URI**: `com.household.watchnext://trakt-callback`
-3. **JavaScript (CORS) origins**: leave blank — only used for browser/SPA apps
-4. **Permissions / scrobble**: leave unchecked — Phase 2 only reads history and pushes ratings, which standard OAuth tokens already cover. Enable later if/when we add live playback scrobbling.
-5. Copy the Client ID + Client Secret into `env.json`:
+3. Set the project id in `.firebaserc`.
+4. Create `env.json` (gitignored) from `env.example.json`:
    ```json
    {
      "TMDB_API_KEY": "…",
@@ -98,58 +111,54 @@ Trakt's `client_secret` lives only in Firebase Secrets Manager (`TRAKT_CLIENT_SE
      "TRAKT_CLIENT_SECRET": "…"
    }
    ```
-6. Run via `./run.sh` so the keys are injected via `--dart-define-from-file=env.json`.
-
-Keys needed for later phases:
-- Anthropic API key (Phase 7) — set as Cloud Functions secret: `firebase functions:secrets:set ANTHROPIC_API_KEY`
+5. Push Cloud Functions secrets:
+   ```bash
+   firebase functions:secrets:set TRAKT_CLIENT_SECRET
+   firebase functions:secrets:set ANTHROPIC_API_KEY
+   firebase functions:secrets:set TMDB_API_KEY
+   ```
 
 ### Run locally
+
 ```bash
-flutter pub get
-flutter run --dart-define=TMDB_API_KEY=xxx
+./run.sh                       # wraps flutter run with --dart-define-from-file=env.json
 ```
 
-### Deploy Firestore rules + Cloud Functions
+### Test
+
+```bash
+./test.sh                      # full matrix: analyze + tests + tsc + eslint + jest + rules
+flutter test                   # Dart unit/widget/routing/rules/edge-case/fuzz tests only
+```
+
+### Deploy
+
 ```bash
 firebase deploy --only firestore:rules
 cd functions && npm install && cd ..
 firebase deploy --only functions
 ```
 
-## Project Structure
+---
 
-```
-lib/
-├── main.dart              # App entry + Firebase init
-├── app.dart               # Router + bottom nav shell
-├── firebase_options.dart  # Regenerated by flutterfire CLI
-├── theme/                 # Dark-only Material 3 theme
-├── models/                # Data models (added per phase)
-├── providers/             # Riverpod providers
-├── services/              # Firebase / TMDB / Trakt / Claude clients
-└── screens/
-    ├── auth/              # Login
-    ├── household/         # Create / join via invite code
-    ├── home/              # Tonight's Pick (Phase 7)
-    ├── discover/          # Collections + trending (Phase 7)
-    ├── history/           # Watched / In Progress / Unrated (Phase 3)
-    ├── stats/             # Analytics dashboard (Phase 9)
-    ├── profile/           # Settings + invite code
-    └── shared/            # Reusable widgets
+## Secret handling
 
-functions/src/             # Cloud Functions (empty scaffold)
-firestore.rules            # Household-scoped security rules
-firestore.indexes.json     # Composite indexes (empty for now)
-firebase.json              # Firebase config
-```
+- `env.json` is gitignored; the template is `env.example.json`.
+- Trakt `client_secret` lives **only** in Firebase Secrets Manager — the client calls `traktExchangeCode` / `traktRefreshToken` / `traktRevoke` CF proxies for any secret-dependent operation.
+- TMDB + Anthropic keys are Cloud Functions secrets too (Stremio addon + concierge both need TMDB server-side for imdb lookup / title resolution).
+- Debug keystore pinned in `android/app/build.gradle` so the SHA-1 in Google Sign-In config stays stable across checkouts.
 
-## Security notes
+---
 
-- Firestore rules scope all reads/writes to verified household membership.
-- Two-person cap enforced in `HouseholdService.joinByInviteCode` (see `lib/services/household_service.dart`).
-- `google-services.json`, `.env`, `local.properties` are gitignored. Never commit secrets.
-- Trakt OAuth tokens (Phase 2) will be stored encrypted on the member document.
+## Security model
+
+- Every Firestore read/write is scoped to verified household membership via `isMember(householdId)`.
+- Two-person cap enforced client-side in `HouseholdService.joinByInviteCode`.
+- Stremio tokens (`/stremioTokens/{token}`) and Rescore / Issue / Rules queue docs are admin-SDK-only.
+- Firestore rules live in `firestore.rules`; the 43-test E2E suite in `test-rules/` exercises them against the emulator.
+
+---
 
 ## License
 
-This project is provided as-is for personal use.
+Personal use.

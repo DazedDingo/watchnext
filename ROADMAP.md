@@ -1,7 +1,7 @@
 # WatchNext — Build Roadmap
 
 Source of truth for the full 11-phase build plan from the original design spec.
-**Status as of 2026-04-19** audited from the live codebase. Each phase marked
+**Status as of 2026-04-21** audited from the live codebase. Each phase marked
 Shipped ✅ / Partial 🟡 / Not started ⬜ with explicit gaps listed where the
 shipped implementation diverges from the original intent.
 
@@ -40,7 +40,7 @@ For the authoritative design spec (screens, data model, flows, gamification, all
 - History screen — Watched / In progress / Unrated tabs, swipe-to-rate on Unrated.
 - Rating flow modal sheet — 1–5 stars + tag chips + note. Movie/show/season/episode levels. Pushes to Trakt on save when linked.
 - Watchlist screen — shared queue, swipe to remove, tap → title detail.
-- Title detail screen — backdrop, poster, metadata, add/remove watchlist, rate button, household ratings list.
+- Title detail screen — backdrop, poster, metadata, add/remove watchlist, rate button, household ratings list, and a manual watch-status control. Movies get a 2-state Mark-watched toggle; TV gets a 3-state `Not / Watching / Watched` SegmentedButton that drives `WatchEntryService.markWatching` / `markWatched` / `unmarkWatching` / `unmarkWatched` for users who aren't Trakt-linked.
 - Home screen assembly now lives in Phase 7 (Tonight's Pick, mood, rec list); Phase 3's placeholder is superseded.
 - Real-time Firestore listeners via Riverpod StreamProviders.
 
@@ -203,6 +203,8 @@ scorer and Phase 9 stats depend on, so they come before any new feature work.
 
 - [x] **Deep-link from title detail** — shipped 2026-04-20. `stremio:///detail/{type}/{imdb_id}` button on the title screen with web fallback.
 - [x] **WatchNext-as-Stremio-addon (watchlist catalog)** — shipped 2026-04-20. `functions/src/stremio.ts` exposes an HTTP endpoint implementing the Stremio addon protocol (manifest / catalog / meta). Profile → Stremio mints a per-household token via the `provisionStremioToken` callable; the resulting URL installs a household-private catalog of the shared watchlist into Stremio. Imdb ids missing from watchlist docs are resolved on demand via TMDB `external_ids` and cached back onto the doc.
+- [x] **User-selectable accent + animated WatchNext wordmark + flat nav bar** — shipped 2026-04-21. `AppAccent` enum (seven seeds, default Streaming red) drives `ColorScheme.fromSeed` at runtime via `accentProvider` (persisted under `wn_accent`). Profile → Preferences surfaces a bottom-sheet colour picker. The AppBar / splash / login logo is a single reusable `WatchNextLogo` that renders "Watch" static and "**Next**" under an animated L→R gradient ShaderMask in the current accent. Bottom navigation flattened to 56px icon-only (`labelBehavior: alwaysHide`).
+- [x] **3-state watch status on TV title detail** — shipped 2026-04-21. Title detail replaces the binary Mark-watched toggle for TV with a `Not / Watching / Watched` SegmentedButton. `WatchEntryService` grew `markWatching` + `unmarkWatching` siblings to `markWatched` + `unmarkWatched`. All four mutations route through `.update()` (never `.set(merge:true)`) so Firestore honours the `watched_by.<uid>` dot-notation path instead of creating a literal dotted key — root-causing two bugs where watched/unwatched silently no-op'd.
 - [ ] **Recommendations + Next Up catalogs** — add two more catalog ids (`wn_recs`, `wn_nextup`) sourcing from `/recommendations` (mode-aware per the caller's uid) and `watchEntries where inProgressStatus=='watching'`. Recs catalog needs per-user scoping; the token carries `uid` already, so the addon server just has to read that row.
 - [ ] **Pretty URL via Firebase Hosting** — today the install URL is the raw CF endpoint. A Hosting rewrite → `https://watchnext.web.app/stremio/{token}/manifest.json` would be nicer to share and more durable if we ever migrate regions.
 - [ ] **Write-back actions** — let the user mark-watched / add-to-watchlist from inside Stremio. Stremio's protocol doesn't define these hooks on the addon side; this would have to go through a custom deep-link-out-to-the-app round-trip.
