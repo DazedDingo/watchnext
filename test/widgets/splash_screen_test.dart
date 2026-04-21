@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:watchnext/screens/auth/splash_screen.dart';
+import 'package:watchnext/widgets/watchnext_logo.dart';
 
 void main() {
   group('SplashScreen', () {
@@ -12,7 +13,9 @@ void main() {
       // in the tree from frame 1.
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('WatchNext'), findsOneWidget);
+      expect(find.byType(WatchNextLogo), findsOneWidget);
+      expect(find.text('Watch'), findsOneWidget);
+      expect(find.text('Next'), findsOneWidget);
       expect(find.text('by DazedDingo'), findsOneWidget);
     });
 

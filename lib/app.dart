@@ -7,8 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'providers/household_provider.dart';
 import 'providers/mode_provider.dart';
+import 'providers/theme_provider.dart';
 import 'providers/trakt_provider.dart';
-import 'theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/household/setup_screen.dart';
@@ -98,15 +98,16 @@ final _router = GoRouter(
   ],
 );
 
-class WatchNextApp extends StatelessWidget {
+class WatchNextApp extends ConsumerWidget {
   const WatchNextApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(themeDataProvider);
     return MaterialApp.router(
       title: 'WatchNext',
-      theme: appDarkTheme,
-      darkTheme: appDarkTheme,
+      theme: theme,
+      darkTheme: theme,
       themeMode: ThemeMode.dark,
       routerConfig: _router,
     );
@@ -229,11 +230,13 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
 
     return Scaffold(
       body: widget.child,
+      // Flat 56px icon-only bar — 6 destinations + labels wasted ~28px
+      // per row on 360dp phones. Selected-icon fill + accent indicator
+      // still communicates which tab is active.
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
-        // 6 destinations — hide labels on unselected tabs so icons stay legible
-        // on 360dp-wide phones (otherwise labels clip).
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        height: 56,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Discover'),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/watchnext_logo.dart';
 
 class LoginScreen extends ConsumerWidget {
   const LoginScreen({super.key});
@@ -71,17 +72,9 @@ class LoginScreen extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'WatchNext',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 44,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                        shadows: [
-                          Shadow(color: Colors.black87, blurRadius: 12, offset: Offset(0, 2)),
-                        ],
-                      ),
+                    const Center(
+                      child: WatchNextLogo(
+                          fontSize: 44, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 12),
                     Text(

@@ -29,6 +29,7 @@ import '../../widgets/async_error.dart';
 import '../../widgets/genre_sheet.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
+import '../../widgets/watchnext_logo.dart';
 import '../../widgets/year_range_slider.dart';
 
 const _homeHelp =
@@ -256,7 +257,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('WatchNext'),
+        title: const WatchNextLogo(),
         actions: const [
           Padding(
             padding: EdgeInsets.only(right: 4),

@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../providers/trakt_provider.dart';
 import '../../widgets/help_button.dart';
 
@@ -109,6 +110,7 @@ class ProfileScreen extends ConsumerWidget {
             ),
           ),
           const _NotificationToggle(),
+          const _AccentPicker(),
           const Divider(),
 
           // ── Trakt ──────────────────────────────────────────────────────
@@ -438,4 +440,69 @@ class _SectionHeader extends StatelessWidget {
               ?.copyWith(letterSpacing: 1.2),
         ),
       );
+}
+
+// ---------------------------------------------------------------------------
+// Accent picker — recolors the Material 3 ColorScheme seed app-wide
+// ---------------------------------------------------------------------------
+
+class _AccentPicker extends ConsumerWidget {
+  const _AccentPicker();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(accentProvider);
+    return ListTile(
+      leading: const Icon(Icons.palette_outlined),
+      title: const Text('Accent color'),
+      subtitle: Text(current.label),
+      trailing: Wrap(
+        spacing: 6,
+        children: [
+          for (final a in AppAccent.values)
+            _Swatch(
+              accent: a,
+              selected: a == current,
+              onTap: () => ref.read(accentProvider.notifier).set(a),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  final AppAccent accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _Swatch({
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: accent.label,
+      selected: selected,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: accent.seed,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? Colors.white : Colors.white24,
+              width: selected ? 2.5 : 1,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
