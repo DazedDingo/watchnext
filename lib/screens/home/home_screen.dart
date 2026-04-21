@@ -205,11 +205,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((r) => !r.genres.contains('Animation'))
             .toList();
 
+    // Curated-source filter — strict: only recs a past discover pass tagged
+    // with the matching curator survive. Mirrors the Oscar contract. Stale
+    // non-Criterion recs in the pool would otherwise leak through under a
+    // Criterion filter because the filter scopes TMDB server-side, not the
+    // existing Firestore pool.
+    final curatorFiltered = curatedSource == CuratedSource.none
+        ? animationFiltered
+        : animationFiltered
+            .where((r) => r.curator == curatedSource.name)
+            .toList();
+
     // Search filter — trimmed case-insensitive substring on title.
     final q = _search.trim().toLowerCase();
     final searchFiltered = q.isEmpty
-        ? animationFiltered
-        : animationFiltered
+        ? curatorFiltered
+        : curatorFiltered
             .where((r) => r.title.toLowerCase().contains(q))
             .toList();
 

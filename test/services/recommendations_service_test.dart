@@ -1139,6 +1139,107 @@ void main() {
     });
   });
 
+  group('buildCandidates — curator tagging', () {
+    test('stamps curator only on discover rows when discoverCurator set', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: const {
+          'results': [
+            {'id': 1, 'title': 'Crit', 'release_date': '1970-01-01'},
+          ],
+        },
+        trendingMoviesPayload: const {
+          'results': [
+            {'id': 2, 'title': 'Hot', 'release_date': '2025-01-01'},
+          ],
+        },
+        discoverCurator: 'criterion',
+      );
+      final crit = out.firstWhere((c) => c['tmdb_id'] == 1);
+      final hot = out.firstWhere((c) => c['tmdb_id'] == 2);
+      expect(crit['curator'], 'criterion');
+      expect(hot.containsKey('curator'), isFalse,
+          reason: 'baseline rows must not carry a curator tag');
+    });
+
+    test('omits curator field entirely when discoverCurator is empty', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverMoviesPayload: const {
+          'results': [
+            {'id': 1, 'title': 'Plain', 'release_date': '2020-01-01'},
+          ],
+        },
+      );
+      expect(out.first.containsKey('curator'), isFalse);
+    });
+  });
+
+  group('writeCandidateDocs — curator flag stickiness', () {
+    test('writes curator on a fresh candidate', () async {
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db);
+      const hh = 'h1';
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Seven Samurai',
+          'curator': 'criterion',
+        },
+      ]);
+      final doc =
+          await db.doc('households/$hh/recommendations/movie:1').get();
+      expect(doc.data()!['curator'], 'criterion');
+    });
+
+    test('preserves existing curator when re-written without the field',
+        () async {
+      // Real-world sequence: Criterion refresh tags movie:1. Next refresh has
+      // the curator toggle off, so movie:1 comes through trending without the
+      // curator key. Merge semantics must leave `curator='criterion'` intact.
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db);
+      const hh = 'h1';
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Seven Samurai',
+          'curator': 'criterion',
+        },
+      ]);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'Seven Samurai',
+          // no curator key this time
+        },
+      ]);
+      final doc =
+          await db.doc('households/$hh/recommendations/movie:1').get();
+      expect(doc.data()!['curator'], 'criterion');
+    });
+
+    test('ignores empty-string curator (baseline rows)', () async {
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db);
+      const hh = 'h1';
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 1,
+          'title': 'x',
+          'curator': '',
+        },
+      ]);
+      final doc =
+          await db.doc('households/$hh/recommendations/movie:1').get();
+      expect(doc.data()!.containsKey('curator'), isFalse);
+    });
+  });
+
   group('buildCandidates — fuzz: every flag combo is crash-free', () {
     // Regression guard: exhaustively exercise the boolean/payload combinations
     // the service composes when the user stacks filters. A regression that

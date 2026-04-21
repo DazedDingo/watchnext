@@ -250,6 +250,9 @@ class RecommendationsService {
       discoverMoviesPayload: discoverMovies,
       discoverTvPayload: discoverTv,
       discoverIsOscar: oscarOnly,
+      discoverCurator: curatedSource == CuratedSource.none
+          ? ''
+          : curatedSource.name,
       excludeAnimation:
           excludeAnimation && !genreFilters.contains('Animation'),
       tmdbCap: tmdbCap,
@@ -321,6 +324,13 @@ class RecommendationsService {
         // `is_oscar_winner=true` untouched.
         if (c['is_oscar_winner'] == true) {
           data['is_oscar_winner'] = true;
+        }
+        // Same sticky pattern for the curator tag — only write when this
+        // batch's discover pass confirmed the curator. Baseline rows omit
+        // the field so a prior `curator: 'criterion'` survives the merge.
+        final curator = c['curator'];
+        if (curator is String && curator.isNotEmpty) {
+          data['curator'] = curator;
         }
         if (!existingIds.contains(key)) {
           // Seed default score fields only on first write — protects any
@@ -396,6 +406,7 @@ List<Map<String, dynamic>> buildCandidates({
   Map<String, dynamic> discoverMoviesPayload = const {},
   Map<String, dynamic> discoverTvPayload = const {},
   bool discoverIsOscar = false,
+  String discoverCurator = '',
   bool excludeAnimation = false,
   int tmdbCap = 20,
   int discoverCap = 40,
@@ -448,16 +459,16 @@ List<Map<String, dynamic>> buildCandidates({
   // also happens to be trending wins the `is_oscar_winner` tag instead of
   // getting silently re-labelled as `source: 'trending'` by the dedup. The
   // user-narrowed query is more informative than a generic trending row.
-  final tmdbSources = <(Map<String, dynamic>, String, String, int, bool)>[
-    (discoverMoviesPayload, 'movie', 'discover', discoverCap, discoverIsOscar),
-    (discoverTvPayload, 'tv', 'discover', discoverCap, discoverIsOscar),
-    (trendingMoviesPayload, 'movie', 'trending', tmdbCap, false),
-    (trendingTvPayload, 'tv', 'trending', tmdbCap, false),
-    (topRatedMoviesPayload, 'movie', 'top_rated', tmdbCap, false),
-    (topRatedTvPayload, 'tv', 'top_rated', tmdbCap, false),
+  final tmdbSources = <(Map<String, dynamic>, String, String, int, bool, String)>[
+    (discoverMoviesPayload, 'movie', 'discover', discoverCap, discoverIsOscar, discoverCurator),
+    (discoverTvPayload, 'tv', 'discover', discoverCap, discoverIsOscar, discoverCurator),
+    (trendingMoviesPayload, 'movie', 'trending', tmdbCap, false, ''),
+    (trendingTvPayload, 'tv', 'trending', tmdbCap, false, ''),
+    (topRatedMoviesPayload, 'movie', 'top_rated', tmdbCap, false, ''),
+    (topRatedTvPayload, 'tv', 'top_rated', tmdbCap, false, ''),
   ];
 
-  for (final (payload, defaultMediaType, source, cap, isOscar) in tmdbSources) {
+  for (final (payload, defaultMediaType, source, cap, isOscar, curator) in tmdbSources) {
     final rows = (payload['results'] as List? ?? const [])
         .cast<Map<String, dynamic>>();
     for (final m in rows.take(cap)) {
@@ -494,6 +505,10 @@ List<Map<String, dynamic>> buildCandidates({
       // omitted so `writeCandidateDocs` doesn't reset a previously-set
       // `is_oscar_winner=true` on a row that's now coming through trending.
       if (isOscar) row['is_oscar_winner'] = true;
+      // Curator tag — same sticky-on-merge pattern as oscar. A row that came
+      // through a Criterion discover carries `curator: 'criterion'`; baseline
+      // rows carry nothing and the merge leaves any existing tag alone.
+      if (curator.isNotEmpty) row['curator'] = curator;
       // Runtime comes through on discover payloads when the service stamped
       // a synthetic value (server confirmed in-bounds via with_runtime.*).
       // Trending / top-rated don't carry runtime, so the key stays absent

@@ -26,6 +26,11 @@ class Recommendation {
   /// any past discover pass. Sticky: once true in Firestore, future writes
   /// don't reset it (a movie doesn't un-win an Oscar).
   final bool isOscarWinner;
+  /// Which curated list (if any) tagged this title on a past discover pass —
+  /// e.g. 'criterion'. Empty string when the row came through baseline
+  /// trending/top_rated or a non-curator discover. Used by the Home client-
+  /// side filter so a Criterion pool doesn't leak stale non-Criterion recs.
+  final String curator;
   final DateTime? generatedAt;
 
   const Recommendation({
@@ -44,6 +49,7 @@ class Recommendation {
     this.source = 'unknown',
     this.scored = false,
     this.isOscarWinner = false,
+    this.curator = '',
     this.generatedAt,
   });
 
@@ -81,6 +87,7 @@ class Recommendation {
       source: d['source'] as String? ?? 'unknown',
       scored: d['scored'] as bool? ?? false,
       isOscarWinner: d['is_oscar_winner'] as bool? ?? false,
+      curator: d['curator'] as String? ?? '',
       generatedAt: (d['generated_at'] as Timestamp?)?.toDate(),
     );
   }
