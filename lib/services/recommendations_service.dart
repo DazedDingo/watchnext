@@ -6,8 +6,10 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/recommendation.dart';
 import '../models/watchlist_item.dart';
+import '../providers/curated_source_provider.dart';
 import '../providers/media_type_filter_provider.dart';
 import '../providers/runtime_filter_provider.dart';
+import '../providers/sort_mode_provider.dart';
 import '../providers/year_filter_provider.dart';
 import '../utils/tmdb_genres.dart';
 import 'tmdb_service.dart';
@@ -128,6 +130,8 @@ class RecommendationsService {
     MediaTypeFilter? mediaTypeFilter,
     bool oscarOnly = false,
     bool excludeAnimation = false,
+    SortMode sortMode = SortMode.topRated,
+    CuratedSource curatedSource = CuratedSource.none,
     bool forceTasteProfile = false,
   }) async {
     List<Map<String, dynamic>> redditRows = const [];
@@ -142,14 +146,19 @@ class RecommendationsService {
       // Best-effort; no Reddit data is fine.
     }
 
-    // Baseline four sources are always fetched — they give us a broad pool
-    // even when the user hasn't picked filters.
-    final baseline = await Future.wait([
-      _safeTmdb(() => _tmdb.trendingMovies()),
-      _safeTmdb(() => _tmdb.trendingTv()),
-      _safeTmdb(() => _tmdb.topRatedMovies()),
-      _safeTmdb(() => _tmdb.topRatedTv()),
-    ]);
+    // Baseline four sources: trending + top_rated per media type. Suppressed
+    // when the user picks Underseen sort or a curated source — popularity-
+    // driven baselines would dilute those signals.
+    final suppressBaseline =
+        sortMode.suppressBaseline || curatedSource != CuratedSource.none;
+    final baseline = suppressBaseline
+        ? const <Map<String, dynamic>>[{}, {}, {}, {}]
+        : await Future.wait([
+            _safeTmdb(() => _tmdb.trendingMovies()),
+            _safeTmdb(() => _tmdb.trendingTv()),
+            _safeTmdb(() => _tmdb.topRatedMovies()),
+            _safeTmdb(() => _tmdb.topRatedTv()),
+          ]);
 
     // Discover sources fire when the user has narrowed the request in any
     // way — including picking a runtime bucket or media type. Trending/
@@ -165,7 +174,9 @@ class RecommendationsService {
         runtimeBucket != null ||
         mediaTypeFilter != null ||
         oscarOnly ||
-        excludeAnimation;
+        excludeAnimation ||
+        sortMode != SortMode.topRated ||
+        curatedSource != CuratedSource.none;
     final fetchMovies = mediaTypeFilter != MediaTypeFilter.tv;
     final fetchTv = mediaTypeFilter != MediaTypeFilter.movie;
     if (hasFilters) {
@@ -185,6 +196,9 @@ class RecommendationsService {
                 genreIds: movieIds,
                 keywordIds: keywordIds,
                 excludeGenreIds: excludeIds,
+                withCompanies: curatedSource.withCompanies,
+                sortBy: sortMode.tmdbSortBy('movie'),
+                maxVoteCount: sortMode.maxVoteCount,
                 minYear: yearRange.minYear,
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
@@ -196,6 +210,9 @@ class RecommendationsService {
                 genreIds: tvIds,
                 keywordIds: keywordIds,
                 excludeGenreIds: excludeIds,
+                withCompanies: curatedSource.withCompanies,
+                sortBy: sortMode.tmdbSortBy('tv'),
+                maxVoteCount: sortMode.maxVoteCount,
                 minYear: yearRange.minYear,
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,

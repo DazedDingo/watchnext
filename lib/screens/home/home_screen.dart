@@ -7,16 +7,17 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/curated_source_provider.dart';
 import '../../providers/exclude_animation_provider.dart';
 import '../../providers/genre_filter_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
-import '../../providers/mood_provider.dart';
 import '../../providers/oscar_filter_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
+import '../../providers/sort_mode_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
@@ -34,8 +35,7 @@ const _homeHelp =
     'WatchNext picks something to watch that works for both of you.\n\n'
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
-    '• Mood pills — one-tap presets that fill the genre picker (tap again to clear).\n'
-    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, Oscar-winners-only, and Exclude-animation live here. The header summarises what\'s active.\n'
+    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (Criterion), Oscar-winners-only, and Exclude-animation live here. The header summarises what\'s active.\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
@@ -110,6 +110,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final mediaType = ref.watch(mediaTypeFilterProvider);
     final oscarOnly = ref.watch(oscarFilterProvider);
     final excludeAnimation = ref.watch(excludeAnimationProvider);
+    final sortMode = ref.watch(sortModeProvider);
+    final curatedSource = ref.watch(curatedSourceProvider);
     final includeWatched = ref.watch(includeWatchedProvider);
     final watchedKeys = ref.watch(watchedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
@@ -136,6 +138,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (prev != curr) _scheduleAutoRefresh();
     });
     ref.listen<bool>(excludeAnimationProvider, (prev, curr) {
+      if (prev != curr) _scheduleAutoRefresh();
+    });
+    ref.listen<SortMode>(sortModeProvider, (prev, curr) {
+      if (prev != curr) _scheduleAutoRefresh();
+    });
+    ref.listen<CuratedSource>(curatedSourceProvider, (prev, curr) {
       if (prev != curr) _scheduleAutoRefresh();
     });
 
@@ -310,13 +318,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
               ),
             ),
-            _MoodPresetPills(
-              selectedGenres: selectedGenres,
-              onPick: (m) =>
-                  ref.read(modeGenreProvider.notifier).set(mode, m.genres.toSet()),
-              onClear: () =>
-                  ref.read(modeGenreProvider.notifier).clear(mode),
-            ),
             _FiltersPanel(
               selectedGenres: selectedGenres,
               runtime: runtime,
@@ -324,6 +325,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               mediaType: mediaType,
               oscarOnly: oscarOnly,
               excludeAnimation: excludeAnimation,
+              sortMode: sortMode,
+              curatedSource: curatedSource,
               includeWatched: includeWatched,
               onEditGenres: () => _openGenreSheet(context, ref, mode),
               onClearGenres: () =>
@@ -338,6 +341,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeOscarProvider.notifier).set(mode, v),
               onExcludeAnimationChanged: (v) =>
                   ref.read(modeExcludeAnimationProvider.notifier).set(mode, v),
+              onSortModeSelect: (v) =>
+                  ref.read(modeSortProvider.notifier).set(mode, v),
+              onCuratedSourceSelect: (v) =>
+                  ref.read(modeCuratedSourceProvider.notifier).set(mode, v),
               onIncludeWatchedChanged: (v) =>
                   ref.read(includeWatchedProvider.notifier).set(v),
             ),
@@ -422,6 +429,8 @@ class _FiltersPanel extends StatelessWidget {
   final MediaTypeFilter? mediaType;
   final bool oscarOnly;
   final bool excludeAnimation;
+  final SortMode sortMode;
+  final CuratedSource curatedSource;
   final bool includeWatched;
   final VoidCallback onEditGenres;
   final VoidCallback onClearGenres;
@@ -430,6 +439,8 @@ class _FiltersPanel extends StatelessWidget {
   final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
   final ValueChanged<bool> onOscarChanged;
   final ValueChanged<bool> onExcludeAnimationChanged;
+  final ValueChanged<SortMode> onSortModeSelect;
+  final ValueChanged<CuratedSource> onCuratedSourceSelect;
   final ValueChanged<bool> onIncludeWatchedChanged;
 
   const _FiltersPanel({
@@ -439,6 +450,8 @@ class _FiltersPanel extends StatelessWidget {
     required this.mediaType,
     required this.oscarOnly,
     required this.excludeAnimation,
+    required this.sortMode,
+    required this.curatedSource,
     required this.includeWatched,
     required this.onEditGenres,
     required this.onClearGenres,
@@ -447,6 +460,8 @@ class _FiltersPanel extends StatelessWidget {
     required this.onMediaTypeSelect,
     required this.onOscarChanged,
     required this.onExcludeAnimationChanged,
+    required this.onSortModeSelect,
+    required this.onCuratedSourceSelect,
     required this.onIncludeWatchedChanged,
   });
 
@@ -458,6 +473,8 @@ class _FiltersPanel extends StatelessWidget {
     if (mediaType != null) n += 1;
     if (oscarOnly) n += 1;
     if (excludeAnimation) n += 1;
+    if (sortMode != SortMode.topRated) n += 1;
+    if (curatedSource != CuratedSource.none) n += 1;
     // "Include watched" is counted as an active filter when it diverges from
     // the default (hide watched). Most users want the default, so flipping it
     // on should be visibly flagged.
@@ -486,6 +503,8 @@ class _FiltersPanel extends StatelessWidget {
         parts.add('≤$hi');
       }
     }
+    if (sortMode != SortMode.topRated) parts.add(sortMode.label);
+    if (curatedSource != CuratedSource.none) parts.add(curatedSource.label);
     if (oscarOnly) parts.add('Oscar winners');
     if (excludeAnimation) parts.add('No animation');
     if (includeWatched) parts.add('+ watched');
@@ -556,6 +575,14 @@ class _FiltersPanel extends StatelessWidget {
               selected: runtime,
               onSelect: onRuntimeSelect,
             ),
+            _SortModePills(
+              selected: sortMode,
+              onSelect: onSortModeSelect,
+            ),
+            _CuratedSourcePills(
+              selected: curatedSource,
+              onSelect: onCuratedSourceSelect,
+            ),
             YearRangeSlider(
               range: yearRange,
               onChanged: onYearRangeChanged,
@@ -608,54 +635,6 @@ class _FiltersPanel extends StatelessWidget {
             const SizedBox(height: 4),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ─── Mood preset pills ────────────────────────────────────────────────────────
-
-/// Mood pills are one-tap *presets* that populate the genre multi-select.
-/// A mood reads as "active" when the selected-genres set exactly matches its
-/// preset. Tapping an active mood clears genres; tapping an inactive one
-/// replaces the current selection. `WatchMood.custom` (empty genres) is
-/// skipped since the explicit genre picker covers that case.
-class _MoodPresetPills extends StatelessWidget {
-  final Set<String> selectedGenres;
-  final void Function(WatchMood) onPick;
-  final VoidCallback onClear;
-
-  const _MoodPresetPills({
-    required this.selectedGenres,
-    required this.onPick,
-    required this.onClear,
-  });
-
-  bool _matches(WatchMood m) {
-    if (m.genres.isEmpty) return false;
-    return selectedGenres.length == m.genres.length &&
-        m.genres.every(selectedGenres.contains);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final moods = WatchMood.values.where((m) => m.genres.isNotEmpty).toList();
-    return SizedBox(
-      height: 48,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        itemCount: moods.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final mood = moods[i];
-          final active = _matches(mood);
-          return FilterChip(
-            label: Text(mood.label),
-            selected: active,
-            onSelected: (_) => active ? onClear() : onPick(mood),
-          );
-        },
       ),
     );
   }
@@ -791,6 +770,81 @@ class _RuntimePills extends StatelessWidget {
             label: Text(bucket.label),
             selected: active,
             onSelected: (_) => onSelect(active ? null : bucket),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Sort mode pills ──────────────────────────────────────────────────────────
+
+class _SortModePills extends StatelessWidget {
+  final SortMode selected;
+  final ValueChanged<SortMode> onSelect;
+
+  const _SortModePills({required this.selected, required this.onSelect});
+
+  IconData _iconFor(SortMode m) {
+    switch (m) {
+      case SortMode.topRated:
+        return Icons.star_outline;
+      case SortMode.popularity:
+        return Icons.local_fire_department_outlined;
+      case SortMode.recent:
+        return Icons.new_releases_outlined;
+      case SortMode.underseen:
+        return Icons.search;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: SortMode.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final v = SortMode.values[i];
+          return FilterChip(
+            avatar: Icon(_iconFor(v), size: 16),
+            label: Text(v.label),
+            selected: selected == v,
+            onSelected: (_) => onSelect(v),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Curated source pills ─────────────────────────────────────────────────────
+
+class _CuratedSourcePills extends StatelessWidget {
+  final CuratedSource selected;
+  final ValueChanged<CuratedSource> onSelect;
+
+  const _CuratedSourcePills({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: CuratedSource.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final v = CuratedSource.values[i];
+          return FilterChip(
+            avatar: const Icon(Icons.collections_bookmark_outlined, size: 16),
+            label: Text(v.label),
+            selected: selected == v,
+            onSelected: (_) => onSelect(v),
           );
         },
       ),

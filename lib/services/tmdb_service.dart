@@ -103,6 +103,9 @@ class TmdbService {
     List<int> genreIds = const [],
     List<int> keywordIds = const [],
     List<int> excludeGenreIds = const [],
+    String? withCompanies,
+    String? sortBy,
+    int? maxVoteCount,
     int? minYear,
     int? maxYear,
     int? minRuntime,
@@ -133,9 +136,20 @@ class TmdbService {
       required bool withYear,
     }) {
       final p = <String, String>{
-        'sort_by': 'vote_average.desc',
+        'sort_by': sortBy ?? 'vote_average.desc',
         'vote_count.gte': '$minVoteCount',
       };
+      // Vote-count ceiling is how we implement the "Underseen" sort — TMDB
+      // has no native "hidden gems" sort, but `vote_count.lte` achieves the
+      // same effect by cutting the blockbuster tail.
+      if (maxVoteCount != null) p['vote_count.lte'] = '$maxVoteCount';
+      // Company filter (e.g. Criterion Collection distributor = 1771).
+      // Preserved across fallback rungs for the same reason as keywords —
+      // a curated-source query that drops the company constraint isn't
+      // Criterion anymore.
+      if (withCompanies != null && withCompanies.isNotEmpty) {
+        p['with_companies'] = withCompanies;
+      }
       if (ids.isNotEmpty) p['with_genres'] = ids.join('|');
       // Keywords (e.g. TMDB's "oscar-winning-film" keyword 210024) are
       // preserved across every fallback rung — dropping them would defeat

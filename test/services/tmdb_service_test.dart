@@ -822,4 +822,147 @@ void main() {
       expect(captured!.queryParameters['without_genres'], '16,99');
     });
   });
+
+  group('TmdbService.discoverPaged — sortBy override', () {
+    test('forwards sortBy param verbatim on every paginated call', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'A'},
+              ],
+              'total_pages': 3,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [28],
+        sortBy: 'popularity.desc',
+        poolFloor: 3,
+      );
+      expect(calls, isNotEmpty);
+      for (final c in calls) {
+        expect(c.queryParameters['sort_by'], 'popularity.desc',
+            reason: 'sort override must survive every retry rung');
+      }
+    });
+
+    test('defaults to vote_average.desc when sortBy omitted', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({'results': [], 'total_pages': 1}),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(mediaType: 'movie', genreIds: const [28]);
+      expect(captured!.queryParameters['sort_by'], 'vote_average.desc');
+    });
+  });
+
+  group('TmdbService.discoverPaged — maxVoteCount (Underseen)', () {
+    test('emits vote_count.lte on every rung when set', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'A'},
+              ],
+              'total_pages': 3,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        genreIds: const [28],
+        maxVoteCount: 500,
+        poolFloor: 3,
+      );
+      expect(calls, isNotEmpty);
+      for (final c in calls) {
+        expect(c.queryParameters['vote_count.lte'], '500',
+            reason: 'Underseen ceiling must survive every retry rung');
+      }
+    });
+
+    test('omits vote_count.lte when maxVoteCount null', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({'results': [], 'total_pages': 1}),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(mediaType: 'movie', genreIds: const [28]);
+      expect(captured!.queryParameters.containsKey('vote_count.lte'), isFalse);
+    });
+  });
+
+  group('TmdbService.discoverPaged — withCompanies (Criterion)', () {
+    test('forwards with_companies on every paginated call', () async {
+      final calls = <Uri>[];
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          calls.add(req.url);
+          return http.Response(
+            json.encode({
+              'results': [
+                {'id': 1, 'title': 'A'},
+              ],
+              'total_pages': 3,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(
+        mediaType: 'movie',
+        withCompanies: '1771', // Criterion
+        poolFloor: 3,
+      );
+      expect(calls, isNotEmpty);
+      for (final c in calls) {
+        expect(c.queryParameters['with_companies'], '1771',
+            reason: 'curated-source company filter must survive every rung');
+      }
+    });
+
+    test('omits with_companies when null or empty', () async {
+      Uri? captured;
+      final tmdb = TmdbService(
+        client: MockClient((req) async {
+          captured ??= req.url;
+          return http.Response(
+            json.encode({'results': [], 'total_pages': 1}),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tmdb.discoverPaged(mediaType: 'movie', genreIds: const [28]);
+      expect(captured!.queryParameters.containsKey('with_companies'), isFalse);
+    });
+  });
 }

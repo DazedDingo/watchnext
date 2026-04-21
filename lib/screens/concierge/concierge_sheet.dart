@@ -8,7 +8,6 @@ import '../../providers/concierge_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/mode_provider.dart';
-import '../../providers/mood_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
 
@@ -86,7 +85,6 @@ class _ConciergeSheetState extends ConsumerState<ConciergeSheet> {
     if (householdId == null) return;
 
     final mode = ref.read(viewModeProvider);
-    final mood = ref.read(moodProvider);
 
     _controller.clear();
     setState(() {
@@ -101,7 +99,6 @@ class _ConciergeSheetState extends ConsumerState<ConciergeSheet> {
             message: text,
             sessionId: _sessionId,
             mode: mode == ViewMode.solo ? 'solo' : 'together',
-            moodLabel: mood?.label,
             history: _history,
           );
 
