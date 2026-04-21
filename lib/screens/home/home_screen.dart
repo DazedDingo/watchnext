@@ -587,50 +587,13 @@ class _FiltersPanel extends StatelessWidget {
               range: yearRange,
               onChanged: onYearRangeChanged,
             ),
-            SwitchListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              dense: true,
-              secondary: Icon(
-                Icons.emoji_events,
-                color: oscarOnly
-                    ? Theme.of(context).colorScheme.primary
-                    : Colors.white54,
-              ),
-              title: const Text('Oscar winners only'),
-              subtitle: const Text(
-                'Narrow to Academy Award winning titles',
-                style: TextStyle(fontSize: 12, color: Colors.white54),
-              ),
-              value: oscarOnly,
-              onChanged: onOscarChanged,
-            ),
-            SwitchListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              dense: true,
-              secondary: Icon(
-                Icons.animation,
-                color: excludeAnimation
-                    ? Theme.of(context).colorScheme.primary
-                    : Colors.white54,
-              ),
-              title: const Text('Exclude animation'),
-              subtitle: const Text(
-                'Hide animated films and shows',
-                style: TextStyle(fontSize: 12, color: Colors.white54),
-              ),
-              value: excludeAnimation,
-              onChanged: onExcludeAnimationChanged,
-            ),
-            SwitchListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              dense: true,
-              title: const Text('Include watched'),
-              subtitle: const Text(
-                'Show titles you\'ve already seen in recommendations',
-                style: TextStyle(fontSize: 12, color: Colors.white54),
-              ),
-              value: includeWatched,
-              onChanged: onIncludeWatchedChanged,
+            _TogglePills(
+              oscarOnly: oscarOnly,
+              excludeAnimation: excludeAnimation,
+              includeWatched: includeWatched,
+              onOscarChanged: onOscarChanged,
+              onExcludeAnimationChanged: onExcludeAnimationChanged,
+              onIncludeWatchedChanged: onIncludeWatchedChanged,
             ),
             const SizedBox(height: 4),
           ],
@@ -816,6 +779,59 @@ class _SortModePills extends StatelessWidget {
             onSelected: (_) => onSelect(v),
           );
         },
+      ),
+    );
+  }
+}
+
+// ─── Boolean toggle pills (Oscar / No animation / Include watched) ────────────
+
+class _TogglePills extends StatelessWidget {
+  final bool oscarOnly;
+  final bool excludeAnimation;
+  final bool includeWatched;
+  final ValueChanged<bool> onOscarChanged;
+  final ValueChanged<bool> onExcludeAnimationChanged;
+  final ValueChanged<bool> onIncludeWatchedChanged;
+
+  const _TogglePills({
+    required this.oscarOnly,
+    required this.excludeAnimation,
+    required this.includeWatched,
+    required this.onOscarChanged,
+    required this.onExcludeAnimationChanged,
+    required this.onIncludeWatchedChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        children: [
+          FilterChip(
+            avatar: const Icon(Icons.emoji_events, size: 16),
+            label: const Text('Oscar winners'),
+            selected: oscarOnly,
+            onSelected: onOscarChanged,
+          ),
+          const SizedBox(width: 8),
+          FilterChip(
+            avatar: const Icon(Icons.animation, size: 16),
+            label: const Text('No animation'),
+            selected: excludeAnimation,
+            onSelected: onExcludeAnimationChanged,
+          ),
+          const SizedBox(width: 8),
+          FilterChip(
+            avatar: const Icon(Icons.visibility, size: 16),
+            label: const Text('Include watched'),
+            selected: includeWatched,
+            onSelected: onIncludeWatchedChanged,
+          ),
+        ],
       ),
     );
   }
