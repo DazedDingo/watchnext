@@ -298,33 +298,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Row(
                 children: [
-                  if (mode == ViewMode.together)
-                    FilledButton.icon(
-                      icon: const Icon(Icons.groups),
-                      label: const Text('Decide Together'),
-                      onPressed: () => context.push('/decide'),
+                  if (mode == ViewMode.together) ...[
+                    Expanded(
+                      child: _HomeAction(
+                        icon: Icons.groups,
+                        label: 'Decide',
+                        filled: true,
+                        onPressed: () => context.push('/decide'),
+                      ),
                     ),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.casino),
-                    label: const Text('Surprise me'),
-                    onPressed: available.isEmpty
-                        ? null
-                        : () {
-                            final pick = pickSurprise(available);
-                            if (pick == null) return;
-                            context.push(
-                                '/title/${pick.mediaType}/${pick.tmdbId}');
-                          },
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: _HomeAction(
+                      icon: Icons.casino,
+                      label: 'Surprise',
+                      onPressed: available.isEmpty
+                          ? null
+                          : () {
+                              final pick = pickSurprise(available);
+                              if (pick == null) return;
+                              context.push(
+                                  '/title/${pick.mediaType}/${pick.tmdbId}');
+                            },
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.group_work_outlined),
-                    label: const Text('Like these'),
-                    onPressed: () => LikeTheseSheet.show(context),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _HomeAction(
+                      icon: Icons.group_work_outlined,
+                      label: 'Like these',
+                      onPressed: () => LikeTheseSheet.show(context),
+                    ),
                   ),
                 ],
               ),
@@ -424,6 +432,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
       ),
     );
+  }
+}
+
+// ─── Home action row ──────────────────────────────────────────────────────────
+
+class _HomeAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final bool filled;
+
+  const _HomeAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      padding: WidgetStatePropertyAll(
+          const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+      minimumSize: const WidgetStatePropertyAll(Size(0, 34)),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+    final child = Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 16),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13)),
+        ),
+      ],
+    );
+    return filled
+        ? FilledButton(style: style, onPressed: onPressed, child: child)
+        : OutlinedButton(style: style, onPressed: onPressed, child: child);
   }
 }
 
