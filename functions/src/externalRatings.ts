@@ -64,18 +64,20 @@ async function fetchFromOmdb(
   imdbId: string,
   apiKey: string,
 ): Promise<ExternalRatings> {
-  if (!apiKey || apiKey.length < 4) {
-    // Guard against misconfigured secret — throw a recognizable error rather
-    // than a cryptic OMDb 401 when the key is empty.
+  // Trim whitespace — Secret Manager values pasted through a terminal
+  // commonly pick up a trailing newline, which URL-encodes to `%0A` and
+  // makes OMDb reject an otherwise-valid key as "Invalid API key!".
+  const cleanKey = apiKey.trim();
+  if (!cleanKey || cleanKey.length < 4) {
     throw new HttpsError(
       "failed-precondition",
-      `OMDB_API_KEY not configured (len=${apiKey?.length ?? 0})`,
+      `OMDB_API_KEY not configured (len=${cleanKey.length})`,
     );
   }
 
   const url = new URL(OMDB_URL);
   url.searchParams.set("i", imdbId);
-  url.searchParams.set("apikey", apiKey);
+  url.searchParams.set("apikey", cleanKey);
   url.searchParams.set("tomatoes", "true");
 
   let res: Response;

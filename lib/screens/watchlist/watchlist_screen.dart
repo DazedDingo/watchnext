@@ -33,6 +33,16 @@ const _watchlistHelp =
 
 enum _WatchedFilter { unwatched, watching, watched, all }
 
+const _watchlistSegmentStyle = ButtonStyle(
+  visualDensity: VisualDensity.compact,
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  padding: WidgetStatePropertyAll(
+    EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+  ),
+  minimumSize: WidgetStatePropertyAll(Size(0, 34)),
+  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+);
+
 class WatchlistScreen extends ConsumerStatefulWidget {
   const WatchlistScreen({super.key});
 
@@ -99,29 +109,29 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
         data: (_) {
           return Column(children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: SegmentedButton<_WatchedFilter>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(
-                      value: _WatchedFilter.unwatched,
-                      label: Text('Unwatched'),
-                      icon: Icon(Icons.visibility_off_outlined)),
-                  ButtonSegment(
-                      value: _WatchedFilter.watching,
-                      label: Text('Watching'),
-                      icon: Icon(Icons.play_circle_outline)),
-                  ButtonSegment(
-                      value: _WatchedFilter.watched,
-                      label: Text('Watched'),
-                      icon: Icon(Icons.check_circle_outline)),
-                  ButtonSegment(
-                      value: _WatchedFilter.all,
-                      label: Text('All'),
-                      icon: Icon(Icons.list_alt)),
-                ],
-                selected: {_filter},
-                onSelectionChanged: (s) => setState(() => _filter = s.first),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+              child: SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<_WatchedFilter>(
+                  style: _watchlistSegmentStyle,
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                        value: _WatchedFilter.unwatched,
+                        label: Text('Unwatched')),
+                    ButtonSegment(
+                        value: _WatchedFilter.watching,
+                        label: Text('Watching')),
+                    ButtonSegment(
+                        value: _WatchedFilter.watched,
+                        label: Text('Watched')),
+                    ButtonSegment(
+                        value: _WatchedFilter.all,
+                        label: Text('All')),
+                  ],
+                  selected: {_filter},
+                  onSelectionChanged: (s) => setState(() => _filter = s.first),
+                ),
               ),
             ),
             Expanded(
