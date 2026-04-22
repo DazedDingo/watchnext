@@ -95,6 +95,21 @@ jobs:
       - name: Rename APK
         run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/WatchNext-${{ steps.version.outputs.tag }}.apk
 
+      - name: Generate human-readable release notes
+        id: notes
+        run: |
+          # Ensure we have tag history for `git describe` to find the prev tag.
+          git fetch --tags --depth=50 origin
+          NOTES=$(python3 .github/scripts/release_notes.py)
+          # Emit as multi-line output for the next step.
+          {
+            echo "body<<__RELEASE_NOTES_EOF__"
+            echo "$NOTES"
+            echo "__RELEASE_NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+          echo "--- Release notes preview ---"
+          echo "$NOTES"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -102,7 +117,6 @@ jobs:
           name: WatchNext ${{ steps.version.outputs.name }}
           files: build/app/outputs/flutter-apk/WatchNext-${{ steps.version.outputs.tag }}.apk
           fail_on_unmatched_files: true
-          generate_release_notes: true
           body: |
             ## Install
 
@@ -112,4 +126,6 @@ jobs:
 
             ---
 
-            ### What's changed
+            ### What's new
+
+            ${{ steps.notes.outputs.body }}
