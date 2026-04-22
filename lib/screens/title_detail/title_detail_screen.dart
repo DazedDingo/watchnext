@@ -28,8 +28,7 @@ const _titleDetailHelp =
     'Everything you can do with a title lives here.\n\n'
     '• Add to watchlist — saves it so both members can see.\n'
     '• Rate — rate 1–5 stars once you\'ve watched. Trakt-linked? Ratings push automatically.\n'
-    '• Predict — guess how many stars you\'ll give it before watching, for the prediction game.\n'
-    '• See Reveal — shown when you\'ve both predicted and rated, to see who was closer.\n'
+    '• Prediction game (more-menu, "⋯") — optional. Predict stars before watching; a dot appears on the menu when a Reveal is ready.\n'
     '• Stremio — opens the title in the Stremio app so you can play it (falls back to the web player if the app isn\'t installed).\n'
     '• IMDb — opens the title in the IMDb app or website.\n'
     '• AI blurb — a one-liner from the recommender explaining why this one landed on your list.\n'
@@ -892,17 +891,12 @@ class _ActionRow extends StatelessWidget {
             label: 'Rate',
             onPressed: onRate,
           ),
-          if (canPredict)
-            pill(
-              icon: Icons.psychology_outlined,
-              label: 'Predict',
-              onPressed: onPredict,
-            ),
-          if (canReveal)
-            pill(
-              icon: Icons.emoji_events_outlined,
-              label: 'See Reveal',
-              onPressed: onReveal,
+          if (canPredict || canReveal)
+            _PredictOverflowMenu(
+              canPredict: canPredict,
+              canReveal: canReveal,
+              onPredict: onPredict,
+              onReveal: onReveal,
             ),
           if (hasImdb) ...[
             _ExternalLinkButton(
@@ -920,6 +914,85 @@ class _ActionRow extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ─── Predict / Reveal overflow menu ──────────────────────────────────────────
+
+/// Demoted entry point for the Predict "game". Predict + See Reveal used to
+/// sit as primary action pills, but the flow requires both a pre-watch
+/// commitment and a post-watch return visit — friction most sessions skip.
+/// Keeping them reachable without eating primary real estate. A small accent
+/// dot draws attention when a Reveal is actually waiting (both members have
+/// predicted + rated), which is the only state that actively wants the user.
+class _PredictOverflowMenu extends StatelessWidget {
+  final bool canPredict;
+  final bool canReveal;
+  final VoidCallback onPredict;
+  final VoidCallback onReveal;
+
+  const _PredictOverflowMenu({
+    required this.canPredict,
+    required this.canReveal,
+    required this.onPredict,
+    required this.onReveal,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return PopupMenuButton<String>(
+      tooltip: 'Prediction game',
+      padding: EdgeInsets.zero,
+      offset: const Offset(0, 36),
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.more_horiz, size: 20),
+          if (canReveal)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: cs.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
+      ),
+      itemBuilder: (_) => [
+        if (canPredict)
+          const PopupMenuItem(
+            value: 'predict',
+            child: Row(
+              children: [
+                Icon(Icons.psychology_outlined, size: 18),
+                SizedBox(width: 12),
+                Text('Predict'),
+              ],
+            ),
+          ),
+        if (canReveal)
+          const PopupMenuItem(
+            value: 'reveal',
+            child: Row(
+              children: [
+                Icon(Icons.emoji_events_outlined, size: 18),
+                SizedBox(width: 12),
+                Text('See Reveal'),
+              ],
+            ),
+          ),
+      ],
+      onSelected: (v) {
+        if (v == 'predict') onPredict();
+        if (v == 'reveal') onReveal();
+      },
     );
   }
 }
