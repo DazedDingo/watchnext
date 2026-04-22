@@ -64,14 +64,31 @@ async function fetchFromOmdb(
   imdbId: string,
   apiKey: string,
 ): Promise<ExternalRatings> {
+  if (!apiKey || apiKey.length < 4) {
+    // Guard against misconfigured secret — throw a recognizable error rather
+    // than a cryptic OMDb 401 when the key is empty.
+    throw new HttpsError(
+      "failed-precondition",
+      `OMDB_API_KEY not configured (len=${apiKey?.length ?? 0})`,
+    );
+  }
+
   const url = new URL(OMDB_URL);
   url.searchParams.set("i", imdbId);
   url.searchParams.set("apikey", apiKey);
   url.searchParams.set("tomatoes", "true");
 
-  const res = await fetch(url.toString(), {
-    headers: { "User-Agent": "watchnext/1.0" },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      headers: { "User-Agent": "watchnext/1.0" },
+    });
+  } catch (err) {
+    throw new HttpsError(
+      "internal",
+      `OMDb fetch threw: ${(err as Error).message}`,
+    );
+  }
 
   if (!res.ok) {
     throw new HttpsError(
@@ -164,7 +181,25 @@ export const fetchExternalRatings = onCall(
         });
         return snap.data();
       }
-      throw err;
+      // No stale cache: degrade to `notFound` instead of 500-ing the whole
+      // call. A transient OMDb outage or auth/quota error shouldn't break
+      // the title-detail render. We do NOT persist this negative response
+      // — next call retries from scratch so a real fix (rotate key,
+      // refresh quota) heals automatically.
+      logger.error("OMDb fetch failed (no cache fallback)", {
+        imdbId,
+        error: (err as Error).message,
+      });
+      return {
+        imdbId,
+        imdbRating: null,
+        imdbVotes: null,
+        rtRating: null,
+        metascore: null,
+        fetchedAtMs: 0,
+        source: "omdb" as const,
+        notFound: true,
+      } satisfies ExternalRatings;
     }
 
     await ref.set(fresh);

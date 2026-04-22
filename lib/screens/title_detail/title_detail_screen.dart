@@ -1415,6 +1415,25 @@ class _RatingsSourcesSection extends ConsumerWidget {
                   ),
             ),
           ],
+          // Explicit empty-state when the fetch completed but returned no
+          // external scores — either OMDb had no data (notFound) or the CF
+          // failed silently. Better than a blank row where the user wonders
+          // whether it's still loading.
+          if (!externalAsync.isLoading &&
+              imdbId != null &&
+              ext?.imdbRating == null &&
+              ext?.rtRating == null &&
+              ext?.metascore == null) ...[
+            const SizedBox(height: 6),
+            Text(
+              ext?.notFound == true
+                  ? 'No external ratings for this title.'
+                  : 'External ratings unavailable right now.',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.white38,
+                  ),
+            ),
+          ],
         ],
       ),
     );

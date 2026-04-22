@@ -1259,13 +1259,15 @@ class _RecCard extends ConsumerWidget {
     final score = rec.scoreFor(uid);
     final blurb = rec.blurbFor(uid);
 
-    // Lazy IMDb rating chip — silent when the rec doc hasn't been stamped
+    // Lazy external ratings — silent when the rec doc hasn't been stamped
     // with an imdb_id yet (the background resolver runs after Phase A) or
-    // when OMDb hasn't returned a score for this title.
+    // when OMDb hasn't returned scores for this title.
     double? imdbRating;
+    double? rtRating;
     if (rec.imdbId != null) {
       final async = ref.watch(externalRatingsProvider(rec.imdbId!));
       imdbRating = async.asData?.value?.imdbRating;
+      rtRating = async.asData?.value?.rtRating;
     }
 
     return ListTile(
@@ -1299,8 +1301,13 @@ class _RecCard extends ConsumerWidget {
           const SizedBox(width: 8),
           if (imdbRating != null) ...[
             _ImdbChip(imdbRating),
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
           ],
+          if (rtRating != null) ...[
+            _RtChip(rtRating),
+            const SizedBox(width: 6),
+          ] else if (imdbRating != null)
+            const SizedBox(width: 2),
           _ScoreBadge(score),
         ],
       ),
@@ -1362,6 +1369,50 @@ class _ImdbChip extends StatelessWidget {
           const SizedBox(width: 3),
           Text(
             rating.toStringAsFixed(1),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Rotten Tomatoes chip — red when "fresh" (≥60%), green-yellow otherwise.
+/// OMDb returns the Tomatometer (critic score) as a 0–100 int.
+class _RtChip extends StatelessWidget {
+  final double rating;
+  const _RtChip(this.rating);
+
+  @override
+  Widget build(BuildContext context) {
+    final fresh = rating >= 60;
+    final color = fresh ? const Color(0xFFFA320A) : const Color(0xFF00B04F);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: color.withValues(alpha: 0.6), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'RT',
+            style: TextStyle(
+              fontSize: 9,
+              color: color,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            '${rating.toInt()}%',
             style: const TextStyle(
               fontSize: 11,
               color: Colors.white,
