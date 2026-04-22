@@ -1,7 +1,7 @@
 name: watchnext
 description: "Shared movie & TV recommender for two-person households."
 publish_to: 'none'
-version: 0.4.62+67
+version: 0.4.63+68
 
 environment:
   sdk: ^3.11.4
@@ -41,6 +41,9 @@ dependencies:
   intl: ^0.19.0
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
+
+  # In-window YouTube trailer player on title detail
+  youtube_player_flutter: ^9.1.1
 
 dev_dependencies:
   flutter_test:

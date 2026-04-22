@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 import '../../models/rating.dart';
 import '../../models/watch_entry.dart';
@@ -577,6 +578,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                   child: Text(overview, style: Theme.of(context).textTheme.bodyMedium),
                 ),
               ],
+              _TrailerSection(details: d),
               // AI blurb from Phase 7 scoring — shown when available.
               if (rec != null) ...() {
                 final blurb = mode == ViewMode.solo
@@ -969,6 +971,119 @@ class _WatchlistScopeSheetState extends State<WatchlistScopeSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Trailer section — expandable in-window YouTube player ───────────────────
+
+/// Picks the best trailer key from TMDB's `videos.results` array.
+/// Preference order: official YouTube Trailer → any YouTube Trailer → any
+/// YouTube Teaser → any YouTube video. Returns null if nothing usable found.
+/// Exposed for unit tests.
+String? pickTrailerKey(List<dynamic>? videos) {
+  if (videos == null) return null;
+  final youTubeVideos = videos
+      .whereType<Map<String, dynamic>>()
+      .where((v) =>
+          (v['site'] as String?)?.toLowerCase() == 'youtube' &&
+          (v['key'] as String?)?.isNotEmpty == true)
+      .toList();
+  if (youTubeVideos.isEmpty) return null;
+
+  String? pick(bool Function(Map<String, dynamic>) matcher) {
+    for (final v in youTubeVideos) {
+      if (matcher(v)) return v['key'] as String;
+    }
+    return null;
+  }
+
+  return pick((v) =>
+          (v['type'] as String?) == 'Trailer' && v['official'] == true) ??
+      pick((v) => (v['type'] as String?) == 'Trailer') ??
+      pick((v) => (v['type'] as String?) == 'Teaser') ??
+      youTubeVideos.first['key'] as String?;
+}
+
+class _TrailerSection extends StatefulWidget {
+  final Map<String, dynamic> details;
+  const _TrailerSection({required this.details});
+
+  @override
+  State<_TrailerSection> createState() => _TrailerSectionState();
+}
+
+class _TrailerSectionState extends State<_TrailerSection> {
+  YoutubePlayerController? _ctrl;
+
+  String? get _key {
+    final videos =
+        (widget.details['videos'] as Map<String, dynamic>?)?['results']
+            as List?;
+    return pickTrailerKey(videos);
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  void _expand() {
+    final key = _key;
+    if (key == null) return;
+    setState(() {
+      _ctrl = YoutubePlayerController(
+        initialVideoId: key,
+        flags: const YoutubePlayerFlags(
+          autoPlay: true,
+          mute: false,
+        ),
+      );
+    });
+  }
+
+  void _collapse() {
+    _ctrl?.pause();
+    _ctrl?.dispose();
+    setState(() => _ctrl = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_key == null) return const SizedBox.shrink();
+    if (_ctrl == null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: OutlinedButton.icon(
+          icon: const Icon(Icons.play_circle_outline),
+          label: const Text('Watch trailer'),
+          onPressed: _expand,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: YoutubePlayer(
+              controller: _ctrl!,
+              showVideoProgressIndicator: true,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              icon: const Icon(Icons.close, size: 16),
+              label: const Text('Hide trailer'),
+              onPressed: _collapse,
+            ),
+          ),
+        ],
       ),
     );
   }

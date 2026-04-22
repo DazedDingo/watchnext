@@ -18,6 +18,7 @@ import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
 import '../../providers/sort_mode_provider.dart';
+import '../../providers/upcoming_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
@@ -384,6 +385,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     setState(() => _dismissed.add(tonightsPick.id)),
               ),
             ],
+            const _UpcomingForYouRow(),
             if (listRecs.isNotEmpty) ...[
               const _SectionLabel('RECOMMENDED FOR YOU'),
               ...listRecs.map(
@@ -1309,5 +1311,107 @@ class _SectionLabel extends StatelessWidget {
             letterSpacing: 1.2, fontSize: 12, color: Colors.white54),
       ),
     );
+  }
+}
+
+// ─── Upcoming for you carousel ──────────────────────────────────────────────
+
+/// Horizontal poster row sourced from `upcomingForYouProvider`. Silent when
+/// the provider is loading or has nothing to show — the Home screen is busy
+/// enough already that "Upcoming for you — nothing found" would just be noise.
+class _UpcomingForYouRow extends ConsumerWidget {
+  const _UpcomingForYouRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(upcomingForYouProvider);
+    return async.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _SectionLabel('UPCOMING FOR YOU'),
+            SizedBox(
+              height: 230,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final t = items[i];
+                  return _UpcomingCard(
+                    item: t,
+                    onTap: () =>
+                        context.push('/title/${t.mediaType}/${t.tmdbId}'),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _UpcomingCard extends StatelessWidget {
+  final UpcomingTitle item;
+  final VoidCallback onTap;
+
+  const _UpcomingCard({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final poster = TmdbService.imageUrl(item.posterPath, size: 'w342');
+    return SizedBox(
+      width: 120,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 2 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: poster != null
+                    ? Image.network(
+                        poster,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            const ColoredBox(color: Color(0xFF1A1A1A)),
+                      )
+                    : const ColoredBox(color: Color(0xFF1A1A1A)),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            Text(
+              _dateLabel(item.releaseDate),
+              style: const TextStyle(fontSize: 11, color: Colors.white54),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _dateLabel(DateTime? d) {
+    if (d == null) return '';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
   }
 }

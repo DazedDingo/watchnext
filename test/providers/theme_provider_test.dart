@@ -50,7 +50,7 @@ void main() {
 
     test('gracefully falls back when stored value is a stale accent name',
         () async {
-      SharedPreferences.setMockInitialValues({'wn_accent': 'magenta'});
+      SharedPreferences.setMockInitialValues({'wn_accent': 'ultraviolet'});
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
       final c = AccentController(prefs);

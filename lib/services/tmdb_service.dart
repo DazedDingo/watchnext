@@ -40,11 +40,12 @@ class TmdbService {
       _get(_uri('/search/multi', {'query': query, 'page': '$page'}));
 
   Future<Map<String, dynamic>> movieDetails(int tmdbId) =>
-      _get(_uri('/movie/$tmdbId', {'append_to_response': 'credits,keywords,similar'}));
+      _get(_uri('/movie/$tmdbId',
+          {'append_to_response': 'credits,keywords,similar,videos'}));
 
   Future<Map<String, dynamic>> tvDetails(int tmdbId) =>
       _get(_uri('/tv/$tmdbId',
-          {'append_to_response': 'credits,keywords,similar,external_ids'}));
+          {'append_to_response': 'credits,keywords,similar,external_ids,videos'}));
 
   Future<Map<String, dynamic>> tvSeason(int tmdbId, int seasonNumber) =>
       _get(_uri('/tv/$tmdbId/season/$seasonNumber'));
@@ -66,6 +67,13 @@ class TmdbService {
 
   Future<Map<String, dynamic>> upcomingMovies({int page = 1}) =>
       _get(_uri('/movie/upcoming', {'page': '$page'}));
+
+  /// TV titles currently in an active airing window. Used for the "Upcoming
+  /// for you" Home section — TMDB has no first-run-only TV feed, so we treat
+  /// "airing now and within the next week" as the TV analogue to
+  /// `/movie/upcoming`.
+  Future<Map<String, dynamic>> onTheAirTv({int page = 1}) =>
+      _get(_uri('/tv/on_the_air', {'page': '$page'}));
 
   Future<Map<String, dynamic>> topRatedMovies({int page = 1}) =>
       _get(_uri('/movie/top_rated', {'page': '$page'}));

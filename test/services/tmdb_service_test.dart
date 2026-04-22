@@ -83,7 +83,7 @@ void main() {
       expect(url.queryParameters['page'], '3');
     });
 
-    test('movieDetails hits /movie/:id with credits,keywords,similar append',
+    test('movieDetails hits /movie/:id with credits,keywords,similar,videos append',
         () async {
       final rec = _Recorder();
       final tmdb = TmdbService(client: rec.client(routes: {
@@ -94,10 +94,10 @@ void main() {
       final url = rec.calls.single.url;
       expect(url.path, endsWith('/movie/603'));
       expect(url.queryParameters['append_to_response'],
-          'credits,keywords,similar');
+          'credits,keywords,similar,videos');
     });
 
-    test('tvDetails hits /tv/:id with same append_to_response', () async {
+    test('tvDetails hits /tv/:id with external_ids,videos append', () async {
       final rec = _Recorder();
       final tmdb = TmdbService(client: rec.client(routes: {
         '/tv/1399': {'id': 1399, 'name': 'GoT'},
@@ -106,7 +106,7 @@ void main() {
       final url = rec.calls.single.url;
       expect(url.path, endsWith('/tv/1399'));
       expect(url.queryParameters['append_to_response'],
-          'credits,keywords,similar,external_ids');
+          'credits,keywords,similar,external_ids,videos');
     });
 
     test('tvSeason hits /tv/:id/season/:n', () async {
