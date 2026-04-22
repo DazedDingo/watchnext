@@ -1,241 +1,248 @@
-# WatchNext — Build Roadmap
+# WatchNext — Roadmap
 
-Source of truth for the full 11-phase build plan from the original design spec.
-**Status as of 2026-04-21** audited from the live codebase. Each phase marked
-Shipped ✅ / Partial 🟡 / Not started ⬜ with explicit gaps listed where the
-shipped implementation diverges from the original intent.
+Where the project is, where it's going, and what's still in the wishlist.
 
-For the authoritative design spec (screens, data model, flows, gamification, all copy), see the PDF: `WatchNext_Design.pdf` (kept alongside this file or in your notes).
+**Audited against the live codebase on 2026-04-22.**
+
+---
+
+## At a glance
+
+| Phase | Theme | Status |
+|-------|-------|--------|
+| 1 | Foundation | ✅ Shipped |
+| 2 | Trakt integration | ✅ Shipped |
+| 3 | Core UX | ✅ Shipped |
+| 4 | Solo / Together + share sheet | ✅ Shipped |
+| 5 | Decide Together | ✅ Shipped |
+| 6 | Predict & Rate | ✅ Shipped |
+| 7 | AI & Discovery | 🟡 Mostly shipped |
+| 8 | Conversational Concierge | ✅ Shipped |
+| 9 | Analytics & Gamification | 🟡 Mostly shipped |
+| 10 | Widget, Wrapped, notifications | 🟡 Partial |
+| 11 | Polish | ⬜ Not started |
+
+**Legend:** ✅ Shipped · 🟡 Partial — some gaps · ⬜ Not started.
+
+The full design spec (screens, data model, flows, copy) lives in `WatchNext_Design.pdf` — this roadmap tracks implementation against it.
 
 ---
 
 ## Phase 1 — Foundation ✅
 
-- Flutter project scaffold (Kotlin-native was considered; Flutter chosen for consistency with `groceries-app`; widget will be a native Kotlin side-module in Phase 10).
-- Dark-mode Material 3 theme only.
-- 5-tab bottom nav: Home / Discover / History / Stats / Profile.
-- Firebase: Auth (Google Sign-In), Firestore (rules deployed), Cloud Functions stub, Cloud Messaging package wired.
-- Household model: create → invite code → partner joins (two-person cap).
-- TMDB API service (search, details, similar, trending, upcoming, top-rated, list, image URLs).
-- Firestore security rules scoped to household membership for every collection in the spec's data model.
+The bones of the app.
+
+- Flutter project scaffold, dark-only Material 3.
+- Six-tab bottom navigation: Home / Discover / Watchlist / History / Stats / Profile.
+- Firebase wired up: Auth (Google Sign-In), Firestore, Cloud Functions, Cloud Messaging.
+- **Household model** — create, invite code, partner joins. Two-person cap enforced.
+- **TMDB API service** — search, details, similar, trending, upcoming, top-rated.
+- **Firestore security rules** — every collection scoped to household membership.
 
 ---
 
 ## Phase 2 — Trakt Integration ✅
 
-- Trakt OAuth 2.0 per user. Browser auth (CSRF state-protected), token exchange, tokens on member doc.
-- `TraktService` — history, ratings, trending, recommendations, push ratings, token refresh.
-- Full sync on first link: paginated pull of entire watch history, TMDB cross-ref, per-episode sub-docs for TV.
-- Incremental sync on app open (>1hr since last `last_trakt_sync`).
-- Push WatchNext ratings to Trakt via `TraktService.pushRating`.
-- **Unrated Queue** provider exposed in `lib/providers/watch_entries_provider.dart`.
-- Client-side sync (no Cloud Function dependency) — no Blaze-plan server push on sync.
+Per-user watch tracking and rating sync.
 
-**Deferred (not yet shipped):** per-episode Unrated Queue pass (show-level only today).
+- **OAuth 2.0 per user** — browser-based, CSRF protected.
+- **Full sync on first link** — every title in your Trakt history, cross-referenced against TMDB.
+- **Incremental sync on app open** (>1 hour since last sync).
+- **Push ratings to Trakt** — rate a title here, it appears on your Trakt profile.
+- **Unrated Queue** — catch-up for titles you've watched but never scored.
+
+*Deferred:* per-episode Unrated Queue (currently show-level only).
 
 ---
 
 ## Phase 3 — Core UX ✅
 
-- History screen — Watched / In progress / Unrated tabs, swipe-to-rate on Unrated.
-- Rating flow modal sheet — 1–5 stars + tag chips + note. Movie/show/season/episode levels. Pushes to Trakt on save when linked.
-- Watchlist screen — shared queue, swipe to remove, tap → title detail.
-- Title detail screen — backdrop, poster, metadata, add/remove watchlist, rate button, household ratings list, and a manual watch-status control. Movies get a 2-state Mark-watched toggle; TV gets a 3-state `Not / Watching / Watched` SegmentedButton that drives `WatchEntryService.markWatching` / `markWatched` / `unmarkWatching` / `unmarkWatched` for users who aren't Trakt-linked.
-- Home screen assembly now lives in Phase 7 (Tonight's Pick, mood, rec list); Phase 3's placeholder is superseded.
-- Real-time Firestore listeners via Riverpod StreamProviders.
+The screens you actually use.
 
-**Deferred (not yet shipped):**
-- Search + filters on Watched tab.
-- Per-episode Unrated Queue with "Rate All" batch mode.
-- "Resume" nudge after 2 weeks of inactivity on In-Progress (blocked on Phase 10 notifications).
-- Prediction accuracy badge on Watched rows (blocked on Phase 9 streak/badge infra).
+- **History** — Watched / In progress / Unrated tabs, swipe-to-rate.
+- **Rating sheet** — 1–5 stars, tag chips, optional note. Movie / show / season / episode.
+- **Watchlist** — shared queue with swipe to remove.
+- **Title detail** — backdrop, poster, metadata, household ratings, watch-status controls. Movies get a 2-state Mark-watched; TV gets 3-state *Not / Watching / Watched*.
+- **Real-time Firestore listeners** — changes land instantly on both devices.
+
+*Deferred:*
+- Search + filters on Watched tab
+- Per-episode Unrated Queue with batch rate-all
+- "Resume" nudge after 2 weeks of inactivity (waits on Phase 10 notifications)
+- Prediction-accuracy badge on Watched rows (waits on Phase 9 badge infra)
 
 ---
 
-## Phase 4 — Solo / Together mode + Share-to-Save ✅
+## Phase 4 — Solo / Together + Share-to-Save ✅
 
-- Segmented control at top of Home and Discover: Solo | Together. Persists per-device in SharedPreferences (`wn_view_mode`).
-- Recommendation doc contract: `match_score` + `match_score_solo` per-user, `ai_blurb` + `ai_blurb_solo` per-user (populated by Phase 7's scoring CF).
-- Android share-sheet intent filter (`SEND` + `text/plain`). `ShareParser` resolves incoming URLs via TMDB/IMDb/Letterboxd/Google/fallback lookup.
-- Confirmation bottom sheet stores items with `added_source: "share_sheet"`.
-- Listeners wired in `ScaffoldWithNavBar` for both warm (`getMediaStream`) and cold (`getInitialMedia`) starts via `receive_sharing_intent`.
+Shared life, separate tastes.
 
-**Deferred (not yet shipped):** default-mode per-user (from `members/{uid}.default_mode` during onboarding) — blocked on Phase 11 onboarding flow.
+- **Solo / Together segmented control** at the top of Home and Discover; persists per-device.
+- **Recommendation docs carry dual scores** (`match_score` + `match_score_solo`) populated by the Phase 7 scorer.
+- **Android share sheet** — receive "Share" intents from any app. `ShareParser` resolves IMDb, TMDB, Letterboxd, and Google URLs and offers a confirmation sheet.
+
+*Deferred:* per-user default mode from onboarding (waits on Phase 11).
 
 ---
 
 ## Phase 5 — Decide Together ✅
 
-- **Negotiate** — top 5 per user from scored recommendations (mood-filtered). Side-by-side layout. Instant Match highlight on overlap (`decide_provider.dart` line 188). "None of these — shuffle" button rerolls the five candidates (`rerollCandidates` in `decide_provider.dart`); exclusions are session-only and cleared on close / new session. **"Surprise me — fish older catalog"** button (`rerollExploratory`) opt-in fishes a random pre-2020 decade via `/discover` so negotiation has fresh faces from outside the trending pool when neither user is biting; sees `kExploratoryDecades`. Decade-sampled rather than user-selected to keep the surprise pop.
-- Match → suggest. No match → each picks #1.
-- Different picks → **compromise pick**. Three-tier fallback: top scored rec → TMDB `similar` overlap → any similar. Current implementation uses TMDB-similar rather than the Claude-scored compromise the spec described — downgrade-in-place; the Claude upgrade is a straight swap of the candidate source.
-- **Veto** — max 2 per user (`vetoesA >= 2 || vetoesB >= 2 → tiebreak`).
-- **Tiebreaker** — resolves to the user with fewer lifetime wins in `gamification.whose_turn`. `DecisionPick.wasTiebreak` flagged for Phase 9 stats.
-- Decision logged to `decisionHistory`. `whose_turn` counters updated in `DecideService.recordDecision`.
-- Optional Predict & Rate trigger after selection (wired via Predict flow; not enforced).
+How you actually pick something tonight.
 
-**Gaps vs spec:**
-- Compromise picks use TMDB similar, not a Claude call with both taste profiles. Swap when appetite / API budget is there.
+- **Negotiate** — top 5 per user, side by side. Instant Match highlight on overlap. "None of these — shuffle" rerolls the pool.
+- **"Surprise me — fish older catalog"** — opt-in button that samples a random pre-2020 decade when the trending pool feels stale.
+- **Compromise pick** — three-tier fallback (top scored rec → TMDB "similar" overlap → any similar) when neither partner agrees.
+- **Veto** — max 2 per user before we go to tiebreak.
+- **Tiebreaker** — whoever has fewer lifetime wins picks. Tiebreak picks flagged for future stats.
+- **Decision history** — every pick logged, "whose turn" counters updated automatically.
+- **Predict & Rate** trigger after a decision — optional but encouraged.
+
+*Gaps:* compromise picks could use a Claude call with both taste profiles instead of TMDB similar — straight swap when appetite permits.
 
 ---
 
 ## Phase 6 — Predict & Rate ✅
 
-- Pre-watch prediction sheet — 1–5 stars, skip always available. Hidden from partner until both submit.
-- Post-watch rating via Phase 3 flow. Two-way Trakt sync on the rating (prediction itself is WatchNext-only).
-- Show-level prediction only (spec matches this — prediction operates at show level, episodes rated via Phase 3).
-- Reveal screen — side-by-side predicted vs actual, delta display, winner highlighted (`reveal_screen.dart` lines 43–80).
-- Counters on member doc: `predict_total`, `predict_wins` (fed by `PredictionService.markRevealSeen`).
-- FCM nudge on `ratings/{id}` creation via `onRatingCreated` Cloud Function (`notifications.ts`) — pings partner when a rating posts after a shared prediction.
+Calibrate taste by guessing before you watch.
 
-**Gaps vs spec:**
-- Prediction accuracy badge on Watched rows (blocked on Phase 9).
-- Running streak / current-accuracy leaderboard display (blocked on Phase 9 streaks).
+- **Pre-watch prediction sheet** — 1–5 stars (skip always available). Partner's guess hidden until both submit.
+- **Post-watch rating** via the standard Phase 3 flow, with two-way Trakt sync.
+- **Reveal screen** — side-by-side predicted vs actual, delta, winner highlighted.
+- **Member-doc counters** — total and wins, so your accuracy % is always derivable.
+- **FCM nudge** — partner gets a push when you rate after a shared prediction.
+
+*Gaps:* prediction-accuracy badge on Watched rows + running-streak leaderboard (both wait on Phase 9).
 
 ---
 
 ## Phase 7 — AI & Discovery 🟡
 
+The brain.
+
 **Shipped:**
-- **Reddit scraper Cloud Function** — weekly Sunday 03:00 UTC. Scrapes 7 configured subreddits, TMDB cross-refs, writes `/redditMentions` (`functions/src/redditScraper.ts`).
-- **Taste profile generation** — `generateTasteProfile` callable (`functions/src/tasteProfile.ts`). Produces per-user + combined top genres, decades, liked/disliked titles. Currently mode-unaware (see signal-separation work below).
-- **Claude API batch scoring** — `scoreRecommendations` callable (`functions/src/scoreRecommendations.ts`, model `claude-sonnet-4-6`, `MAX_CANDIDATES=100`). Writes `match_score`/`match_score_solo` and `ai_blurb`/`ai_blurb_solo` to `/recommendations`. Invoked on-demand via fire-and-forget `unawaited()` — the client now writes the candidate pool with default scores to Firestore synchronously first (so Home's stream lights up in <5s) then kicks off scoring in the background; see Known Gotcha #13 in CLAUDE.md. If the background scoring call fails, `processRescoreQueue` covers it on the next 10-min sweep.
-- **Home screen** — Tonight's Pick hero (top rec from local sort, not a dedicated CF doc), mood selector pills (8 moods → TMDB genre map), **collapsible Filters panel with a ~42px compact header** (chevron flips when expanded, active-filter count pill + summary text show current state at a glance — no `ExpansionTile`'s ListTile double-height) containing free-form genre multi-select + media-type pills (Movies / TV; per-mode persisted under `wn_media_type_{solo,together}`) + runtime pills (`<90 / 90–120 / >2h`) + year range slider (inclusive `[minYear, maxYear]`, null bound = "Any") + Oscar-winners-only switch (per-mode persisted under `wn_oscar_winners_{solo,together}`; backed by TMDB keyword `210024` and a sticky `is_oscar_winner` flag on rec docs), live title search field, "Surprise me" random-from-top, "Because you loved X" chip (`utils/rec_explainer.dart`). Mood filter is graceful on empty-genre recs — it keeps them in the pool instead of dropping pre-`coerceGenres` docs entirely. Runtime filter is strict (drops null-runtime recs when a bucket is active); the service fires a runtime-aware `/discover` pass (`with_runtime.gte/lte`) and stamps a representative runtime on discover rows so the pool is non-empty. Media-type and Oscar filters are strict too; when set, the service narrows the discover call accordingly (skipping the unwanted media type, passing the Oscar keyword). Filter changes schedule a 700ms-debounced refresh (see Known Gotcha #15); concurrent refreshes are guarded by an `_refreshEpoch` counter (see #31) so a slow-returning older fan-out can't overwrite a newer refresh's Firestore pool.
-- **Recommendation list** — poster + title + match score badge + AI blurb + source badge. Stream limit is 120 so the chained mood+runtime+year+search filters have room to breathe.
-- **Candidate pool** — four parallel TMDB sources per refresh (trending movies, trending TV, top-rated movies, top-rated TV) plus watchlist + Reddit + discover (when filters are active). Each TMDB source is capped separately via `tmdbCap` (default 10 on the client) and `discoverCap` (40 per discover source) so one noisy source can't crowd out the others; dedup by `{mediaType}:{tmdbId}` keeps the earlier source (watchlist > reddit > **discover** > trending > top_rated). Discover leads the TMDB merge so a row that's both narrowed (genre/oscar/etc) and trending keeps its discover tag — needed for the sticky `is_oscar_winner` flag to survive when an Oscar Best Picture is also trending. Each source fetch is wrapped in a typed `_safeTmdb` try/catch. `discoverPaged` uses `poolFloor=40, maxPages=5` per media type with a three-rung fallback (OR-joined genres + years → per-genre fallback → drop-year fallback); the `with_keywords` param (e.g. Oscar keyword `210024`) is preserved across every rung. Narrow filters ("War, 1970-1989") still land sizable pools. Every TMDB call is `.timeout(15s)` wrapped; a single stuck request no longer hangs the refresh spinner.
+- **Claude batch scoring** — a Cloud Function scores up to 100 candidates per refresh, writing `match_score` / `match_score_solo` + an AI blurb to each rec.
+- **Taste profile generation** — per-user + combined top genres, decades, and liked/disliked titles. Two slots (solo vs together) so a partner's solo-horror weekends don't contaminate the shared profile.
+- **Background rescoring** — whenever anyone rates a title, a scheduled CF (every 10 min) regenerates the taste profile and rescores the 50 most recent recs.
+- **Home screen** — Tonight's Pick hero, Upcoming-for-you carousel, scored rec list (120 items, streamed in real time).
+- **Filters panel** — compact, collapsible. Free-form genre multi-select, media type (Movies / TV), runtime bucket (<90 / 90–120 / >2h), year range slider, Oscar-winners-only toggle, "Sort" picker (Top rated / Popularity / Recent / Underseen), and curated source (Criterion). All filters persist per mode.
+- **Narrow-filter discover** — a fallback ladder keeps the candidate pool healthy even for tight queries like "War, 1970–1989".
+- **Reddit scraper** — weekly (Sunday 03:00 UTC) pull from 7 film-centric subreddits, TMDB cross-referenced, written to `/redditMentions`.
+- **Race-safe refresh** — an epoch counter drops stale fan-outs so a slow older refresh can't overwrite a newer pool.
 
-**Gaps vs spec:**
-- **Tonight's Pick Cloud Function** — the daily Cloud Scheduler-driven pick that Phase 10's widget is supposed to consume is not exported from `functions/src/index.ts`. Home screen picks locally instead.
-- **Curated Collections (Discover)** — "Best of A24", "Reddit All-Time Favorites", etc. are not implemented. Discover currently offers Trending, New Releases, and Browse by Genre only. ("Oscar Winners You Haven't Seen" is partially covered by the Home Oscar-winners-only filter — combine it with the "hide watched" default to get the same effect.)
-- **Rewatch suggestions** — occasional "Rewatch?" card for highly-rated + mood-matching titles not yet in home rotation.
-
-**Shipped (scheduled re-scoring):**
-- `onRatingWritten` Firestore trigger stamps `/rescoreQueue/{householdId}` whenever a rating doc is created/updated/deleted.
-- `processRescoreQueue` scheduled CF (every 10 min) drains dirty households: regenerates the taste profile via the shared `buildAndWriteTasteProfile` helper, loads the household's current `/recommendations` docs as the candidate list (most-recent 50), and re-scores them in place using the shared `scoreAndWriteCandidates` helper.
-- Natural debounce: many rating writes in a 10-min window collapse into one drain pass (marker is overwritten, not appended). Transient Claude errors leave the household marked dirty so the next sweep retries. Background-triggered re-scoring of new Reddit mentions or watchlist arrivals is still not hooked up — those still require a client `refresh`.
+*Gaps:*
+- **Tonight's Pick Cloud Function** — the scheduled daily pick that the Phase 10 widget would consume isn't exported yet. Home picks locally today.
+- **Curated Collections in Discover** — "Best of A24", "Reddit All-Time Favorites", "Oscar Winners You Haven't Seen" aren't implemented as dedicated surfaces. (The Oscar-winners filter on Home covers the third.)
+- **"Rewatch?" card** — occasional highly-rated mood-matching resurface hasn't shipped.
 
 ---
 
 ## Phase 8 — Conversational Concierge ✅
 
-- Full-screen draggable bottom sheet (`concierge_sheet.dart`).
-- `concierge` Cloud Function (`functions/src/concierge.ts`) — Claude API with household context (taste profile, last 50 history, watchlist, active mode, mood, ratings).
-- Multi-turn chat, session persistence in `/conciergeHistory`.
-- Tappable title suggestion cards in responses.
-- `cache_control` on context block for prompt caching.
+Chat with an AI that knows your household.
 
-**Gaps vs spec:** none meaningful — UX matches the spec.
+- **Full-screen chat sheet.**
+- **Claude-powered** — the Cloud Function sends your taste profile, last 50 history rows, watchlist, current mode and mood into the prompt.
+- **Multi-turn chat with session persistence.**
+- **Tappable title cards** in responses — Claude suggestions that don't resolve on TMDB are silently dropped so we never show a broken tile.
+- **Prompt caching** on the context block.
 
 ---
 
 ## Phase 9 — Analytics & Gamification 🟡
 
-**Shipped:**
-- **Stats dashboard** (`stats_screen.dart`) — total titles, movies/TV counts, runtime, compatibility %, per-user rating distributions, top genres.
-- **Per-mode rating + predict breakdown** — Ratings card shows small Solo/Together avg+count chips per member (from `Rating.context`); Predict & Rate cards show Solo/Together % and wins-over-total sub-rows when that member has context-tagged predictions. Null-context ratings/predictions are kept out of the breakouts so the split numbers reflect post-rollout activity only.
-- **Predict leaderboard** — populated by `PredictionService.markRevealSeen` incrementing `predict_total` / `predict_wins` on member doc (plus the split-context counters used by the breakout).
-- **`whose_turn` counters** — updated in `DecideService.recordDecision` for tiebreak fairness.
-- **Rating streak** — `ratingStreakForUser` (pure, UTC-day bucketed, 1-day grace) derives current + best from `/ratings` with no schema change. Surfaced as a `_StreakChip` next to the Solo/Together chips on the Ratings card — flame 🔥 styling when `current >= 3`, shows "best N" when the historical run beats the active one.
-- **Watch streak** — `watchStreakHousehold` (pure, same UTC-day bucketing + 1-day grace as rating streak) derives current + best from `/watchEntries.last_watched_at`. Household-level so shared-Trakt setups don't double-count via `watched_by`. Surfaced under the summary cards as a `_WatchStreakRow` — only rendered when `current > 0` or `best > 1`, flame 🔥 styling at `current >= 3`.
-- **Badges** — `computeBadges` (pure, in `stats_provider.dart`) derives twelve achievements with no schema change: First Watch (1 title), Century Club (100 titles), Genre Explorer (5 distinct genres), Binge Master (10 TV shows), Marathon Mode (5 watches in a UTC day), Compromise Champ (5 decisions via the compromise flow), Show Finisher (5 TV shows with `in_progress_status='completed'`), Perfect Sync (90% within-1-star compatibility), Prediction Machine (per-user, 80% accuracy over 20+ predictions), Five Star Fan (per-user, 10 five-star ratings), Critic (per-user, 10 ratings with a note), Tagger (per-user, 10 ratings with ≥1 tag). `_BadgesCard` on Stats screen shows earned/locked state with a progress bar per row; Prediction Machine swaps its progress line to `{n}% accuracy · need 80%` once volume is cleared.
-- **`gamificationUpdater` CF** — `onWatchEntryWrittenBadges` + `onMemberWrittenBadges` + `onTasteProfileWrittenBadges` + `onRatingWrittenBadges` + `onDecisionWrittenBadges` Firestore triggers run the TS port of `computeBadges` (`evaluateBadges` in `functions/src/gamificationUpdater.ts`), persist deltas to `/households/{hh}/badges/{badgeId}`, and fire FCM (`type: badge_unlocked`) the moment a badge flips locked → earned. Household badges notify both members; per-user badges notify only the earner. Unchanged progress/earned state skips the write to stay cheap.
+Make watching feel like an activity.
 
-**Gaps vs spec:**
-- **Prediction streak** — not yet derived. Same pure-function pattern would extend to predictions once we ship per-prediction submission timestamps.
-- **Badges (remaining from spec)** — Hidden Gem Hunter, Reddit Scout, Around the World, Rewatch Royalty, Collection Completionist. Foundation is in place (client eval + server persistence + FCM); adding each one now is ~a pair of functions on both sides.
-- **Home-screen counters** — "Movies watched together", watch streak, Predict & Rate record not displayed on Home.
-- **`gamificationUpdater` Cloud Function** — not exported. Current counter updates are inline in service-layer code, which is fine for `whose_turn` + predict counters but doesn't scale to streaks / badges that need cross-collection triggers.
+**Shipped:**
+- **Stats dashboard** — total titles, movies/TV, runtime, compatibility %, per-user rating distributions, top genres.
+- **Per-mode breakdowns** — Solo/Together rating avg + count chips, Solo/Together predict accuracy with wins-over-total sub-rows.
+- **Rating streak & watch streak** — pure-function derivations, 1-day grace, 🔥 icon at 3+.
+- **Twelve badges** — First Watch, Century Club, Genre Explorer, Binge Master, Marathon Mode, Compromise Champ, Show Finisher, Perfect Sync, Prediction Machine, Five-Star Fan, Critic, Tagger. Progress bar per row.
+- **Server-side badge evaluator** — Firestore triggers on watchEntry / member / ratings / taste / decision writes re-run a pure evaluator and push FCM the moment a badge flips earned.
+- **Predict leaderboard** + `whose_turn` tiebreak counters.
+
+*Gaps:*
+- **Prediction streak** — not yet derived.
+- **Spec badges still to come** — Hidden Gem Hunter, Reddit Scout, Around the World, Rewatch Royalty, Collection Completionist.
+- **Home-screen counters** — "Movies watched together", current watch streak, Predict & Rate record not yet surfaced on Home.
 
 ---
 
 ## Phase 10 — Widget, Wrapped & Notifications 🟡
 
 **Shipped:**
-- **Rating-nudge FCM** (partial) — `onRatingCreated` trigger in `functions/src/notifications.ts`. Pings partner when a rating posts after a shared prediction. This is the spec's "Rating nudge" item in slightly different form (predict-paired instead of 24-hour-lag).
+- **Rating-nudge push** — partner gets a notification when you rate a title you both predicted on.
 
-**Gaps vs spec:**
-- **Android home-screen widget** — not started. No `home_widget` package. `MainActivity.kt` is a bare `FlutterActivity` stub. No Jetpack Glance module.
-- **Tonight's Pick Cloud Function** — not scheduled (called out under Phase 7 too).
-- **Release notifications CF** — not implemented.
-- **Wrapped generator CF** — not implemented.
-- **Unrated Queue weekly digest CF** — not implemented.
-- **Rating nudge (24-hour flavor)** — the current `onRatingCreated` trigger covers the predict-paired case; the spec also calls for a nudge when a `watchEntry` flips to "watched" and only one rating lands within 24h. Not implemented.
+*Gaps:*
+- **Android home-screen widget** — Tonight's Pick widget isn't built yet.
+- **Tonight's Pick Cloud Function** — same one called out under Phase 7.
+- **Release-day notifications** — watchlist items becoming available.
+- **Wrapped generator** — annual recap with sharable image cards.
+- **Unrated Queue weekly digest** — reminder to catch up on missed ratings.
+- **24-hour rating-nudge flavor** — when a partner marks something watched without rating it within 24h.
 
 ---
 
 ## Phase 11 — Polish ⬜
 
-Nothing shipped. Specifically:
+Nothing here yet. On the list:
 
-- **Poster grid onboarding** — 15 intelligently-chosen titles with 1–5 star overlay + skip. Pre-fills from Trakt. No onboarding beyond household setup exists today.
-- **Offline caching** — `sqflite` / `drift` not in `pubspec.yaml`. No local DB.
-- **Export watch history (CSV)** — not implemented.
-- **Collection completionist tracking** — not tracked (blocked on Phase 7's curated collections).
-- **Error states, sync conflict handling, empty states, performance pass** — not audited as a batch.
-- **Trusted circle schema** — firestore rules carry the `/trustedCircle` + `/friendSuggestions` placeholders; no app logic.
-
----
-
-## Current shipped Cloud Functions
-
-For reference, `functions/src/index.ts` exports:
-- `generateTasteProfile`, `scoreRecommendations`, `redditScraper`, `concierge`, `onRatingCreated`, `onRatingWritten`, `processRescoreQueue`, `onWatchEntryWrittenBadges`, `onMemberWrittenBadges`, `onTasteProfileWrittenBadges`, `submitIssue`, `drainIssueQueue`, `traktExchangeCode`, `traktRefreshToken`, `traktRevoke`.
-
-Not yet exported but called out in the phase plan above: `tonightsPick`, `releaseNotifications`, `wrappedGenerator`, `unratedQueueDigest`.
+- **Poster-grid onboarding** — 15 smart-picked titles with 1–5 overlay + skip, pre-filled from Trakt.
+- **Offline caching** — local SQLite of the most-recent recs + history.
+- **Export watch history** (CSV).
+- **Collection Completionist tracking** — waits on curated collections above.
+- **Error states, empty states, sync conflict handling, and a general performance pass.**
+- **Trusted circle** — rules placeholders exist but no app-side logic.
 
 ---
 
-## Signal-separation track (Solo vs Together — cross-phase)
+## Signal separation — Solo vs Together
 
-Decisions made 2026-04-18. These are all foundational changes the Phase 7
-scorer and Phase 9 stats depend on, so they come before any new feature work.
+Cross-cutting work to make sure your solo tastes and your shared tastes stay cleanly separated. Foundational — Phase 7's scorer and Phase 9's stats depend on it.
 
-- [x] **`Rating.context` field** (`solo` / `together` / `null`) — shipped. Write-path defaults from `viewModeProvider` at save time; legacy rows and Trakt historicals stay `null` (treated as shared signal). Rating sheet has a Solo/Together segmented toggle to override. Downstream scorers do not yet filter on it — that lands with the Batch 2 taste-profile engine.
-- [x] **`WatchlistItem.scope` + `owner_uid`** — shipped. Share-confirm sheet has a Shared/Solo toggle (defaults to shared). Solo-scoped items visible only to owner + only in Solo mode via `visibleWatchlistProvider`. `buildId` is `{scope}:{owner_uid_or_shared}:{mediaType}:{tmdbId}`. Title-detail watchlist button is mode-aware (Solo mode prefers solo entry, falls back to shared). Decide screen candidate pool uses the visible list.
-- [x] **Per-mode filter state** — shipped. `moodProvider` / `runtimeFilterProvider` are now `Provider<T?>` that read from `modeMoodProvider` / `modeRuntimeProvider` (`StateNotifierProvider<_, Map<ViewMode, T?>>`). Writes route to the active mode only; SharedPreferences keys: `wn_mood_solo`, `wn_mood_together`, `wn_runtime_solo`, `wn_runtime_together`. Mode switch preserves the other mode's selection.
-- [x] **`tasteProfile` schema** — shipped. `functions/src/tasteProfile.ts` now writes `per_user_solo` and `per_user_together` slots alongside the existing cross-context `per_user`. Null-context ratings fold into both slots as shared backdrop (`matchesContextFilter` treats `null` as match-any). `scoreRecommendations` feeds both taste contexts per member into the prompt and instructs Claude to route them into the `together`/`solo` scores respectively. Concierge solo mode prefers `per_user_solo[uid]` with fallback to `per_user[uid]` for legacy docs. `combined_together` derivation still deferred (not a simple average); scorer uses the cross-context `combined.top_genres` for the shared-genre prompt line.
-- [x] **`Prediction.context` + split prediction counters** — shipped. `PredictionEntry.context` carries `solo` / `together` / `null`; `markRevealSeen` routes increments to `predict_total_solo` / `predict_wins_solo`, `_together` variants, or legacy `predict_total` / `predict_wins` fields. `HouseholdMember.predictTotal`/`predictWins` are now sum-across-contexts getters for back-compat. Reveal screen reads the entry's own context (not current mode) so a prediction made in Solo still counts as solo even if the user flips mode before revealing.
-- [x] **Trakt-scope flag** — shipped. `members/{uid}.trakt_history_scope: 'shared'|'personal'|'mixed'` (defaults to mixed). User picks on the Trakt link screen after linking. `TraktSyncService.runSync` reads the flag and stamps `Rating.context` on Trakt-imported ratings: shared→together, personal→solo, mixed→null. Historical ratings imported before the flag existed stay null (treated as shared signal).
-
----
-
-## Stremio integration — optimisation track
-
-- [x] **Deep-link from title detail** — shipped 2026-04-20. `stremio:///detail/{type}/{imdb_id}` button on the title screen with web fallback.
-- [x] **WatchNext-as-Stremio-addon (watchlist catalog)** — shipped 2026-04-20. `functions/src/stremio.ts` exposes an HTTP endpoint implementing the Stremio addon protocol (manifest / catalog / meta). Profile → Stremio mints a per-household token via the `provisionStremioToken` callable; the resulting URL installs a household-private catalog of the shared watchlist into Stremio. Imdb ids missing from watchlist docs are resolved on demand via TMDB `external_ids` and cached back onto the doc.
-- [x] **User-selectable accent + animated WatchNext wordmark + flat nav bar** — shipped 2026-04-21. `AppAccent` enum drives `ColorScheme.fromSeed` at runtime via `accentProvider` (persisted under `wn_accent`). Profile → Preferences surfaces a bottom-sheet colour picker. The AppBar / splash / login logo is a single reusable `WatchNextLogo` that renders "Watch" static and "**Next**" under an animated L→R gradient ShaderMask in the current accent. Bottom navigation flattened to 56px icon-only (`labelBehavior: alwaysHide`). **Expanded 2026-04-22** to 18 named accents (red, coral, orange, amber, yellow, lime, green, forest, teal, cyan, sky, blue, indigo, violet, magenta, pink, rose, slate) so users have real per-household identity without the palette collapsing to muddy variants under `ColorScheme.fromSeed`'s dark-theme chroma clamps.
-- [x] **3-state watch status on TV title detail** — shipped 2026-04-21. Title detail replaces the binary Mark-watched toggle for TV with a `Not / Watching / Watched` SegmentedButton. `WatchEntryService` grew `markWatching` + `unmarkWatching` siblings to `markWatched` + `unmarkWatched`. All four mutations route through `.update()` (never `.set(merge:true)`) so Firestore honours the `watched_by.<uid>` dot-notation path instead of creating a literal dotted key — root-causing two bugs where watched/unwatched silently no-op'd.
-- [x] **Inline trailer on title detail** — shipped 2026-04-22. `TmdbService.movieDetails` / `tvDetails` now append `videos` to the detail request. `_TrailerSection` renders an idle "Watch trailer" OutlinedButton beneath the overview; tapping instantiates a `YoutubePlayerController` (via `youtube_player_flutter`) that autoplays inline at 16:9. Selection prefers official YouTube Trailer → any Trailer → Teaser → first YouTube video (see `pickTrailerKey`). Section is silent when no YouTube video is attached (e.g. older catalog). Picker logic is unit-tested.
-- [x] **"Upcoming for you" Home section** — shipped 2026-04-22. New `upcomingForYouProvider` fans out to TMDB `/movie/upcoming` + `/tv/on_the_air`, filters out titles the household has already touched (watched or watching), and ranks remaining candidates by genre-overlap against the taste profile (per-mode: `per_user_solo` / `per_user_together` with `combined` fallback). Intentionally client-side only — not round-tripped through the Phase 7 scoring CF because upcoming feeds rotate frequently and Claude scores are overkill for a discovery carousel that exists to highlight what's *coming*. Rendered as a 230-tall horizontal poster row between Tonight's Pick and the main rec list; silent on empty/error so it never blocks the page.
-- [ ] **Recommendations + Next Up catalogs** — add two more catalog ids (`wn_recs`, `wn_nextup`) sourcing from `/recommendations` (mode-aware per the caller's uid) and `watchEntries where inProgressStatus=='watching'`. Recs catalog needs per-user scoping; the token carries `uid` already, so the addon server just has to read that row.
-- [ ] **Pretty URL via Firebase Hosting** — today the install URL is the raw CF endpoint. A Hosting rewrite → `https://watchnext.web.app/stremio/{token}/manifest.json` would be nicer to share and more durable if we ever migrate regions.
-- [ ] **Write-back actions** — let the user mark-watched / add-to-watchlist from inside Stremio. Stremio's protocol doesn't define these hooks on the addon side; this would have to go through a custom deep-link-out-to-the-app round-trip.
+- [x] **`Rating.context` field** — every rating stamped `solo` / `together` / `null` (legacy). Rating sheet has an override toggle.
+- [x] **`WatchlistItem.scope` + `owner_uid`** — share-confirm sheet picks Shared or Solo; solo items only visible to owner in solo mode.
+- [x] **Per-mode filter state** — mood, runtime, media type, Oscar filter, sort, and curated source all persist independently for solo and together.
+- [x] **Taste profile schema** — `per_user_solo` and `per_user_together` alongside the legacy cross-context slot. Scorer feeds both into Claude.
+- [x] **Prediction counters split** — `predict_total_solo/_together` and `predict_wins_solo/_together` on member doc; a prediction made in solo stays solo even if you flip mode before revealing.
+- [x] **Trakt scope flag** — Shared / Personal / Mixed per user. Imported Trakt ratings get stamped accordingly so the taste engine learns cleanly.
 
 ---
 
-## Out of scope (for reference)
+## Stremio track
 
-These features from the spec are deliberately not in any phase above:
+Extra mileage from Stremio integration.
 
-- iOS build (Android-only per spec).
-- Light theme (dark-only per spec).
-- Social sharing beyond Wrapped image cards.
-- Manual title entry (everything flows through TMDB search / share sheet / Trakt sync).
+- [x] **Deep-link from title detail** — `stremio://` button with a web fallback.
+- [x] **WatchNext as a Stremio addon** — Profile → Stremio mints a household-private install URL; your shared watchlist appears as a Stremio catalog.
+- [x] **Accent picker + animated wordmark + flat nav bar** — 18 named colour seeds, live recolour on select.
+- [x] **3-state watch status for TV** — title detail uses *Not / Watching / Watched*.
+- [x] **Inline trailer** — tap *Watch trailer* on the title screen and YouTube plays right there (16:9, autoplay on expand).
+- [x] **Upcoming for you** — Home carousel of soon-releasing titles ranked by your taste.
+- [ ] **Extra Stremio catalogs** — Recommendations and Next-Up, on top of Watchlist.
+- [ ] **Pretty Stremio URL** via Firebase Hosting rewrite.
+- [ ] **Write-back actions** — mark-watched / add-to-watchlist from inside Stremio (likely via a deep-link round-trip).
 
 ---
 
-## API keys checklist
+## Out of scope
 
-- [x] Firebase project ID → `.firebaserc` + `firebase_options.dart`
-- [x] `google-services.json` → `android/app/`
-- [x] TMDB API key
-- [x] Trakt Client ID + Secret
-- [x] Anthropic API key (`firebase functions:secrets:set ANTHROPIC_API_KEY`)
+These are deliberately *not* planned:
 
-## Model versioning note
+- **iOS build** — Android-only by design.
+- **Light theme** — dark-only by design.
+- **Social sharing** beyond Wrapped image cards.
+- **Manual title entry** — everything flows through TMDB search / share sheet / Trakt sync.
 
-Phase 7 currently uses `claude-sonnet-4-6`. Update when a newer Sonnet lands.
-Opus 4.7 (`claude-opus-4-7`) and Haiku 4.5 (`claude-haiku-4-5-20251001`) are the
-other families available for cost/quality trades — Concierge and batch scoring
-have different latencies and could split model choice if scoring cost becomes
-an issue.
+---
+
+## Notes for future me
+
+**API keys currently in play:**
+- Firebase project → `.firebaserc` + `firebase_options.dart`
+- `google-services.json` → `android/app/`
+- TMDB API key (dart-define + Firebase secret for server-side Stremio addon)
+- Trakt Client ID + Secret
+- Anthropic API key (Firebase secret)
+
+**Model versioning:**
+Phase 7 batch scoring + Phase 8 concierge currently use **`claude-sonnet-4-6`**. Update when a newer Sonnet lands. Opus 4.7 (`claude-opus-4-7`) and Haiku 4.5 (`claude-haiku-4-5-20251001`) are the other families — could split model choice for cost/quality trades if scoring cost becomes an issue.

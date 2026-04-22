@@ -3,6 +3,13 @@ name: release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/**'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
 
 env:
   # The SHA-1 the APK MUST be signed with — matches the keystore the
@@ -92,6 +99,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.name }}
+          name: WatchNext ${{ steps.version.outputs.name }}
           files: build/app/outputs/flutter-apk/WatchNext-${{ steps.version.outputs.tag }}.apk
           fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            Download **WatchNext-${{ steps.version.outputs.tag }}.apk** from the Assets below and open it on your Android device. First-time install? You may need to allow your browser to install apps from unknown sources.
+
+            > Already have WatchNext? Install the new APK straight over the top — your Trakt login, settings, and household data are preserved.
+
+            ---
+
+            ### What's changed
