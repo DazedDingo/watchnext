@@ -198,7 +198,34 @@ class RecommendationsService {
         curatedSource != CuratedSource.none;
     final fetchMovies = mediaTypeFilter != MediaTypeFilter.tv;
     final fetchTv = mediaTypeFilter != MediaTypeFilter.movie;
+
+    // Narrow-combo detection: when the user has stacked multiple orthogonal
+    // filters (e.g. "War + 1970-1989" or "Comedy + 90-120min + Criterion"),
+    // the default discoverPaged budget (poolFloor=40, maxPages=5,
+    // minVoteCount=50) routinely exhausts without filling the pool —
+    // obscure/older titles get cut by the 50-votes floor and there just
+    // aren't enough popular entries to hit poolFloor. Widen the search
+    // when that's likely: deeper fetch (more pages), looser vote floor
+    // (let less-rated titles through), and a bigger target pool. Broad
+    // queries stay on the default budget so they don't get slower.
+    //
+    // Must be paired with a matching bump to buildCandidates' `discoverCap`
+    // — otherwise the extra 60 rows get fetched then thrown away.
+    final narrow = isNarrowFilterCombo(
+      genreFilters: genreFilters,
+      yearRange: yearRange,
+      runtimeBucket: runtimeBucket,
+      oscarOnly: oscarOnly,
+      curatedSource: curatedSource,
+      sortMode: sortMode,
+    );
+    final dPoolFloor = narrow ? 100 : 40;
+    final dMaxPages = narrow ? 10 : 5;
+    final dMinVotes = narrow ? 10 : 50;
+    final dDiscoverCap = narrow ? 100 : 40;
+
     if (hasFilters) {
+
       final movieIds = genreIdsFromNames(genreFilters, mediaType: 'movie');
       final tvIds = genreIdsFromNames(genreFilters, mediaType: 'tv');
       final keywordIds = oscarOnly ? const [kOscarKeywordId] : const <int>[];
@@ -222,6 +249,9 @@ class RecommendationsService {
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
                 maxRuntime: runtimeBucket?.maxRuntime,
+                minVoteCount: dMinVotes,
+                poolFloor: dPoolFloor,
+                maxPages: dMaxPages,
               )),
         if (fetchTv)
           _safeTmdb(() => _tmdb.discoverPaged(
@@ -236,6 +266,9 @@ class RecommendationsService {
                 maxYear: yearRange.maxYear,
                 minRuntime: runtimeBucket?.minRuntime,
                 maxRuntime: runtimeBucket?.maxRuntime,
+                minVoteCount: dMinVotes,
+                poolFloor: dPoolFloor,
+                maxPages: dMaxPages,
               )),
       ]);
       var i = 0;
@@ -275,6 +308,7 @@ class RecommendationsService {
       excludeAnimation:
           excludeAnimation && !genreFilters.contains('Animation'),
       tmdbCap: tmdbCap,
+      discoverCap: dDiscoverCap,
     );
 
     if (candidates.isEmpty) return;
@@ -636,4 +670,41 @@ List<Map<String, dynamic>> buildCandidates({
   }
 
   return candidates;
+}
+
+/// Returns true when the user has stacked enough orthogonal filters that a
+/// default-budget `discoverPaged` pass is likely to come back near-empty.
+///
+/// Each of these narrows the result set roughly multiplicatively:
+/// - genre (user picked at least one)
+/// - year range (at least one bound)
+/// - runtime bucket
+/// - Oscar-winners-only
+/// - curated source (Criterion)
+/// - "Underseen" sort mode (caps vote_count, aggressively thins the pool)
+///
+/// Two or more of those and we should widen the fetch — more pages, lower
+/// vote floor, bigger target pool — so narrow combos don't just surface an
+/// empty list. Media-type filter and Exclude-Animation aren't counted
+/// because they only gate *which* side of the discover fan-out fires, not
+/// how deep it goes. Sort modes other than topRated and underseen reshape
+/// ranking but don't actually narrow the pool either.
+///
+/// Pure function — exposed for test coverage of every combination.
+bool isNarrowFilterCombo({
+  required Set<String> genreFilters,
+  required YearRange yearRange,
+  required RuntimeBucket? runtimeBucket,
+  required bool oscarOnly,
+  required CuratedSource curatedSource,
+  required SortMode sortMode,
+}) {
+  var n = 0;
+  if (genreFilters.isNotEmpty) n++;
+  if (yearRange.hasAnyBound) n++;
+  if (runtimeBucket != null) n++;
+  if (oscarOnly) n++;
+  if (curatedSource != CuratedSource.none) n++;
+  if (sortMode == SortMode.underseen) n++;
+  return n >= 2;
 }

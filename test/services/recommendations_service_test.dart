@@ -6,6 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:watchnext/models/watchlist_item.dart';
+import 'package:watchnext/providers/curated_source_provider.dart';
+import 'package:watchnext/providers/runtime_filter_provider.dart';
+import 'package:watchnext/providers/sort_mode_provider.dart';
+import 'package:watchnext/providers/year_filter_provider.dart';
 import 'package:watchnext/services/recommendations_service.dart';
 import 'package:watchnext/services/tmdb_service.dart';
 
@@ -1634,6 +1638,92 @@ void main() {
       expect(ids, containsAll(['movie:301', 'movie:302']),
           reason:
               'sequential (non-overlapping) refreshes must both land; guard only drops stale concurrent ones');
+    });
+  });
+
+  // ─── isNarrowFilterCombo ────────────────────────────────────────────────
+  //
+  // Locks in which filter combinations should trigger the widened-pool
+  // discover fetch (bigger poolFloor, more pages, lower vote floor). If the
+  // threshold changes we want tests to fail loudly — this directly shapes
+  // how many TMDB pages fire per refresh.
+  group('isNarrowFilterCombo', () {
+    bool call({
+      Set<String> genreFilters = const {},
+      YearRange yearRange = const YearRange.unbounded(),
+      RuntimeBucket? runtimeBucket,
+      bool oscarOnly = false,
+      CuratedSource curatedSource = CuratedSource.none,
+      SortMode sortMode = SortMode.topRated,
+    }) {
+      return isNarrowFilterCombo(
+        genreFilters: genreFilters,
+        yearRange: yearRange,
+        runtimeBucket: runtimeBucket,
+        oscarOnly: oscarOnly,
+        curatedSource: curatedSource,
+        sortMode: sortMode,
+      );
+    }
+
+    test('no filters → not narrow', () {
+      expect(call(), isFalse);
+    });
+
+    test('one filter → not narrow (default pool budget is fine)', () {
+      expect(call(genreFilters: {'War'}), isFalse);
+      expect(call(yearRange: const YearRange(minYear: 1970, maxYear: 1989)),
+          isFalse);
+      expect(call(runtimeBucket: RuntimeBucket.medium), isFalse);
+      expect(call(oscarOnly: true), isFalse);
+      expect(call(curatedSource: CuratedSource.criterion), isFalse);
+      expect(call(sortMode: SortMode.underseen), isFalse);
+    });
+
+    test('two orthogonal filters → narrow', () {
+      expect(
+        call(
+          genreFilters: {'War'},
+          yearRange: const YearRange(minYear: 1970, maxYear: 1989),
+        ),
+        isTrue,
+      );
+      expect(
+        call(genreFilters: {'Comedy'}, runtimeBucket: RuntimeBucket.medium),
+        isTrue,
+      );
+      expect(
+        call(oscarOnly: true, curatedSource: CuratedSource.criterion),
+        isTrue,
+      );
+    });
+
+    test('underseen sort counts toward narrowness (thins pool via vote cap)',
+        () {
+      expect(
+        call(genreFilters: {'Drama'}, sortMode: SortMode.underseen),
+        isTrue,
+      );
+    });
+
+    test('three+ filters are still just narrow (no further tiers)', () {
+      expect(
+        call(
+          genreFilters: {'War'},
+          yearRange: const YearRange(minYear: 1970, maxYear: 1989),
+          runtimeBucket: RuntimeBucket.long_,
+          oscarOnly: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('non-narrowing knobs do not tip the score', () {
+      // excludeAnimation + mediaType + non-default sort (other than underseen)
+      // don't shrink the pool meaningfully — they just reshape it. Caller
+      // deliberately excludes these from the narrowness detector.
+      expect(call(sortMode: SortMode.popularity), isFalse);
+      expect(call(sortMode: SortMode.recent), isFalse);
     });
   });
 }
