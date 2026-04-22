@@ -1091,7 +1091,7 @@ class _SearchField extends StatelessWidget {
 
 // ─── Tonight's Pick hero card ─────────────────────────────────────────────────
 
-class _TonightsPick extends StatelessWidget {
+class _TonightsPick extends ConsumerWidget {
   final Recommendation rec;
   final String? uid;
   final String? explainer;
@@ -1107,10 +1107,21 @@ class _TonightsPick extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final poster = TmdbService.imageUrl(rec.posterPath, size: 'w500');
     final score = rec.scoreFor(uid);
     final blurb = rec.blurbFor(uid);
+
+    double? imdbRating;
+    double? rtRating;
+    double? metascore;
+    if (rec.imdbId != null) {
+      final async = ref.watch(externalRatingsProvider(rec.imdbId!));
+      final ext = async.asData?.value;
+      imdbRating = ext?.imdbRating;
+      rtRating = ext?.rtRating;
+      metascore = ext?.metascore;
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -1198,6 +1209,20 @@ class _TonightsPick extends StatelessWidget {
                       style: const TextStyle(
                           fontSize: 12, color: Colors.white54),
                     ),
+                  if (imdbRating != null ||
+                      rtRating != null ||
+                      metascore != null) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (imdbRating != null) _ImdbChip(imdbRating),
+                        if (rtRating != null) _RtChip(rtRating),
+                        if (metascore != null) _MetascoreChip(metascore),
+                      ],
+                    ),
+                  ],
                   if (explainer != null) ...[
                     const SizedBox(height: 6),
                     _ExplainerChip(explainer!),
@@ -1413,6 +1438,57 @@ class _RtChip extends StatelessWidget {
           const SizedBox(width: 3),
           Text(
             '${rating.toInt()}%',
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Metacritic chip — green ≥61 (favorable), yellow 40–60 (mixed), red ≤39
+/// (unfavorable). Matches the Metacritic colour band convention so users
+/// read the chip the same way they'd read it on the site.
+class _MetascoreChip extends StatelessWidget {
+  final double score;
+  const _MetascoreChip(this.score);
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color;
+    if (score >= 61) {
+      color = const Color(0xFF66CC33);
+    } else if (score >= 40) {
+      color = const Color(0xFFFFCC33);
+    } else {
+      color = const Color(0xFFFF0000);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: color.withValues(alpha: 0.6), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'MC',
+            style: TextStyle(
+              fontSize: 9,
+              color: color,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            score.toInt().toString(),
             style: const TextStyle(
               fontSize: 11,
               color: Colors.white,

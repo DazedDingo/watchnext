@@ -60,11 +60,22 @@ final upcomingForYouProvider =
   final movieRows = (results[0]['results'] as List?) ?? const [];
   final tvRows = (results[1]['results'] as List?) ?? const [];
 
+  // TMDB's /movie/upcoming occasionally returns rows whose `release_date`
+  // is the ORIGINAL primary release (theatrical re-releases, TMDB data
+  // edits) — we've seen a 1986 title land here. Gate movies on a
+  // future-ish release date so the carousel actually shows upcoming
+  // content. Allow a 14-day past window so just-released hits still
+  // surface while the feed rotates. TV is unaffected: on_the_air returns
+  // shows currently airing new episodes, and `first_air_date` being
+  // decades old is legitimate (long-running series).
+  final cutoff = DateTime.now().subtract(const Duration(days: 14));
+
   final out = <UpcomingTitle>[];
   for (final row in movieRows) {
     final t = _rowToTitle(row, 'movie', genreWeights);
     if (t == null) continue;
     if (watchedKeys.contains(t.key)) continue;
+    if (t.releaseDate == null || t.releaseDate!.isBefore(cutoff)) continue;
     out.add(t);
   }
   for (final row in tvRows) {
