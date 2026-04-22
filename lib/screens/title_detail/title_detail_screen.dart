@@ -5,16 +5,20 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
+import '../../models/external_ratings.dart';
 import '../../models/rating.dart';
+import '../../models/review.dart';
 import '../../models/watch_entry.dart';
 import '../../models/watchlist_item.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/external_ratings_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/prediction_provider.dart';
 import '../../providers/recommendations_provider.dart';
+import '../../providers/reviews_provider.dart';
 import '../../providers/tmdb_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
@@ -570,6 +574,10 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                 details: d,
                 mediaType: widget.mediaType,
                 imdbId: _imdbIdFor(d),
+              )),
+              _dimmable(_ReviewsSection(
+                mediaType: widget.mediaType,
+                tmdbId: widget.tmdbId,
               )),
               // AI blurb from Phase 7 scoring — shown when available.
               if (rec != null) ...() {
@@ -1273,7 +1281,7 @@ class _TrailerSectionState extends State<_TrailerSection> {
   }
 }
 
-class _RatingsSourcesSection extends StatelessWidget {
+class _RatingsSourcesSection extends ConsumerWidget {
   final Map<String, dynamic> details;
   final String mediaType;
   final String? imdbId;
@@ -1313,19 +1321,27 @@ class _RatingsSourcesSection extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final avg = _tmdbAverage;
-    final votes = _tmdbVoteCount;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tmdbAvg = _tmdbAverage;
+    final tmdbVotes = _tmdbVoteCount;
     final title = _title;
-    if (avg == null && title.isEmpty) return const SizedBox.shrink();
+    if (tmdbAvg == null && title.isEmpty && imdbId == null) {
+      return const SizedBox.shrink();
+    }
+
+    // Fetch external ratings (IMDb / RT / Metascore) when we have an imdb id.
+    final externalAsync = imdbId != null
+        ? ref.watch(externalRatingsProvider(imdbId!))
+        : const AsyncValue<ExternalRatings?>.data(null);
+    final ext = externalAsync.asData?.value;
 
     final encodedTitle = Uri.encodeComponent(title);
     final rtUri = Uri.parse(
         'https://www.rottentomatoes.com/search?search=$encodedTitle');
     final letterboxdUri =
         Uri.parse('https://letterboxd.com/search/films/$encodedTitle/');
-    final imdbReviewsUri = imdbId != null
-        ? Uri.parse('https://www.imdb.com/title/$imdbId/reviews/')
+    final imdbTitleUri = imdbId != null
+        ? Uri.parse('https://www.imdb.com/title/$imdbId/')
         : null;
 
     return Padding(
@@ -1335,38 +1351,74 @@ class _RatingsSourcesSection extends StatelessWidget {
         children: [
           Text('Ratings & reviews',
               style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          if (avg != null)
+          const SizedBox(height: 10),
+          // Primary ratings row — IMDb / RT / Metascore / TMDB. Each tile is
+          // silent when the corresponding score is missing so sparsely-rated
+          // titles don't leave awkward empty boxes.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (ext?.imdbRating != null)
+                _ScoreTile(
+                  label: 'IMDb',
+                  value: ext!.imdbRating!.toStringAsFixed(1),
+                  suffix: '/ 10',
+                  sub: ext.imdbVotes != null
+                      ? _fmtVotes(ext.imdbVotes!)
+                      : null,
+                  color: const Color(0xFFF5C518),
+                  onTap: imdbTitleUri != null
+                      ? () => _open(context, imdbTitleUri)
+                      : null,
+                ),
+              if (ext?.rtRating != null)
+                _ScoreTile(
+                  label: 'Rotten Tomatoes',
+                  value: '${ext!.rtRating!.toInt()}',
+                  suffix: '%',
+                  color: (ext.rtRating! >= 60)
+                      ? const Color(0xFFFA320A)
+                      : const Color(0xFF00B04F),
+                  onTap: () => _open(context, rtUri),
+                ),
+              if (ext?.metascore != null)
+                _ScoreTile(
+                  label: 'Metacritic',
+                  value: '${ext!.metascore!.toInt()}',
+                  suffix: '/ 100',
+                  color: _metascoreColor(ext.metascore!),
+                ),
+              if (tmdbAvg != null)
+                _ScoreTile(
+                  label: 'TMDB',
+                  value: tmdbAvg.toStringAsFixed(1),
+                  suffix: '/ 10',
+                  sub: tmdbVotes != null ? _fmtVotes(tmdbVotes) : null,
+                  color: const Color(0xFF01B4E4),
+                ),
+            ],
+          ),
+          if (externalAsync.isLoading && imdbId != null) ...[
+            const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(Icons.star_rounded,
-                    size: 18, color: Color(0xFFFFB300)),
-                const SizedBox(width: 4),
-                Text(
-                  '${avg.toStringAsFixed(1)} / 10',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  votes != null ? '· TMDB (${_fmtVotes(votes)})' : '· TMDB',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
+                const SizedBox(width: 8),
+                Text('Loading IMDb & Rotten Tomatoes…',
+                    style: Theme.of(context).textTheme.labelSmall),
               ],
             ),
-          const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 4,
             children: [
-              if (imdbReviewsUri != null)
-                _RatingLinkChip(
-                  label: 'IMDb reviews',
-                  onTap: () => _open(context, imdbReviewsUri),
-                ),
-              _RatingLinkChip(
-                label: 'Rotten Tomatoes',
-                onTap: () => _open(context, rtUri),
-              ),
               if (mediaType == 'movie')
                 _RatingLinkChip(
                   label: 'Letterboxd',
@@ -1383,6 +1435,231 @@ class _RatingsSourcesSection extends StatelessWidget {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
     return '$n';
+  }
+
+  Color _metascoreColor(double score) {
+    if (score >= 61) return const Color(0xFF66CC33);
+    if (score >= 40) return const Color(0xFFFFCC33);
+    return const Color(0xFFFF0000);
+  }
+}
+
+/// A compact ratings tile with a coloured accent strip and the score inline.
+/// Tappable when [onTap] is non-null — the IMDb and Rotten Tomatoes tiles
+/// route to their respective sites when pressed.
+class _ScoreTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final String suffix;
+  final String? sub;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _ScoreTile({
+    required this.label,
+    required this.value,
+    required this.suffix,
+    required this.color,
+    this.sub,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 0.5),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+                fontSize: 10,
+                color: color,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 3),
+              Text(
+                suffix,
+                style: const TextStyle(fontSize: 11, color: Colors.white54),
+              ),
+              if (sub != null) ...[
+                const SizedBox(width: 6),
+                Text(
+                  sub!,
+                  style:
+                      const TextStyle(fontSize: 11, color: Colors.white38),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return tile;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: tile,
+      ),
+    );
+  }
+}
+
+/// Expandable reviews section — TMDB reviews, collapsed by default so they
+/// don't dominate the screen. Shows up to 5 reviews; each is a card with
+/// author, rating (if present), and the body (expandable on tap).
+class _ReviewsSection extends ConsumerStatefulWidget {
+  final String mediaType;
+  final int tmdbId;
+
+  const _ReviewsSection({required this.mediaType, required this.tmdbId});
+
+  @override
+  ConsumerState<_ReviewsSection> createState() => _ReviewsSectionState();
+}
+
+class _ReviewsSectionState extends ConsumerState<_ReviewsSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(
+      reviewsProvider(TitleRef(widget.mediaType, widget.tmdbId)),
+    );
+    final reviews = async.asData?.value ?? const <Review>[];
+
+    // Stay silent while loading or when empty — avoids a hollow section on
+    // titles TMDB has no reviews for.
+    if (reviews.isEmpty) return const SizedBox.shrink();
+
+    final preview = reviews.take(5).toList();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Text(
+                    'Reviews (${reviews.length})',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 20,
+                    color: Colors.white54,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            for (final r in preview)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _ReviewCard(review: r),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewCard extends StatefulWidget {
+  final Review review;
+  const _ReviewCard({required this.review});
+
+  @override
+  State<_ReviewCard> createState() => _ReviewCardState();
+}
+
+class _ReviewCardState extends State<_ReviewCard> {
+  bool _full = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.review;
+    final long = r.content.length > 320;
+    final body = (_full || !long) ? r.content : '${r.content.substring(0, 320)}…';
+    final date = r.createdAt;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  r.author,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (r.rating != null) ...[
+                const Icon(Icons.star_rounded,
+                    size: 14, color: Color(0xFFFFB300)),
+                const SizedBox(width: 2),
+                Text(
+                  '${r.rating!.toStringAsFixed(1)} / 10',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ],
+          ),
+          if (date != null)
+            Text(
+              '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
+              style: const TextStyle(fontSize: 11, color: Colors.white38),
+            ),
+          const SizedBox(height: 6),
+          Text(body, style: const TextStyle(fontSize: 13, height: 1.35)),
+          if (long)
+            TextButton(
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => setState(() => _full = !_full),
+              child: Text(_full ? 'Show less' : 'Read more'),
+            ),
+        ],
+      ),
+    );
   }
 }
 

@@ -34,6 +34,7 @@ export {
   provisionStremioToken,
   revokeStremioToken,
 } from "./stremio";
+export { fetchExternalRatings } from "./externalRatings";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

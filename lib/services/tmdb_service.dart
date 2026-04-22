@@ -84,6 +84,15 @@ class TmdbService {
   Future<Map<String, dynamic>> listDetails(int listId) =>
       _get(_uri('/list/$listId'));
 
+  /// Fetches user reviews for a title. TMDB caps at 20 per page; we typically
+  /// only surface the top 3–5 in the UI so one page is plenty.
+  Future<Map<String, dynamic>> reviews(
+    String mediaType,
+    int tmdbId, {
+    int page = 1,
+  }) =>
+      _get(_uri('/$mediaType/$tmdbId/reviews', {'page': '$page'}));
+
   Future<Map<String, dynamic>> discoverMovies(Map<String, String> params) =>
       _get(_uri('/discover/movie', params));
 

@@ -42,7 +42,7 @@ Each release comes with a short *What's new* so you always know what you're gett
 
 - **Watchlist** — shared queue plus solo queues for personal watches. A dedicated *Watching* tab for TV shows in progress.
 - **History** — Watched, In progress, and Unrated tabs. Swipe to rate.
-- **Title detail** — metadata, similar titles, AI blurb, household ratings, watchlist + watch-status controls, inline trailer, and deep links to Stremio, IMDb, and Rotten Tomatoes.
+- **Title detail** — metadata, similar titles, AI blurb, household ratings, watchlist + watch-status controls, inline trailer, **IMDb / Rotten Tomatoes / Metascore** ratings inline, an expandable **Reviews** section, and deep links to Stremio, IMDb, and Letterboxd.
 - **Watch status for TV** — *Not / Watching / Watched*, so "I'm halfway through" is a real state.
 
 ### 🏆 Stats & streaks

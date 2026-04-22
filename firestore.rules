@@ -97,6 +97,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Cached external ratings (IMDb / RT / Metascore) keyed by imdb id.
+    // Populated by the fetchExternalRatings CF (admin SDK) with a 7-day TTL.
+    // Read-only to any authed client since this is public movie metadata,
+    // not household-private data — and it lets users of the same title
+    // share a cache entry.
+    match /externalRatings/{imdbId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // Server-only scratch space.
     match /sync/{docId}/{sub=**}   { allow read, write: if false; }
     match /_rate_limits/{token}    { allow read, write: if false; }
