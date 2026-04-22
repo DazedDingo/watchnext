@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/curated_source_provider.dart';
+import '../../providers/rewatch_provider.dart';
 import '../../providers/exclude_animation_provider.dart';
 import '../../providers/external_ratings_provider.dart';
 import '../../providers/genre_filter_provider.dart';
@@ -41,7 +43,7 @@ const _homeHelp =
     'WatchNext picks something to watch that works for both of you.\n\n'
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
-    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (Criterion), Oscar-winners-only, and Exclude-animation live here. The header summarises what\'s active.\n'
+    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), Oscar-winners-only, and Exclude-animation live here. The header summarises what\'s active.\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
@@ -255,8 +257,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Curated-source filter — strict: only recs a past discover pass tagged
     // with the matching curator survive. Mirrors the Oscar contract. Stale
-    // non-Criterion recs in the pool would otherwise leak through under a
-    // Criterion filter because the filter scopes TMDB server-side, not the
+    // non-curator recs in the pool would otherwise leak through under a
+    // curator filter because the filter scopes TMDB server-side, not the
     // existing Firestore pool.
     final curatorFiltered = curatedSource == CuratedSource.none
         ? animationFiltered
@@ -331,6 +333,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         displacement: 140,
         strokeWidth: 3.5,
         onRefresh: () async {
+          HapticFeedback.mediumImpact();
           final messenger = ScaffoldMessenger.of(context);
           messenger.clearSnackBars();
           messenger.showSnackBar(
@@ -462,6 +465,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ],
             const _UpcomingForYouRow(),
+            const _RewatchRow(),
             if (listRecs.isNotEmpty) ...[
               const _SectionLabel('RECOMMENDED FOR YOU'),
               ...listRecs.map(
@@ -1007,7 +1011,14 @@ class _SortModeSegment extends StatelessWidget {
   }
 }
 
-// ─── Curated source segment ───────────────────────────────────────────────────
+// ─── Curated source — dropdown ────────────────────────────────────────────────
+//
+// Curator grew past what a SegmentedButton can render cleanly (six options
+// including None, and labels like "Studio Ghibli" squish below legibility at
+// 1/6 width on a 360dp phone). A popup-menu-backed button keeps the flat
+// aesthetic of the rest of the panel while scaling to any number of curators.
+// The selected value reads directly on the control so the state is obvious at
+// a glance — no tap required.
 
 class _CuratedSourceSegment extends StatelessWidget {
   final CuratedSource selected;
@@ -1018,15 +1029,52 @@ class _CuratedSourceSegment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _segmentWrapper(
-      child: SegmentedButton<CuratedSource>(
-        style: _segmentStyle(),
-        showSelectedIcon: false,
-        segments: [
+      child: PopupMenuButton<CuratedSource>(
+        tooltip: 'Pick a curator',
+        position: PopupMenuPosition.under,
+        onSelected: (v) {
+          HapticFeedback.selectionClick();
+          onSelect(v);
+        },
+        itemBuilder: (_) => [
           for (final v in CuratedSource.values)
-            ButtonSegment(value: v, label: Text(v.label)),
+            PopupMenuItem(
+              value: v,
+              child: Row(
+                children: [
+                  if (v == selected)
+                    const Icon(Icons.check, size: 16)
+                  else
+                    const SizedBox(width: 16),
+                  const SizedBox(width: 8),
+                  Text(v.label),
+                ],
+              ),
+            ),
         ],
-        selected: {selected},
-        onSelectionChanged: (s) => onSelect(s.first),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 34),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outline,
+              width: 1,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  selected.label,
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down, size: 18),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1742,5 +1790,118 @@ class _UpcomingCard extends StatelessWidget {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return '${months[d.month - 1]} ${d.day}, ${d.year}';
+  }
+}
+
+// ─── Rewatch carousel ─────────────────────────────────────────────────────────
+
+/// Horizontal poster row sourced from `rewatchForYouProvider`. Past favorites
+/// the household hasn't touched in a year+. Silent when empty so the Home
+/// surface doesn't sprout an apologetic "nothing to rewatch" row on fresh
+/// accounts.
+class _RewatchRow extends ConsumerWidget {
+  const _RewatchRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final items = ref.watch(rewatchForYouProvider);
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('REWATCH?'),
+        SizedBox(
+          height: 230,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final t = items[i];
+              return _RewatchCard(
+                item: t,
+                onTap: () =>
+                    context.push('/title/${t.mediaType}/${t.tmdbId}'),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RewatchCard extends StatelessWidget {
+  final RewatchTitle item;
+  final VoidCallback onTap;
+
+  const _RewatchCard({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final poster = TmdbService.imageUrl(item.posterPath, size: 'w342');
+    return SizedBox(
+      width: 120,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 2 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: poster != null
+                    ? Image.network(
+                        poster,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            const ColoredBox(color: Color(0xFF1A1A1A)),
+                      )
+                    : const ColoredBox(color: Color(0xFF1A1A1A)),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            Row(
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(
+                    item.stars.clamp(0, 5),
+                    (_) => const Icon(Icons.star,
+                        size: 11, color: Colors.amber),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    _agoLabel(item.lastWatchedAt),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11, color: Colors.white54),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _agoLabel(DateTime? d) {
+    if (d == null) return '';
+    final days = DateTime.now().difference(d).inDays;
+    if (days < 730) return '${(days / 30).round()}mo ago';
+    return '${(days / 365).round()}y ago';
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -14,7 +15,7 @@ import 'screens/auth/splash_screen.dart';
 import 'screens/household/setup_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/discover/discover_screen.dart';
-import 'screens/history/history_screen.dart';
+import 'screens/library/library_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/report_issue_screen.dart';
@@ -23,7 +24,6 @@ import 'screens/decide/decide_screen.dart';
 import 'screens/predict/reveal_screen.dart';
 import 'screens/share/share_confirm_sheet.dart';
 import 'screens/title_detail/title_detail_screen.dart';
-import 'screens/watchlist/watchlist_screen.dart';
 import 'services/notification_service.dart';
 
 /// Pure redirect rule for the app router. Extracted so it can be unit-tested
@@ -79,8 +79,11 @@ final _router = GoRouter(
       routes: [
         GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
         GoRoute(path: '/discover', builder: (_, _) => const DiscoverScreen()),
-        GoRoute(path: '/watchlist', builder: (_, _) => const WatchlistScreen()),
-        GoRoute(path: '/history', builder: (_, _) => const HistoryScreen()),
+        GoRoute(path: '/library', builder: (_, _) => const LibraryScreen()),
+        // Back-compat redirects — old deep links and existing notifications
+        // can still point at the retired routes.
+        GoRoute(path: '/watchlist', redirect: (_, _) => '/library'),
+        GoRoute(path: '/history', redirect: (_, _) => '/library'),
         GoRoute(path: '/stats', builder: (_, _) => const StatsScreen()),
         GoRoute(
           path: '/profile',
@@ -223,16 +226,19 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
     final location = GoRouterState.of(context).uri.toString();
     int selectedIndex = 0;
     if (location.startsWith('/discover')) selectedIndex = 1;
-    if (location.startsWith('/watchlist')) selectedIndex = 2;
-    if (location.startsWith('/history')) selectedIndex = 3;
-    if (location.startsWith('/stats')) selectedIndex = 4;
-    if (location.startsWith('/profile')) selectedIndex = 5;
+    if (location.startsWith('/library') ||
+        location.startsWith('/watchlist') ||
+        location.startsWith('/history')) {
+      selectedIndex = 2;
+    }
+    if (location.startsWith('/stats')) selectedIndex = 3;
+    if (location.startsWith('/profile')) selectedIndex = 4;
 
     return Scaffold(
       body: widget.child,
-      // Flat 56px icon-only bar — 6 destinations + labels wasted ~28px
-      // per row on 360dp phones. Selected-icon fill + accent indicator
-      // still communicates which tab is active.
+      // Flat 56px icon-only bar — 5 destinations since Watchlist + History
+      // merged into Library (see CLAUDE.md gotcha "Library tab"). Selected-
+      // icon fill + accent indicator communicates the active tab.
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         height: 56,
@@ -240,13 +246,13 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Discover'),
-          NavigationDestination(icon: Icon(Icons.bookmark_outline), selectedIcon: Icon(Icons.bookmark), label: 'Watchlist'),
-          NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+          NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library), label: 'Library'),
           NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Stats'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
         ],
         onDestinationSelected: (i) {
-          const routes = ['/home', '/discover', '/watchlist', '/history', '/stats', '/profile'];
+          const routes = ['/home', '/discover', '/library', '/stats', '/profile'];
+          HapticFeedback.selectionClick();
           context.go(routes[i]);
         },
       ),

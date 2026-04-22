@@ -1775,7 +1775,7 @@ void main() {
           isFalse);
       expect(call(runtimeBucket: RuntimeBucket.medium), isFalse);
       expect(call(oscarOnly: true), isFalse);
-      expect(call(curatedSource: CuratedSource.criterion), isFalse);
+      expect(call(curatedSource: CuratedSource.a24), isFalse);
       expect(call(sortMode: SortMode.underseen), isFalse);
     });
 
@@ -1792,7 +1792,7 @@ void main() {
         isTrue,
       );
       expect(
-        call(oscarOnly: true, curatedSource: CuratedSource.criterion),
+        call(oscarOnly: true, curatedSource: CuratedSource.a24),
         isTrue,
       );
     });

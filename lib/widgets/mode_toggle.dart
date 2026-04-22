@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/mode_provider.dart';
@@ -23,7 +24,10 @@ class ModeToggle extends ConsumerWidget {
         ButtonSegment(value: ViewMode.together, label: Text('Together')),
       ],
       selected: {mode},
-      onSelectionChanged: (s) => ref.read(viewModeProvider.notifier).set(s.first),
+      onSelectionChanged: (s) {
+        HapticFeedback.selectionClick();
+        ref.read(viewModeProvider.notifier).set(s.first);
+      },
     );
   }
 }

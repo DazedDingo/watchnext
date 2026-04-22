@@ -5,30 +5,58 @@ import 'mode_provider.dart';
 
 /// Canonical curator-list sources a cinephile might anchor discovery on.
 ///
-/// Currently only [criterion] is wired up (via TMDB company id 1771, the
-/// Criterion Collection's distributor tag — stable and documented). Other
-/// curator lists (Sight & Sound 250, AFI 100, MUBI) will be added as
-/// separate enum cases once we pin canonical ids. When a source is active,
+/// TMDB `with_companies` is a server-side AND-composable filter — combines
+/// cleanly with genre, year range, runtime bucket, media type, oscar,
+/// exclude-animation, and sort. When a source is active,
 /// `recommendations_service.refresh()` suppresses the trending + top_rated
 /// baseline — those surfaces would dilute a curator-scoped pool.
 ///
-/// Persisted per mode so a solo cinephile night can sit in the Criterion
-/// rabbit hole while Together night stays broad.
+/// Company ids are production companies (not pure distributors) where
+/// available — distributor tags rot as rights shift between regions.
+/// Criterion is kept on distributor 1771 for back-compat and because
+/// Criterion doesn't produce; they only distribute.
+///
+/// Persisted per mode so a solo cinephile night can sit in one curator
+/// rabbit hole while Together night stays broad. Compatible with every
+/// other filter; self-defeating combos (e.g. Ghibli + exclude-animation)
+/// render an empty pool silently — deliberately no special-case warning,
+/// the user can reverse the contradiction themselves.
 enum CuratedSource {
   none('Any'),
-  criterion('Criterion');
+  a24('A24'),
+  neon('Neon'),
+  ghibli('Studio Ghibli'),
+  searchlight('Searchlight');
 
   final String label;
   const CuratedSource(this.label);
 
-  /// TMDB `with_companies` param — comma-AND, pipe-OR. Criterion is a
-  /// single distributor so a bare id suffices.
+  /// TMDB `with_companies` param — comma-AND, pipe-OR. Ids verified
+  /// directly against the TMDB /discover endpoint (see provider test).
+  /// Searchlight uses a pipe-OR union of the pre-Disney brand (43 — Fox
+  /// Searchlight) and the current brand (127929 — Searchlight Pictures)
+  /// so the catalog captures both eras.
+  ///
+  /// Criterion was removed from this enum: TMDB's company id for "The
+  /// Criterion Collection" (204170) tags Criterion's own
+  /// behind-the-scenes featurettes, not the underlying films they
+  /// distribute, so the filter would surface bonus-disc content. An
+  /// earlier mapping to company 1771 turned out to be "Tele Europa,"
+  /// which is how `criterion` silently returned a single movie for
+  /// months. A future version can restore Criterion via a hand-baked
+  /// list (following the Oscar-winners pattern in `oscar_winners.dart`).
   String? get withCompanies {
     switch (this) {
       case CuratedSource.none:
         return null;
-      case CuratedSource.criterion:
-        return '1771';
+      case CuratedSource.a24:
+        return '41077';
+      case CuratedSource.neon:
+        return '90733';
+      case CuratedSource.ghibli:
+        return '10342';
+      case CuratedSource.searchlight:
+        return '43|127929';
     }
   }
 }

@@ -7,8 +7,11 @@ void main() {
       expect(computeRouterRedirect(signedIn: false, loc: '/home'), '/login');
       expect(
           computeRouterRedirect(signedIn: false, loc: '/discover'), '/login');
-      expect(computeRouterRedirect(signedIn: false, loc: '/history'), '/login');
+      expect(computeRouterRedirect(signedIn: false, loc: '/library'), '/login');
       expect(computeRouterRedirect(signedIn: false, loc: '/profile'), '/login');
+      // Legacy routes still redirect to /login when signed out — the
+      // back-compat redirect to /library only fires for signed-in users.
+      expect(computeRouterRedirect(signedIn: false, loc: '/history'), '/login');
       expect(
           computeRouterRedirect(signedIn: false, loc: '/watchlist'), '/login');
       expect(
@@ -40,8 +43,11 @@ void main() {
     test('signed-in user on any authed route passes through', () {
       expect(computeRouterRedirect(signedIn: true, loc: '/home'), isNull);
       expect(computeRouterRedirect(signedIn: true, loc: '/discover'), isNull);
-      expect(computeRouterRedirect(signedIn: true, loc: '/history'), isNull);
+      expect(computeRouterRedirect(signedIn: true, loc: '/library'), isNull);
       expect(computeRouterRedirect(signedIn: true, loc: '/profile'), isNull);
+      // Legacy paths pass the auth redirect; GoRoute redirect inside the
+      // shell forwards to /library for signed-in users.
+      expect(computeRouterRedirect(signedIn: true, loc: '/history'), isNull);
       expect(computeRouterRedirect(signedIn: true, loc: '/watchlist'), isNull);
       expect(computeRouterRedirect(signedIn: true, loc: '/decide'), isNull);
       expect(
