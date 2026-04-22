@@ -219,7 +219,7 @@ Extra mileage from Stremio integration.
 - [x] **Inline trailer** — tap *Watch trailer* on the title screen and YouTube plays right there (16:9, autoplay on expand).
 - [x] **Upcoming for you** — Home carousel of soon-releasing titles ranked by your taste.
 - [x] **External ratings + reviews on title detail** — IMDb / Rotten Tomatoes / Metascore shown inline via OMDb (7-day Firestore cache), plus an expandable TMDB Reviews section.
-- [ ] **IMDb-★ chip on list rows** — waits on either stamping `imdb_id` onto rec docs at write time, or a lazy `/tmdbToImdb` Firestore cache; otherwise 120 TMDB `external_ids` calls per refresh.
+- [x] **IMDb-★ chip on list rows** — `Recommendation.imdbId` stamped onto rec docs by a background resolver after Phase A; Home rows render an inline IMDb rating chip next to the match score once it resolves.
 - [ ] **Extra Stremio catalogs** — Recommendations and Next-Up, on top of Watchlist.
 - [ ] **Pretty Stremio URL** via Firebase Hosting rewrite.
 - [ ] **Write-back actions** — mark-watched / add-to-watchlist from inside Stremio (likely via a deep-link round-trip).

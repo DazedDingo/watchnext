@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,8 +62,25 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     _details = widget.mediaType == 'movie'
         ? tmdb.movieDetails(widget.tmdbId)
         : tmdb.tvDetails(widget.tmdbId);
-    _details!.then((d) {
-      if (mounted) setState(() => _title = (d['title'] ?? d['name']) as String);
+    _details!.then((d) async {
+      if (!mounted) return;
+      setState(() => _title = (d['title'] ?? d['name']) as String);
+
+      // Opportunistic imdb_id stamp on the rec doc — we already have it
+      // from the details payload, so the chip on Home can render without
+      // waiting for the background TMDB resolver next refresh.
+      final imdb = _imdbIdFor(d);
+      if (imdb == null) return;
+      final hh = await ref.read(householdIdProvider.future);
+      if (hh == null || !mounted) return;
+      unawaited(ref
+          .read(recommendationsServiceProvider)
+          .stampImdbId(
+            householdId: hh,
+            mediaType: widget.mediaType,
+            tmdbId: widget.tmdbId,
+            imdbId: imdb,
+          ));
     });
   }
 

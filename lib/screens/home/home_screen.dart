@@ -9,6 +9,7 @@ import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/curated_source_provider.dart';
 import '../../providers/exclude_animation_provider.dart';
+import '../../providers/external_ratings_provider.dart';
 import '../../providers/genre_filter_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
@@ -1194,7 +1195,7 @@ class _TonightsPick extends StatelessWidget {
 
 // ─── Recommendation list card ─────────────────────────────────────────────────
 
-class _RecCard extends StatelessWidget {
+class _RecCard extends ConsumerWidget {
   final Recommendation rec;
   final String? uid;
   final String? explainer;
@@ -1208,10 +1209,19 @@ class _RecCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final poster = TmdbService.imageUrl(rec.posterPath, size: 'w185');
     final score = rec.scoreFor(uid);
     final blurb = rec.blurbFor(uid);
+
+    // Lazy IMDb rating chip — silent when the rec doc hasn't been stamped
+    // with an imdb_id yet (the background resolver runs after Phase A) or
+    // when OMDb hasn't returned a score for this title.
+    double? imdbRating;
+    if (rec.imdbId != null) {
+      final async = ref.watch(externalRatingsProvider(rec.imdbId!));
+      imdbRating = async.asData?.value?.imdbRating;
+    }
 
     return ListTile(
       contentPadding:
@@ -1242,6 +1252,10 @@ class _RecCard extends StatelessWidget {
                 maxLines: 2, overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(width: 8),
+          if (imdbRating != null) ...[
+            _ImdbChip(imdbRating),
+            const SizedBox(width: 6),
+          ],
           _ScoreBadge(score),
         ],
       ),
@@ -1268,6 +1282,49 @@ class _RecCard extends StatelessWidget {
         ],
       ),
       onTap: onTap,
+    );
+  }
+}
+
+/// Compact IMDb-rating chip shown on the Home recommendation row.
+/// Silent when no IMDb rating is available (see `_RecCard`).
+class _ImdbChip extends StatelessWidget {
+  final double rating;
+  const _ImdbChip(this.rating);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5C518).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(
+            color: const Color(0xFFF5C518).withValues(alpha: 0.6), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'IMDb',
+            style: TextStyle(
+              fontSize: 9,
+              color: Color(0xFFF5C518),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            rating.toStringAsFixed(1),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

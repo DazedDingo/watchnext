@@ -93,6 +93,12 @@ class TmdbService {
   }) =>
       _get(_uri('/$mediaType/$tmdbId/reviews', {'page': '$page'}));
 
+  /// Lean `/external_ids` call — returns `{imdb_id, facebook_id, ...}` without
+  /// the full details payload. Used to backfill `imdb_id` onto recommendation
+  /// docs so the row-level IMDb rating chip can render.
+  Future<Map<String, dynamic>> externalIds(String mediaType, int tmdbId) =>
+      _get(_uri('/$mediaType/$tmdbId/external_ids'));
+
   Future<Map<String, dynamic>> discoverMovies(Map<String, String> params) =>
       _get(_uri('/discover/movie', params));
 

@@ -93,5 +93,31 @@ void main() {
       final parsed = Recommendation.fromDoc(await db.doc('r/x').get());
       expect(parsed.runtime, 120);
     });
+
+    test('fromDoc reads imdb_id when stamped by the background resolver',
+        () async {
+      final db = FakeFirebaseFirestore();
+      await db.doc('r/x').set({
+        'tmdb_id': 1,
+        'title': 'X',
+        'imdb_id': 'tt0133093',
+      });
+      final parsed = Recommendation.fromDoc(await db.doc('r/x').get());
+      expect(parsed.imdbId, 'tt0133093');
+    });
+
+    test('fromDoc coerces empty imdb_id to null', () async {
+      // The background resolver writes the empty string for titles TMDB
+      // had no imdb mapping for. The model flattens that to null so the
+      // Home chip stays hidden.
+      final db = FakeFirebaseFirestore();
+      await db.doc('r/x').set({
+        'tmdb_id': 1,
+        'title': 'X',
+        'imdb_id': '',
+      });
+      final parsed = Recommendation.fromDoc(await db.doc('r/x').get());
+      expect(parsed.imdbId, isNull);
+    });
   });
 }

@@ -287,7 +287,7 @@ class RecommendationsService {
     // Phase A — sync: write the pool to Firestore with default scores so
     // the Home stream lights up immediately. This is the bit the user waits
     // on. Pre-existing rec keys keep their scores (merge skips score fields).
-    await writeCandidateDocs(householdId, candidates);
+    final missingImdb = await writeCandidateDocs(householdId, candidates);
 
     // Re-check after the Firestore write: an even-newer refresh could have
     // landed while we were writing. Don't fire a stale Claude pass — its
@@ -302,6 +302,15 @@ class RecommendationsService {
       candidates: candidates,
       forceTasteProfile: forceTasteProfile,
     ));
+
+    // Phase B' — also async: resolve imdb_id for rec docs that don't have
+    // it yet (new rows + any legacy rows pre-dating this feature). Stamps
+    // them back onto the doc so the row-level IMDb rating chip can render
+    // on subsequent renders. Independent of Claude scoring so a slow TMDB
+    // response doesn't hold up rescoring.
+    if (missingImdb.isNotEmpty) {
+      unawaited(_backgroundResolveImdbIds(householdId, missingImdb));
+    }
   }
 
   /// Writes each candidate to `/households/{hh}/recommendations/{key}`. For
@@ -311,18 +320,32 @@ class RecommendationsService {
   /// default score seeded so they sort into the stream's top-120 window.
   ///
   /// Chunks writes into Firestore's 500-op batch limit. Exposed for tests.
-  Future<void> writeCandidateDocs(
+  /// Writes candidate docs and returns the `(mediaType, tmdbId)` pairs that
+  /// still need an `imdb_id` resolved — callers can fire `_backgroundResolveImdbIds`
+  /// to backfill them. Set empty when every doc in the pool already carries
+  /// an `imdb_id` from a prior refresh.
+  Future<List<({String mediaType, int tmdbId})>> writeCandidateDocs(
     String householdId,
     List<Map<String, dynamic>> candidates,
   ) async {
-    if (candidates.isEmpty) return;
+    if (candidates.isEmpty) return const [];
     final col = _col(householdId);
 
     // Look up which candidate ids are already scored so we preserve their
     // score on merge. Cap matches the stream window so we don't accidentally
-    // reset scores on recs the UI is actively showing.
+    // reset scores on recs the UI is actively showing. Also captures which
+    // docs already carry `imdb_id` so the background resolver only re-hits
+    // TMDB for rows that genuinely need it.
     final existingSnap = await col.limit(800).get();
-    final existingIds = existingSnap.docs.map((d) => d.id).toSet();
+    final existingIds = <String>{};
+    final hasImdb = <String>{};
+    for (final d in existingSnap.docs) {
+      existingIds.add(d.id);
+      final imdb = d.data()['imdb_id'];
+      if (imdb is String && imdb.isNotEmpty) hasImdb.add(d.id);
+    }
+
+    final needsImdb = <({String mediaType, int tmdbId})>[];
 
     const chunkSize = 450; // stay below Firestore's 500-op batch limit
     for (var start = 0; start < candidates.length; start += chunkSize) {
@@ -371,8 +394,72 @@ class RecommendationsService {
           data['scored'] = false;
         }
         batch.set(col.doc(key), data, SetOptions(merge: true));
+
+        if (!hasImdb.contains(key)) {
+          needsImdb.add((mediaType: mediaType, tmdbId: tmdbId));
+        }
       }
       await batch.commit();
+    }
+
+    return needsImdb;
+  }
+
+  /// Resolves `imdb_id` for each `(mediaType, tmdbId)` pair via TMDB's lean
+  /// `/external_ids` endpoint and stamps it onto the matching rec doc.
+  ///
+  /// Fire-and-forget. Errors are swallowed (imdb_id is a nice-to-have; the
+  /// row-level chip just stays hidden when resolution fails). Limits
+  /// concurrency to avoid a thundering-herd on TMDB — the full candidate
+  /// pool is usually 40–100 new rows and TMDB tolerates ~50 req/s, but we
+  /// stay well under that so a background backfill can't starve the
+  /// foreground refresh fan-out.
+  ///
+  /// The empty string is written on genuine TMDB misses so we don't
+  /// retry forever; `Recommendation.imdbId` coerces empty → null.
+  Future<void> _backgroundResolveImdbIds(
+    String householdId,
+    List<({String mediaType, int tmdbId})> pairs,
+  ) async {
+    const concurrency = 8;
+    final col = _col(householdId);
+
+    for (var i = 0; i < pairs.length; i += concurrency) {
+      final slice = pairs.skip(i).take(concurrency).toList();
+      await Future.wait(slice.map((p) async {
+        try {
+          final payload = await _tmdb.externalIds(p.mediaType, p.tmdbId);
+          final imdb = payload['imdb_id'];
+          if (imdb is String && imdb.isNotEmpty) {
+            await col.doc('${p.mediaType}:${p.tmdbId}').update({
+              'imdb_id': imdb,
+            });
+          }
+        } catch (_) {
+          // Silent — this is best-effort backfill.
+        }
+      }));
+    }
+  }
+
+  /// Opportunistic imdb_id write — used by TitleDetail, which already has
+  /// the imdb_id in its details payload. Zero-cost compared to the TMDB
+  /// round-trip in `_backgroundResolveImdbIds`, so it's worth skipping the
+  /// background resolver entirely for titles the user actually opens.
+  Future<void> stampImdbId({
+    required String householdId,
+    required String mediaType,
+    required int tmdbId,
+    required String imdbId,
+  }) async {
+    if (imdbId.isEmpty) return;
+    try {
+      await _col(householdId).doc('$mediaType:$tmdbId').update({
+        'imdb_id': imdbId,
+      });
+    } catch (_) {
+      // Rec doc may not exist (not every title the user opens is in the
+      // rec pool). `.update()` throws on missing docs — silent ignore.
     }
   }
 

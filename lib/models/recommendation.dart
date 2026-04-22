@@ -31,6 +31,12 @@ class Recommendation {
   /// trending/top_rated or a non-curator discover. Used by the Home client-
   /// side filter so a Criterion pool doesn't leak stale non-Criterion recs.
   final String curator;
+  /// IMDb id (e.g. `tt0133093`). Lazily stamped — a freshly-written rec doc
+  /// starts without this field and a background resolver fills it in a
+  /// second or two later. Null means "not yet resolved" or "title has no
+  /// IMDb entry" (the resolver sets the empty string for the latter so we
+  /// don't keep retrying).
+  final String? imdbId;
   final DateTime? generatedAt;
 
   const Recommendation({
@@ -50,6 +56,7 @@ class Recommendation {
     this.scored = false,
     this.isOscarWinner = false,
     this.curator = '',
+    this.imdbId,
     this.generatedAt,
   });
 
@@ -88,6 +95,9 @@ class Recommendation {
       scored: d['scored'] as bool? ?? false,
       isOscarWinner: d['is_oscar_winner'] as bool? ?? false,
       curator: d['curator'] as String? ?? '',
+      imdbId: (d['imdb_id'] as String?)?.isNotEmpty == true
+          ? d['imdb_id'] as String
+          : null,
       generatedAt: (d['generated_at'] as Timestamp?)?.toDate(),
     );
   }

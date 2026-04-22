@@ -996,6 +996,67 @@ void main() {
       expect(fresh['match_score'], 50);
       expect(fresh['ai_blurb'], '');
     });
+
+    test('returns (mediaType, tmdbId) pairs for rec docs without imdb_id',
+        () async {
+      // Pre-seed one doc with imdb_id already resolved, one without.
+      await db.doc(path('movie:1')).set({
+        'media_type': 'movie',
+        'tmdb_id': 1,
+        'imdb_id': 'tt0000001',
+      });
+      await db.doc(path('movie:2')).set({
+        'media_type': 'movie',
+        'tmdb_id': 2,
+      });
+
+      final missing = await svc.writeCandidateDocs(hh, [
+        candidate('movie', 1), // has imdb_id — skip
+        candidate('movie', 2), // existing but missing imdb_id — include
+        candidate('movie', 3), // fresh — include
+      ]);
+
+      final keys = missing.map((p) => '${p.mediaType}:${p.tmdbId}').toSet();
+      expect(keys, containsAll({'movie:2', 'movie:3'}));
+      expect(keys, isNot(contains('movie:1')));
+    });
+
+    test('stampImdbId writes imdb_id on an existing rec doc', () async {
+      await svc.writeCandidateDocs(hh, [candidate('movie', 10)]);
+      await svc.stampImdbId(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 10,
+        imdbId: 'tt1234567',
+      );
+      final doc = (await db.doc(path('movie:10')).get()).data()!;
+      expect(doc['imdb_id'], 'tt1234567');
+    });
+
+    test('stampImdbId is a no-op for an empty imdb_id', () async {
+      await svc.writeCandidateDocs(hh, [candidate('movie', 11)]);
+      await svc.stampImdbId(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 11,
+        imdbId: '',
+      );
+      final doc = (await db.doc(path('movie:11')).get()).data()!;
+      expect(doc.containsKey('imdb_id'), isFalse);
+    });
+
+    test('stampImdbId silently ignores missing rec doc', () async {
+      // No doc exists at movie:999 — update() would throw, the service
+      // should swallow it.
+      await svc.stampImdbId(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 999,
+        imdbId: 'tt9999999',
+      );
+      final doc = await db.doc(path('movie:999')).get();
+      expect(doc.exists, isFalse);
+    });
   });
 
   group('buildCandidates — oscar discover tagging', () {
