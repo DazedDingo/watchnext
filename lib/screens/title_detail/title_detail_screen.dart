@@ -905,24 +905,70 @@ class _ActionRow extends StatelessWidget {
               onPressed: onReveal,
             ),
           if (hasImdb) ...[
-            IconButton(
-              icon: const Icon(Icons.play_circle_outline, size: 20),
+            _ExternalLinkButton(
+              icon: Icons.play_circle_outline,
+              label: 'Stremio',
               tooltip: 'Open in Stremio',
               onPressed: onStremio,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
-            IconButton(
-              icon: const Icon(Icons.open_in_new, size: 20),
+            _ExternalLinkButton(
+              icon: Icons.open_in_new,
+              label: 'IMDb',
               tooltip: 'Open on IMDb',
               onPressed: onImdb,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ─── External link button ────────────────────────────────────────────────────
+
+/// Compact icon + tiny label for Stremio / IMDb deep-links. Kept intentionally
+/// small (36px tap target, 10.5pt label) so the trailing link strip stays
+/// visually subordinate to the primary action pills — the label just removes
+/// the "what are those icons?" guessing game.
+class _ExternalLinkButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  const _ExternalLinkButton({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  letterSpacing: 0.2,
+                  color: cs.onSurface.withValues(alpha: 0.85),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

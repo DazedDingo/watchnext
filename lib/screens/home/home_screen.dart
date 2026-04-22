@@ -677,38 +677,56 @@ class _FiltersPanelState extends State<_FiltersPanel> {
             secondChild: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const _FilterSectionLabel('Genres'),
                 _GenreChipsRow(
                   selected: widget.selectedGenres,
                   onEdit: widget.onEditGenres,
                   onClear: widget.onClearGenres,
                 ),
-                _MediaTypePills(
+                const _FilterSectionLabel('Type'),
+                _MediaTypeSegment(
                   selected: widget.mediaType,
                   onSelect: widget.onMediaTypeSelect,
                 ),
-                _RuntimePills(
+                const _FilterSectionLabel('Length'),
+                _RuntimeSegment(
                   selected: widget.runtime,
                   onSelect: widget.onRuntimeSelect,
                 ),
-                _SortModePills(
+                const _FilterSectionLabel('Sort by'),
+                _SortModeSegment(
                   selected: widget.sortMode,
                   onSelect: widget.onSortModeSelect,
                 ),
-                _CuratedSourcePills(
+                const _FilterSectionLabel('Curated'),
+                _CuratedSourceSegment(
                   selected: widget.curatedSource,
                   onSelect: widget.onCuratedSourceSelect,
                 ),
+                const _FilterSectionLabel('Year'),
                 YearRangeSlider(
                   range: widget.yearRange,
                   onChanged: widget.onYearRangeChanged,
                 ),
-                _TogglePills(
-                  oscarOnly: widget.oscarOnly,
-                  excludeAnimation: widget.excludeAnimation,
-                  includeWatched: widget.includeWatched,
-                  onOscarChanged: widget.onOscarChanged,
-                  onExcludeAnimationChanged: widget.onExcludeAnimationChanged,
-                  onIncludeWatchedChanged: widget.onIncludeWatchedChanged,
+                const SizedBox(height: 4),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                _FilterSwitchRow(
+                  icon: Icons.emoji_events_outlined,
+                  label: 'Oscar winners only',
+                  value: widget.oscarOnly,
+                  onChanged: widget.onOscarChanged,
+                ),
+                _FilterSwitchRow(
+                  icon: Icons.animation,
+                  label: 'Exclude animation',
+                  value: widget.excludeAnimation,
+                  onChanged: widget.onExcludeAnimationChanged,
+                ),
+                _FilterSwitchRow(
+                  icon: Icons.visibility_outlined,
+                  label: 'Include watched',
+                  value: widget.includeWatched,
+                  onChanged: widget.onIncludeWatchedChanged,
                 ),
                 const SizedBox(height: 4),
               ],
@@ -790,196 +808,196 @@ class _GenreChipsRow extends ConsumerWidget {
   }
 }
 
-// ─── Media-type pills ─────────────────────────────────────────────────────────
+// ─── Flat filter section helpers ──────────────────────────────────────────────
 
-class _MediaTypePills extends StatelessWidget {
+/// Small muted section label that sits above a segmented/slider/switch group.
+/// Replaces the implicit labelling the old FilterChip avatars used to carry.
+class _FilterSectionLabel extends StatelessWidget {
+  final String label;
+  const _FilterSectionLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+          color: cs.onSurface.withValues(alpha: 0.55),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shared style for every SegmentedButton inside the filter panel so they
+/// read as a single family rather than a grab-bag of pill shapes.
+ButtonStyle _segmentStyle() => const ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+      ),
+      minimumSize: WidgetStatePropertyAll(Size(0, 34)),
+      textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+    );
+
+Widget _segmentWrapper({required Widget child}) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      child: SizedBox(
+        width: double.infinity,
+        child: child,
+      ),
+    );
+
+// ─── Media-type segment ───────────────────────────────────────────────────────
+
+class _MediaTypeSegment extends StatelessWidget {
   final MediaTypeFilter? selected;
   final void Function(MediaTypeFilter?) onSelect;
 
-  const _MediaTypePills({required this.selected, required this.onSelect});
+  const _MediaTypeSegment({required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        itemCount: MediaTypeFilter.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final v = MediaTypeFilter.values[i];
-          final active = selected == v;
-          return FilterChip(
-            avatar: Icon(
-              v == MediaTypeFilter.movie ? Icons.movie : Icons.tv,
-              size: 16,
-            ),
-            label: Text(v.label),
-            selected: active,
-            onSelected: (_) => onSelect(active ? null : v),
-          );
-        },
+    return _segmentWrapper(
+      child: SegmentedButton<MediaTypeFilter?>(
+        style: _segmentStyle(),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: null, label: Text('Any')),
+          ButtonSegment(value: MediaTypeFilter.movie, label: Text('Movies')),
+          ButtonSegment(value: MediaTypeFilter.tv, label: Text('TV')),
+        ],
+        selected: {selected},
+        onSelectionChanged: (s) => onSelect(s.first),
       ),
     );
   }
 }
 
-// ─── Runtime pills ────────────────────────────────────────────────────────────
+// ─── Runtime segment ──────────────────────────────────────────────────────────
 
-class _RuntimePills extends StatelessWidget {
+class _RuntimeSegment extends StatelessWidget {
   final RuntimeBucket? selected;
   final void Function(RuntimeBucket?) onSelect;
 
-  const _RuntimePills({required this.selected, required this.onSelect});
+  const _RuntimeSegment({required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        itemCount: RuntimeBucket.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final bucket = RuntimeBucket.values[i];
-          final active = selected == bucket;
-          return FilterChip(
-            avatar: const Icon(Icons.schedule, size: 16),
-            label: Text(bucket.label),
-            selected: active,
-            onSelected: (_) => onSelect(active ? null : bucket),
-          );
-        },
+    return _segmentWrapper(
+      child: SegmentedButton<RuntimeBucket?>(
+        style: _segmentStyle(),
+        showSelectedIcon: false,
+        segments: [
+          const ButtonSegment(value: null, label: Text('Any')),
+          for (final b in RuntimeBucket.values)
+            ButtonSegment(value: b, label: Text(b.label)),
+        ],
+        selected: {selected},
+        onSelectionChanged: (s) => onSelect(s.first),
       ),
     );
   }
 }
 
-// ─── Sort mode pills ──────────────────────────────────────────────────────────
+// ─── Sort mode segment ────────────────────────────────────────────────────────
 
-class _SortModePills extends StatelessWidget {
+class _SortModeSegment extends StatelessWidget {
   final SortMode selected;
   final ValueChanged<SortMode> onSelect;
 
-  const _SortModePills({required this.selected, required this.onSelect});
-
-  IconData _iconFor(SortMode m) {
-    switch (m) {
-      case SortMode.topRated:
-        return Icons.star_outline;
-      case SortMode.popularity:
-        return Icons.local_fire_department_outlined;
-      case SortMode.recent:
-        return Icons.new_releases_outlined;
-      case SortMode.underseen:
-        return Icons.search;
-    }
-  }
+  const _SortModeSegment({required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        itemCount: SortMode.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final v = SortMode.values[i];
-          return FilterChip(
-            avatar: Icon(_iconFor(v), size: 16),
-            label: Text(v.label),
-            selected: selected == v,
-            onSelected: (_) => onSelect(v),
-          );
-        },
+    return _segmentWrapper(
+      child: SegmentedButton<SortMode>(
+        style: _segmentStyle(),
+        showSelectedIcon: false,
+        segments: [
+          for (final m in SortMode.values)
+            ButtonSegment(value: m, label: Text(m.label)),
+        ],
+        selected: {selected},
+        onSelectionChanged: (s) => onSelect(s.first),
       ),
     );
   }
 }
 
-// ─── Boolean toggle pills (Oscar / No animation / Include watched) ────────────
+// ─── Curated source segment ───────────────────────────────────────────────────
 
-class _TogglePills extends StatelessWidget {
-  final bool oscarOnly;
-  final bool excludeAnimation;
-  final bool includeWatched;
-  final ValueChanged<bool> onOscarChanged;
-  final ValueChanged<bool> onExcludeAnimationChanged;
-  final ValueChanged<bool> onIncludeWatchedChanged;
+class _CuratedSourceSegment extends StatelessWidget {
+  final CuratedSource selected;
+  final ValueChanged<CuratedSource> onSelect;
 
-  const _TogglePills({
-    required this.oscarOnly,
-    required this.excludeAnimation,
-    required this.includeWatched,
-    required this.onOscarChanged,
-    required this.onExcludeAnimationChanged,
-    required this.onIncludeWatchedChanged,
+  const _CuratedSourceSegment({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return _segmentWrapper(
+      child: SegmentedButton<CuratedSource>(
+        style: _segmentStyle(),
+        showSelectedIcon: false,
+        segments: [
+          for (final v in CuratedSource.values)
+            ButtonSegment(value: v, label: Text(v.label)),
+        ],
+        selected: {selected},
+        onSelectionChanged: (s) => onSelect(s.first),
+      ),
+    );
+  }
+}
+
+// ─── Boolean filter row (Oscar / No animation / Include watched) ──────────────
+
+/// Compact label-first row with a trailing Switch. Flatter alternative to
+/// FilterChips for boolean filters — the label and state are always readable
+/// side-by-side instead of hiding the state behind a selected-vs-unselected
+/// chip colour.
+class _FilterSwitchRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _FilterSwitchRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        children: [
-          FilterChip(
-            avatar: const Icon(Icons.emoji_events, size: 16),
-            label: const Text('Oscar winners'),
-            selected: oscarOnly,
-            onSelected: onOscarChanged,
-          ),
-          const SizedBox(width: 8),
-          FilterChip(
-            avatar: const Icon(Icons.animation, size: 16),
-            label: const Text('No animation'),
-            selected: excludeAnimation,
-            onSelected: onExcludeAnimationChanged,
-          ),
-          const SizedBox(width: 8),
-          FilterChip(
-            avatar: const Icon(Icons.visibility, size: 16),
-            label: const Text('Include watched'),
-            selected: includeWatched,
-            onSelected: onIncludeWatchedChanged,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Curated source pills ─────────────────────────────────────────────────────
-
-class _CuratedSourcePills extends StatelessWidget {
-  final CuratedSource selected;
-  final ValueChanged<CuratedSource> onSelect;
-
-  const _CuratedSourcePills({required this.selected, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        itemCount: CuratedSource.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final v = CuratedSource.values[i];
-          return FilterChip(
-            avatar: const Icon(Icons.collections_bookmark_outlined, size: 16),
-            label: Text(v.label),
-            selected: selected == v,
-            onSelected: (_) => onSelect(v),
-          );
-        },
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: Theme.of(context).iconTheme.color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label, style: const TextStyle(fontSize: 13)),
+            ),
+            Transform.scale(
+              scale: 0.85,
+              child: Switch(
+                value: value,
+                onChanged: onChanged,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
