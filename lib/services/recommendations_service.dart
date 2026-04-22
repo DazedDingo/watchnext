@@ -11,6 +11,7 @@ import '../providers/media_type_filter_provider.dart';
 import '../providers/runtime_filter_provider.dart';
 import '../providers/sort_mode_provider.dart';
 import '../providers/year_filter_provider.dart';
+import '../utils/oscar_winners.dart';
 import '../utils/tmdb_genres.dart';
 import 'tmdb_service.dart';
 
@@ -228,7 +229,15 @@ class RecommendationsService {
 
       final movieIds = genreIdsFromNames(genreFilters, mediaType: 'movie');
       final tvIds = genreIdsFromNames(genreFilters, mediaType: 'tv');
-      final keywordIds = oscarOnly ? const [kOscarKeywordId] : const <int>[];
+      // Oscar keyword (210024) is TMDB-user-maintained and overwhelmingly
+      // tagged with films that won technical/animated categories rather
+      // than Best Picture — combining it with genre+year filters
+      // routinely returns 0. We substitute a baked Best Picture winners
+      // list below (`kBestPictureWinners`), so we deliberately DO NOT
+      // pass `kOscarKeywordId` into the discover call anymore. Keeping
+      // the constant around for back-compat (tests reference it) but
+      // the refresh path no longer uses it.
+      const List<int> keywordIds = <int>[];
       // If the user explicitly picked Animation as a genre, the exclude toggle
       // is self-contradictory — honour the explicit pick and skip the exclude.
       final excludeIds = (excludeAnimation &&
@@ -309,6 +318,7 @@ class RecommendationsService {
           excludeAnimation && !genreFilters.contains('Animation'),
       tmdbCap: tmdbCap,
       discoverCap: dDiscoverCap,
+      includeOscarBakedList: oscarOnly,
     );
 
     if (candidates.isEmpty) return;
@@ -418,6 +428,15 @@ class RecommendationsService {
         if (curator is String && curator.isNotEmpty) {
           data['curator'] = curator;
         }
+        // Pre-stamp imdb_id when the candidate source already knows it
+        // (e.g. the Best Picture winners baked list). Avoids a wasted
+        // round-trip via `_backgroundResolveImdbIds` for these rows and
+        // means the Home IMDb chip renders from the moment the doc hits
+        // Firestore instead of waiting for TMDB lookup.
+        final preImdb = c['imdb_id'];
+        if (preImdb is String && preImdb.isNotEmpty) {
+          data['imdb_id'] = preImdb;
+        }
         if (!existingIds.contains(key)) {
           // Seed default score fields only on first write — protects any
           // Claude-set match_score on a rec that's already been scored.
@@ -429,7 +448,10 @@ class RecommendationsService {
         }
         batch.set(col.doc(key), data, SetOptions(merge: true));
 
-        if (!hasImdb.contains(key)) {
+        // Only enqueue for background resolution if neither the existing
+        // Firestore doc nor this candidate row already carries imdb_id.
+        final carriesImdb = preImdb is String && preImdb.isNotEmpty;
+        if (!hasImdb.contains(key) && !carriesImdb) {
           needsImdb.add((mediaType: mediaType, tmdbId: tmdbId));
         }
       }
@@ -594,9 +616,39 @@ List<Map<String, dynamic>> buildCandidates({
   bool excludeAnimation = false,
   int tmdbCap = 20,
   int discoverCap = 40,
+  bool includeOscarBakedList = false,
 }) {
   final candidates = <Map<String, dynamic>>[];
   final seen = <String>{};
+
+  // When the user turns on "Oscar winners", inject the curated Best
+  // Picture winners list as a dedicated candidate source. TMDB's Oscar
+  // keyword (210024) is unreliable — most entries are films that won
+  // technical/animated categories, not Best Picture — so combining it
+  // with genre+year filters routinely returns zero. The baked list is
+  // ground truth and every row carries enough metadata (genres, year,
+  // runtime, poster, imdb_id) to survive the client-side filter stack
+  // on its own. Placed first so these rows lead the merge order — if
+  // one is also in trending, it keeps the Oscar tag.
+  if (includeOscarBakedList) {
+    for (final w in kBestPictureWinners) {
+      final key = 'movie:${w.tmdbId}';
+      if (!seen.add(key)) continue;
+      candidates.add({
+        'media_type': 'movie',
+        'tmdb_id': w.tmdbId,
+        'title': w.title,
+        'year': w.year,
+        'poster_path': w.posterPath,
+        'genres': w.genres,
+        'runtime': w.runtime,
+        'overview': w.overview,
+        'source': 'oscar',
+        'is_oscar_winner': true,
+        'imdb_id': w.imdbId,
+      });
+    }
+  }
 
   for (final w in watchlist) {
     final key = '${w.mediaType}:${w.tmdbId}';

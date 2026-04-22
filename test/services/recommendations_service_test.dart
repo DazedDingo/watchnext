@@ -1691,6 +1691,55 @@ void main() {
     });
   });
 
+  // ─── buildCandidates — oscar baked list ────────────────────────────────
+  //
+  // The Oscar filter delegates to a curated Best Picture winners list
+  // (lib/utils/oscar_winners.dart) instead of TMDB's unreliable keyword.
+  // These tests lock down that contract so the Oscar filter can't silently
+  // regress back to the keyword path, and so the baked entries survive
+  // downstream writes with their imdb_id + oscar tag intact.
+  group('buildCandidates — oscar baked list', () {
+    test('includeOscarBakedList=true seeds Best Picture winners tagged', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeOscarBakedList: true,
+      );
+      expect(out.length, greaterThanOrEqualTo(90));
+      for (final c in out) {
+        expect(c['source'], 'oscar');
+        expect(c['is_oscar_winner'], true);
+        expect(c['media_type'], 'movie');
+        expect((c['imdb_id'] as String).startsWith('tt'), isTrue);
+      }
+    });
+
+    test('includeOscarBakedList=false omits the list', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeOscarBakedList: false,
+      );
+      expect(out.where((c) => c['source'] == 'oscar'), isEmpty);
+    });
+
+    test('oscar baked list leads merge order so tags survive trending dedup',
+        () {
+      // If The Godfather (tmdb=238) also comes through trending, the oscar
+      // source must win dedup so it keeps is_oscar_winner=true.
+      final out = buildCandidates(
+        watchlist: const [],
+        trendingMoviesPayload: {
+          'results': [
+            {'id': 238, 'title': 'The Godfather', 'release_date': '1972-03-14'},
+          ],
+        },
+        includeOscarBakedList: true,
+      );
+      final row = out.firstWhere((c) => c['tmdb_id'] == 238);
+      expect(row['source'], 'oscar');
+      expect(row['is_oscar_winner'], true);
+    });
+  });
+
   // ─── isNarrowFilterCombo ────────────────────────────────────────────────
   //
   // Locks in which filter combinations should trigger the widened-pool

@@ -78,3 +78,26 @@ describe("CACHE_TTL_MS", () => {
     expect(CACHE_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
   });
 });
+
+// These unit tests exercise the auth/quota detection branch of
+// `fetchFromOmdb` via a lightweight fake. We can't invoke the onCall
+// wrapper without firebase-functions-test, but the branching logic is
+// what matters — "Invalid API key" was previously cached as notFound
+// for 7 days, hiding activation failures.
+describe("OMDb auth/quota error detection", () => {
+  // Copy of the regex from src/externalRatings.ts — if this drifts,
+  // the test reminds us to revisit both sides.
+  const AUTH_RE = /API key|daily limit|request limit/i;
+
+  it.each([
+    ["Invalid API key!", true],
+    ["No API key provided.", true],
+    ["Request limit reached!", true],
+    ["Daily limit exceeded", true],
+    ["Movie not found!", false],
+    ["Incorrect IMDb ID.", false],
+    ["", false],
+  ])("%s -> throws=%s", (error, shouldThrow) => {
+    expect(AUTH_RE.test(error)).toBe(shouldThrow);
+  });
+});

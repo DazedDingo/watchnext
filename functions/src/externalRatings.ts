@@ -82,10 +82,18 @@ async function fetchFromOmdb(
 
   const payload = (await res.json()) as Record<string, unknown>;
 
-  // OMDb returns `{Response: "False", Error: "..."}` for unknown ids rather
-  // than a 404. Treat as a cacheable "not found" so we don't retry every
-  // time the user opens the title.
+  // OMDb returns `{Response: "False", Error: "..."}` for unknown ids AND
+  // for auth/config errors (invalid key, rate limit, etc). Distinguish
+  // the two — an invalid-key response should NOT be cached as notFound,
+  // otherwise the 7-day TTL will mask the problem long after the user
+  // activates their key. Match on "API key" / "limit" / "Daily" to catch
+  // the auth + quota errors OMDb emits; everything else is a genuine
+  // "no entry for this imdb id" which IS safe to cache.
   if (payload.Response === "False") {
+    const error = String(payload.Error ?? "");
+    if (/API key|daily limit|request limit/i.test(error)) {
+      throw new HttpsError("internal", `OMDb auth/quota: ${error}`);
+    }
     return {
       imdbId,
       imdbRating: null,
