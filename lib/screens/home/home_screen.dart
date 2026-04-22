@@ -487,7 +487,7 @@ class _HomeAction extends StatelessWidget {
 /// a single ExpansionTile so the scored rec list is higher up the fold.
 /// Header subtitle summarises what's active so users don't have to expand
 /// to check state.
-class _FiltersPanel extends StatelessWidget {
+class _FiltersPanel extends StatefulWidget {
   final Set<String> selectedGenres;
   final RuntimeBucket? runtime;
   final YearRange yearRange;
@@ -530,36 +530,43 @@ class _FiltersPanel extends StatelessWidget {
     required this.onIncludeWatchedChanged,
   });
 
+  @override
+  State<_FiltersPanel> createState() => _FiltersPanelState();
+}
+
+class _FiltersPanelState extends State<_FiltersPanel> {
+  bool _isExpanded = false;
+
   int get _activeCount {
     var n = 0;
-    if (selectedGenres.isNotEmpty) n += 1;
-    if (runtime != null) n += 1;
-    if (yearRange.hasAnyBound) n += 1;
-    if (mediaType != null) n += 1;
-    if (oscarOnly) n += 1;
-    if (excludeAnimation) n += 1;
-    if (sortMode != SortMode.topRated) n += 1;
-    if (curatedSource != CuratedSource.none) n += 1;
+    if (widget.selectedGenres.isNotEmpty) n += 1;
+    if (widget.runtime != null) n += 1;
+    if (widget.yearRange.hasAnyBound) n += 1;
+    if (widget.mediaType != null) n += 1;
+    if (widget.oscarOnly) n += 1;
+    if (widget.excludeAnimation) n += 1;
+    if (widget.sortMode != SortMode.topRated) n += 1;
+    if (widget.curatedSource != CuratedSource.none) n += 1;
     // "Include watched" is counted as an active filter when it diverges from
     // the default (hide watched). Most users want the default, so flipping it
     // on should be visibly flagged.
-    if (includeWatched) n += 1;
+    if (widget.includeWatched) n += 1;
     return n;
   }
 
   String _summary() {
     final parts = <String>[];
-    if (selectedGenres.isNotEmpty) {
-      final list = selectedGenres.toList()..sort();
+    if (widget.selectedGenres.isNotEmpty) {
+      final list = widget.selectedGenres.toList()..sort();
       parts.add(list.length <= 2
           ? list.join(', ')
           : '${list.length} genres');
     }
-    if (mediaType != null) parts.add(mediaType!.label);
-    if (runtime != null) parts.add(runtime!.label);
-    if (yearRange.hasAnyBound) {
-      final lo = yearRange.minYear;
-      final hi = yearRange.maxYear;
+    if (widget.mediaType != null) parts.add(widget.mediaType!.label);
+    if (widget.runtime != null) parts.add(widget.runtime!.label);
+    if (widget.yearRange.hasAnyBound) {
+      final lo = widget.yearRange.minYear;
+      final hi = widget.yearRange.maxYear;
       if (lo != null && hi != null) {
         parts.add('$lo–$hi');
       } else if (lo != null) {
@@ -568,101 +575,146 @@ class _FiltersPanel extends StatelessWidget {
         parts.add('≤$hi');
       }
     }
-    if (sortMode != SortMode.topRated) parts.add(sortMode.label);
-    if (curatedSource != CuratedSource.none) parts.add(curatedSource.label);
-    if (oscarOnly) parts.add('Oscar winners');
-    if (excludeAnimation) parts.add('No animation');
-    if (includeWatched) parts.add('+ watched');
+    if (widget.sortMode != SortMode.topRated) parts.add(widget.sortMode.label);
+    if (widget.curatedSource != CuratedSource.none) {
+      parts.add(widget.curatedSource.label);
+    }
+    if (widget.oscarOnly) parts.add('Oscar winners');
+    if (widget.excludeAnimation) parts.add('No animation');
+    if (widget.includeWatched) parts.add('+ watched');
     return parts.isEmpty ? 'None' : parts.join(' · ');
+  }
+
+  void _toggle() {
+    setState(() => _isExpanded = !_isExpanded);
   }
 
   @override
   Widget build(BuildContext context) {
     final active = _activeCount;
+    final primary = Theme.of(context).colorScheme.primary;
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-      child: Theme(
-        // ExpansionTile adds its own divider lines by default; strip them
-        // so the panel reads as part of the Home surface, not a section break.
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-          childrenPadding: EdgeInsets.zero,
-          leading: Icon(
-            Icons.tune,
-            size: 20,
-            color: active > 0 ? Theme.of(context).colorScheme.primary : null,
-          ),
-          title: Row(
-            children: [
-              const Text('Filters'),
-              if (active > 0) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '$active',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Compact single-line header. ~42px tall: 8px vertical padding on each
+          // side of a 26px content row.
+          InkWell(
+            onTap: _toggle,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: SizedBox(
+                height: 26,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.tune,
+                      size: 18,
+                      color: active > 0 ? primary : null,
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Filters',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    if (active > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: primary.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$active',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _summary(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    AnimatedRotation(
+                      turns: _isExpanded ? 0.5 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: const Icon(
+                        Icons.keyboard_arrow_down,
+                        size: 20,
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            firstCurve: Curves.easeOut,
+            secondCurve: Curves.easeIn,
+            sizeCurve: Curves.easeInOut,
+            crossFadeState: _isExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox(width: double.infinity, height: 0),
+            secondChild: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _GenreChipsRow(
+                  selected: widget.selectedGenres,
+                  onEdit: widget.onEditGenres,
+                  onClear: widget.onClearGenres,
+                ),
+                _MediaTypePills(
+                  selected: widget.mediaType,
+                  onSelect: widget.onMediaTypeSelect,
+                ),
+                _RuntimePills(
+                  selected: widget.runtime,
+                  onSelect: widget.onRuntimeSelect,
+                ),
+                _SortModePills(
+                  selected: widget.sortMode,
+                  onSelect: widget.onSortModeSelect,
+                ),
+                _CuratedSourcePills(
+                  selected: widget.curatedSource,
+                  onSelect: widget.onCuratedSourceSelect,
+                ),
+                YearRangeSlider(
+                  range: widget.yearRange,
+                  onChanged: widget.onYearRangeChanged,
+                ),
+                _TogglePills(
+                  oscarOnly: widget.oscarOnly,
+                  excludeAnimation: widget.excludeAnimation,
+                  includeWatched: widget.includeWatched,
+                  onOscarChanged: widget.onOscarChanged,
+                  onExcludeAnimationChanged: widget.onExcludeAnimationChanged,
+                  onIncludeWatchedChanged: widget.onIncludeWatchedChanged,
+                ),
+                const SizedBox(height: 4),
               ],
-            ],
+            ),
           ),
-          subtitle: Text(
-            _summary(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Colors.white54),
-          ),
-          children: [
-            _GenreChipsRow(
-              selected: selectedGenres,
-              onEdit: onEditGenres,
-              onClear: onClearGenres,
-            ),
-            _MediaTypePills(
-              selected: mediaType,
-              onSelect: onMediaTypeSelect,
-            ),
-            _RuntimePills(
-              selected: runtime,
-              onSelect: onRuntimeSelect,
-            ),
-            _SortModePills(
-              selected: sortMode,
-              onSelect: onSortModeSelect,
-            ),
-            _CuratedSourcePills(
-              selected: curatedSource,
-              onSelect: onCuratedSourceSelect,
-            ),
-            YearRangeSlider(
-              range: yearRange,
-              onChanged: onYearRangeChanged,
-            ),
-            _TogglePills(
-              oscarOnly: oscarOnly,
-              excludeAnimation: excludeAnimation,
-              includeWatched: includeWatched,
-              onOscarChanged: onOscarChanged,
-              onExcludeAnimationChanged: onExcludeAnimationChanged,
-              onIncludeWatchedChanged: onIncludeWatchedChanged,
-            ),
-            const SizedBox(height: 4),
-          ],
-        ),
+        ],
       ),
     );
   }

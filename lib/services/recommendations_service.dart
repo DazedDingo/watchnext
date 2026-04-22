@@ -34,6 +34,17 @@ class RecommendationsService {
   final FirebaseFunctions? _fnsOverride;
   final TmdbService _tmdb;
 
+  /// Monotonic refresh counter used to drop stale concurrent refreshes before
+  /// they mutate Firestore. The Home screen debounces filter changes at 700ms
+  /// but still permits concurrent `refresh(...)` calls when the user churns
+  /// filters faster than TMDB can respond (TMDB fan-out is 1–3s). Without this
+  /// guard, an older refresh could finish its TMDB fetches last, then
+  /// overwrite the newer refresh's Firestore pool — the "options flip back a
+  /// few seconds later" symptom. The guard is checked before the Firestore
+  /// write and before kicking off background Claude scoring; the stale
+  /// refresh's TMDB fetches still run but are discarded silently.
+  int _refreshEpoch = 0;
+
   RecommendationsService({
     FirebaseFirestore? db,
     FirebaseFunctions? fns,
@@ -134,6 +145,14 @@ class RecommendationsService {
     CuratedSource curatedSource = CuratedSource.none,
     bool forceTasteProfile = false,
   }) async {
+    // Claim this refresh's epoch up-front. If a newer refresh starts before
+    // our TMDB fetches return, `_refreshEpoch` will advance past `myEpoch`
+    // and the guards below the TMDB fan-out will bail silently without
+    // touching Firestore. Both refreshes finish fetching — we only short-
+    // circuit the mutation side so the last-to-start refresh is the one
+    // whose pool lands, regardless of which finishes TMDB first.
+    final myEpoch = ++_refreshEpoch;
+
     List<Map<String, dynamic>> redditRows = const [];
     try {
       final snap = await _db
@@ -260,10 +279,20 @@ class RecommendationsService {
 
     if (candidates.isEmpty) return;
 
+    // Epoch guard: if another refresh started after us, its Firestore write
+    // is the authoritative one — bail before we stomp it. See `_refreshEpoch`
+    // doc above for the race this prevents.
+    if (myEpoch != _refreshEpoch) return;
+
     // Phase A — sync: write the pool to Firestore with default scores so
     // the Home stream lights up immediately. This is the bit the user waits
     // on. Pre-existing rec keys keep their scores (merge skips score fields).
     await writeCandidateDocs(householdId, candidates);
+
+    // Re-check after the Firestore write: an even-newer refresh could have
+    // landed while we were writing. Don't fire a stale Claude pass — its
+    // candidate list is now out-of-date vs. the pool in Firestore.
+    if (myEpoch != _refreshEpoch) return;
 
     // Phase B — async: taste-profile refresh (if forced) + Claude scoring.
     // Fire-and-forget: any failure leaves the pool intact at default scores,

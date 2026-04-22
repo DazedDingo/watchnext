@@ -1,7 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:watchnext/models/watchlist_item.dart';
 import 'package:watchnext/services/recommendations_service.dart';
+import 'package:watchnext/services/tmdb_service.dart';
 
 WatchlistItem _w({
   required String mediaType,
@@ -1376,6 +1382,197 @@ void main() {
           .get();
       expect(doc.data()!['is_oscar_winner'], true,
           reason: 'oscar flag should be sticky across refresh passes');
+    });
+  });
+
+  // ─── RecommendationsService.refresh — epoch guard ──────────────────────
+  //
+  // The Home screen debounces filter changes at 700ms, but a user who flips
+  // filters faster than TMDB can respond (fan-out is 1–3s) can still trigger
+  // concurrent `refresh(...)` calls. Before the epoch guard, an older refresh
+  // could finish its TMDB fetches AFTER a newer one already landed, and then
+  // stomp the newer pool with its stale candidates — the user-visible symptom
+  // was "the filter I picked flashes up, then gets overwritten a few seconds
+  // later by the previous one".
+  //
+  // The guard: at the top of `refresh`, capture `myEpoch = ++_refreshEpoch`.
+  // Before the Firestore write (and before firing the Claude background
+  // score), check `myEpoch != _refreshEpoch` and bail silently. The stale
+  // refresh still burns its TMDB quota (Dart Futures can't be cancelled),
+  // but it does NOT mutate Firestore.
+  group('RecommendationsService.refresh — epoch guard', () {
+    /// Builds an `http.Client` that routes TMDB baseline endpoints
+    /// (trending + top_rated for movie + tv) to caller-controlled payloads,
+    /// but gates the FIRST `batchSize` requests on [stallUntil] so tests
+    /// can interleave two concurrent `refresh()` calls. The count is tracked
+    /// across all incoming requests; after `batchSize` requests have been
+    /// seen, subsequent ones resolve immediately with [secondPayload].
+    http.Client gatedClient({
+      required Future<void> stallUntil,
+      required Map<String, dynamic> stalePayload,
+      required Map<String, dynamic> freshPayload,
+      required int batchSize,
+      required List<Uri> allRequests,
+    }) {
+      var seen = 0;
+      return MockClient((req) async {
+        allRequests.add(req.url);
+        final isBatchOne = seen < batchSize;
+        seen++;
+        if (isBatchOne) {
+          // Refresh 1's TMDB fetch — stall until the test releases it.
+          await stallUntil;
+          return http.Response(
+            json.encode(stalePayload),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }
+        // Refresh 2's TMDB fetch — resolve immediately with the fresh pool.
+        return http.Response(
+          json.encode(freshPayload),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      });
+    }
+
+    test(
+        'stale refresh does NOT overwrite a newer refresh\'s Firestore pool',
+        () async {
+      // Stale payload carries `id=111`; fresh payload carries `id=222`.
+      // After the race resolves, only the fresh rec key should exist.
+      final stalePayload = {
+        'results': [
+          {
+            'id': 111,
+            'media_type': 'movie',
+            'title': 'Stale Pick',
+            'genre_ids': [18],
+            'release_date': '2020-01-01',
+          },
+        ],
+      };
+      final freshPayload = {
+        'results': [
+          {
+            'id': 222,
+            'media_type': 'movie',
+            'title': 'Fresh Pick',
+            'genre_ids': [18],
+            'release_date': '2024-01-01',
+          },
+        ],
+      };
+
+      // `refresh()` fires 4 baseline TMDB calls when filters are inactive
+      // (trendingMovies, trendingTv, topRatedMovies, topRatedTv). Gate the
+      // first 4 so refresh 1's whole batch waits for us to release them.
+      final release = Completer<void>();
+      final requests = <Uri>[];
+      final client = gatedClient(
+        stallUntil: release.future,
+        stalePayload: stalePayload,
+        freshPayload: freshPayload,
+        batchSize: 4,
+        allRequests: requests,
+      );
+      final tmdb = TmdbService(client: client);
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db, tmdb: tmdb);
+      const hh = 'hh-race';
+
+      // Start refresh 1 (stale). Its 4 TMDB calls block on `release`.
+      final refresh1 = svc.refresh(hh, watchlist: const []);
+
+      // Let refresh 1's TMDB calls get dispatched onto the mock client so
+      // `seen` is advanced past the batch threshold before refresh 2 fires.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Start refresh 2 (fresh). Its TMDB calls resolve immediately; it
+      // advances `_refreshEpoch` past refresh 1 and writes `movie:222` to
+      // Firestore before refresh 1 has even seen its TMDB responses.
+      await svc.refresh(hh, watchlist: const []);
+
+      // Sanity: after refresh 2 lands, only `movie:222` is in Firestore.
+      final midSnap =
+          await db.collection('households/$hh/recommendations').get();
+      expect(midSnap.docs.map((d) => d.id).toList(), ['movie:222'],
+          reason: 'fresh refresh must have written its pool');
+
+      // Now release refresh 1's TMDB responses. It will build its
+      // candidate list (Stale Pick) and then hit the epoch guard — the
+      // epoch has advanced, so it must bail WITHOUT writing to Firestore.
+      release.complete();
+      await refresh1;
+
+      // Final assertion: Firestore still contains only the fresh refresh's
+      // pool. If the epoch guard had not fired, `movie:111` would be here
+      // (alongside `movie:222`) because the stale refresh's writeCandidateDocs
+      // would have merged its own pool on top.
+      final finalSnap =
+          await db.collection('households/$hh/recommendations').get();
+      final ids = finalSnap.docs.map((d) => d.id).toSet();
+      expect(ids, {'movie:222'},
+          reason:
+              'stale refresh must not write its candidates after a newer refresh has committed');
+      expect(ids.contains('movie:111'), isFalse,
+          reason:
+              'the "Stale Pick" from refresh 1 must never appear in Firestore');
+    });
+
+    test('non-overlapping refreshes both land (epoch guard is not a lock)',
+        () async {
+      // Sanity test: if refresh 1 finishes BEFORE refresh 2 starts, the
+      // guard must not interfere. Refresh 2's pool merges with refresh 1's;
+      // both rec keys end up in Firestore (the stream shows the union).
+      final firstPayload = {
+        'results': [
+          {
+            'id': 301,
+            'media_type': 'movie',
+            'title': 'First',
+            'genre_ids': [18],
+            'release_date': '2020-01-01',
+          },
+        ],
+      };
+      final secondPayload = {
+        'results': [
+          {
+            'id': 302,
+            'media_type': 'movie',
+            'title': 'Second',
+            'genre_ids': [18],
+            'release_date': '2024-01-01',
+          },
+        ],
+      };
+
+      var callCount = 0;
+      final client = MockClient((req) async {
+        // First 4 requests return payload 1, next 4 return payload 2.
+        final payload = callCount < 4 ? firstPayload : secondPayload;
+        callCount++;
+        return http.Response(
+          json.encode(payload),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      });
+      final tmdb = TmdbService(client: client);
+      final db = FakeFirebaseFirestore();
+      final svc = RecommendationsService(db: db, tmdb: tmdb);
+      const hh = 'hh-sequential';
+
+      await svc.refresh(hh, watchlist: const []);
+      await svc.refresh(hh, watchlist: const []);
+
+      final snap = await db.collection('households/$hh/recommendations').get();
+      final ids = snap.docs.map((d) => d.id).toSet();
+      expect(ids, containsAll(['movie:301', 'movie:302']),
+          reason:
+              'sequential (non-overlapping) refreshes must both land; guard only drops stale concurrent ones');
     });
   });
 }

@@ -67,6 +67,18 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 
   bool _watchlistBusy = false;
   bool _watchedBusy = false;
+  bool _trailerPlaying = false;
+
+  Widget _dimmable(Widget child) {
+    return AnimatedOpacity(
+      opacity: _trailerPlaying ? 0.3 : 1.0,
+      duration: const Duration(milliseconds: 220),
+      child: IgnorePointer(
+        ignoring: _trailerPlaying,
+        child: child,
+      ),
+    );
+  }
 
   /// Movies carry `imdb_id` at the top level; TV carries it under
   /// `external_ids.imdb_id` (tvDetails appends `external_ids` to pick it up).
@@ -481,11 +493,11 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
             padding: EdgeInsets.zero,
             children: [
               if (backdrop != null)
-                AspectRatio(
+                _dimmable(AspectRatio(
                   aspectRatio: 16 / 9,
                   child: Image.network(backdrop, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox()),
-                ),
-              Padding(
+                )),
+              _dimmable(Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   if (poster != null)
@@ -515,70 +527,51 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                     ]),
                   ),
                 ]),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(spacing: 8, children: [
-                  _WatchlistButton(
-                    onShared: sharedEntry != null,
-                    onSolo: mySoloEntry != null,
-                    busy: _watchlistBusy,
-                    onTap: () => _openScopeSheet(
-                      d,
-                      currentShared: sharedEntry,
-                      currentSolo: mySoloEntry,
-                    ),
-                  ),
-                  _WatchStatusControl(
-                    mediaType: widget.mediaType,
-                    status: watchStatus,
-                    busy: _watchedBusy,
-                    onSelect: (target) => _setWatchStatus(
-                      d,
-                      target: target,
-                      current: watchStatus,
-                    ),
-                  ),
-                  FilledButton.tonalIcon(
-                    icon: const Icon(Icons.star_outline),
-                    label: const Text('Rate'),
-                    onPressed: () => _openRatingSheet(d),
-                  ),
-                  if (canPredict)
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.psychology_outlined),
-                      label: const Text('Predict'),
-                      onPressed: () => _openPredictionSheet(d),
-                    ),
-                  if (canReveal)
-                    FilledButton.icon(
-                      icon: const Icon(Icons.emoji_events_outlined),
-                      label: const Text('See Reveal'),
-                      onPressed: () => context.push(
-                          '/reveal/${widget.mediaType}/${widget.tmdbId}'),
-                    ),
-                  if (_imdbIdFor(d) != null) ...[
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.play_circle_outline),
-                      label: const Text('Stremio'),
-                      onPressed: () => _openInStremio(d),
-                    ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.open_in_new),
-                      label: const Text('IMDb'),
-                      onPressed: () => _openOnImdb(d),
-                    ),
-                  ],
-                ]),
-              ),
-              if (overview != null && overview.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(overview, style: Theme.of(context).textTheme.bodyMedium),
+              )),
+              _dimmable(_ActionRow(
+                mediaType: widget.mediaType,
+                watchStatus: watchStatus,
+                watchedBusy: _watchedBusy,
+                watchlistBusy: _watchlistBusy,
+                onShared: sharedEntry != null,
+                onSolo: mySoloEntry != null,
+                canPredict: canPredict,
+                canReveal: canReveal,
+                hasImdb: _imdbIdFor(d) != null,
+                onWatchlistTap: () => _openScopeSheet(
+                  d,
+                  currentShared: sharedEntry,
+                  currentSolo: mySoloEntry,
                 ),
-              ],
-              _TrailerSection(details: d),
+                onWatchStatus: (target) => _setWatchStatus(
+                  d,
+                  target: target,
+                  current: watchStatus,
+                ),
+                onRate: () => _openRatingSheet(d),
+                onPredict: () => _openPredictionSheet(d),
+                onReveal: () =>
+                    context.push('/reveal/${widget.mediaType}/${widget.tmdbId}'),
+                onStremio: () => _openInStremio(d),
+                onImdb: () => _openOnImdb(d),
+              )),
+              if (overview != null && overview.isNotEmpty)
+                _dimmable(Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Text(overview, style: Theme.of(context).textTheme.bodyMedium),
+                )),
+              _TrailerSection(
+                details: d,
+                onPlayingChanged: (playing) {
+                  if (!mounted) return;
+                  setState(() => _trailerPlaying = playing);
+                },
+              ),
+              _dimmable(_RatingsSourcesSection(
+                details: d,
+                mediaType: widget.mediaType,
+                imdbId: _imdbIdFor(d),
+              )),
               // AI blurb from Phase 7 scoring — shown when available.
               if (rec != null) ...() {
                 final blurb = mode == ViewMode.solo
@@ -586,9 +579,8 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                     : rec.aiBlurb;
                 if (blurb.isEmpty) return const <Widget>[];
                 return [
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  _dimmable(Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -605,34 +597,38 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                         ),
                       ],
                     ),
-                  ),
+                  )),
                 ];
               }(),
-              if (ratings.isNotEmpty) ...[
-                const SizedBox(height: 24),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text('Household ratings', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                for (final r in ratings.where((r) => r.level == _ratingLevel))
-                  ListTile(
-                    leading: const Icon(Icons.person),
-                    title: Row(children: [
-                      for (var i = 0; i < 5; i++)
-                        Icon(i < r.stars ? Icons.star : Icons.star_border, size: 16, color: Colors.amber),
-                    ]),
-                    subtitle: r.note != null ? Text(r.note!) : null,
-                    trailing: Text(r.uid == FirebaseAuth.instance.currentUser?.uid ? 'You' : 'Partner'),
-                  ),
-              ],
+              if (ratings.isNotEmpty)
+                _dimmable(Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 24),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Text('Household ratings', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    for (final r in ratings.where((r) => r.level == _ratingLevel))
+                      ListTile(
+                        leading: const Icon(Icons.person),
+                        title: Row(children: [
+                          for (var i = 0; i < 5; i++)
+                            Icon(i < r.stars ? Icons.star : Icons.star_border, size: 16, color: Colors.amber),
+                        ]),
+                        subtitle: r.note != null ? Text(r.note!) : null,
+                        trailing: Text(r.uid == FirebaseAuth.instance.currentUser?.uid ? 'You' : 'Partner'),
+                      ),
+                  ],
+                )),
               // TMDB ships `similar.results` when the detail call uses
               // `append_to_response=similar`, so this is free — no extra fetch.
-              _SimilarTitlesSection(
+              _dimmable(_SimilarTitlesSection(
                 mediaType: widget.mediaType,
                 similar: (d['similar'] as Map<String, dynamic>?)?['results']
                         as List? ??
                     const [],
-              ),
+              )),
               const SizedBox(height: 40),
             ],
           );
@@ -758,110 +754,176 @@ class _SimilarTitlesSection extends ConsumerWidget {
 // ─── Watchlist add/manage button ──────────────────────────────────────────────
 
 /// Single button that reflects the title's combined state across both scopes
-/// and opens the scope picker sheet. Replaces the previous split add/remove
-/// button so users can toggle Shared and Solo independently.
-class _WatchlistButton extends StatelessWidget {
-  final bool onShared;
-  final bool onSolo;
-  final bool busy;
-  final VoidCallback onTap;
-
-  const _WatchlistButton({
-    required this.onShared,
-    required this.onSolo,
-    required this.busy,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final anyScope = onShared || onSolo;
-    final icon = anyScope ? Icons.bookmark : Icons.bookmark_add_outlined;
-    final label = switch ((onShared, onSolo)) {
-      (true, true) => 'On both lists',
-      (true, false) => 'On Shared list',
-      (false, true) => 'On Solo list',
-      (false, false) => 'Add to watchlist',
-    };
-    if (anyScope) {
-      return OutlinedButton.icon(
-        icon: Icon(icon),
-        label: Text(label),
-        onPressed: busy ? null : onTap,
-      );
-    }
-    return FilledButton.icon(
-      icon: Icon(icon),
-      label: Text(label),
-      onPressed: busy ? null : onTap,
-    );
-  }
-}
-
-// ─── Watch-status control ────────────────────────────────────────────────────
-
+/// and opens the scope picker sheet.
 enum _WatchStatus { notWatched, watching, watched }
 
-class _WatchStatusControl extends StatelessWidget {
+/// Flattened action row — unified compact `OutlinedButton` pills for every
+/// primary action, plus an icon-only trailing strip for external deep links.
+/// Replaces the previous mix of Filled / FilledTonal / Outlined styles that
+/// visually pushed the action area to ~3 rows tall.
+class _ActionRow extends StatelessWidget {
   final String mediaType;
-  final _WatchStatus status;
-  final bool busy;
-  final ValueChanged<_WatchStatus> onSelect;
+  final _WatchStatus watchStatus;
+  final bool watchedBusy;
+  final bool watchlistBusy;
+  final bool onShared;
+  final bool onSolo;
+  final bool canPredict;
+  final bool canReveal;
+  final bool hasImdb;
+  final VoidCallback onWatchlistTap;
+  final ValueChanged<_WatchStatus> onWatchStatus;
+  final VoidCallback onRate;
+  final VoidCallback onPredict;
+  final VoidCallback onReveal;
+  final VoidCallback onStremio;
+  final VoidCallback onImdb;
 
-  const _WatchStatusControl({
+  const _ActionRow({
     required this.mediaType,
-    required this.status,
-    required this.busy,
-    required this.onSelect,
+    required this.watchStatus,
+    required this.watchedBusy,
+    required this.watchlistBusy,
+    required this.onShared,
+    required this.onSolo,
+    required this.canPredict,
+    required this.canReveal,
+    required this.hasImdb,
+    required this.onWatchlistTap,
+    required this.onWatchStatus,
+    required this.onRate,
+    required this.onPredict,
+    required this.onReveal,
+    required this.onStremio,
+    required this.onImdb,
   });
+
+  String get _watchlistLabel => switch ((onShared, onSolo)) {
+        (true, true) => 'On both lists',
+        (true, false) => 'On Shared',
+        (false, true) => 'On Solo',
+        (false, false) => 'Watchlist',
+      };
+
+  IconData get _watchlistIcon =>
+      (onShared || onSolo) ? Icons.bookmark : Icons.bookmark_add_outlined;
 
   @override
   Widget build(BuildContext context) {
-    // Movies only have a binary state — "Watching" isn't meaningful for a
-    // single 90-120min sitting, so keep the simple toggle there.
-    if (mediaType != 'tv') {
-      if (status == _WatchStatus.watched) {
-        return OutlinedButton.icon(
-          icon: const Icon(Icons.check_circle),
-          label: const Text('Watched'),
-          onPressed: busy ? null : () => onSelect(_WatchStatus.notWatched),
+    final buttonStyle = OutlinedButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      minimumSize: const Size(0, 36),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+
+    Widget pill({
+      required IconData icon,
+      required String label,
+      required VoidCallback? onPressed,
+    }) =>
+        OutlinedButton.icon(
+          style: buttonStyle,
+          icon: Icon(icon, size: 16),
+          label: Text(label, style: const TextStyle(fontSize: 12)),
+          onPressed: onPressed,
         );
-      }
-      return FilledButton.tonalIcon(
-        icon: const Icon(Icons.visibility_outlined),
-        label: const Text('Mark watched'),
-        onPressed: busy ? null : () => onSelect(_WatchStatus.watched),
+
+    Widget watchControl;
+    if (mediaType != 'tv') {
+      watchControl = pill(
+        icon: watchStatus == _WatchStatus.watched
+            ? Icons.check_circle
+            : Icons.visibility_outlined,
+        label:
+            watchStatus == _WatchStatus.watched ? 'Watched' : 'Mark watched',
+        onPressed: watchedBusy
+            ? null
+            : () => onWatchStatus(watchStatus == _WatchStatus.watched
+                ? _WatchStatus.notWatched
+                : _WatchStatus.watched),
+      );
+    } else {
+      watchControl = SegmentedButton<_WatchStatus>(
+        segments: const [
+          ButtonSegment(
+              value: _WatchStatus.notWatched,
+              icon: Icon(Icons.radio_button_unchecked, size: 14)),
+          ButtonSegment(
+              value: _WatchStatus.watching,
+              icon: Icon(Icons.play_circle_outline, size: 14)),
+          ButtonSegment(
+              value: _WatchStatus.watched,
+              icon: Icon(Icons.check_circle, size: 14)),
+        ],
+        selected: {watchStatus},
+        showSelectedIcon: false,
+        style: const ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 6, vertical: 0)),
+          minimumSize: WidgetStatePropertyAll(Size(0, 36)),
+        ),
+        onSelectionChanged: watchedBusy
+            ? null
+            : (sel) {
+                if (sel.isEmpty) return;
+                onWatchStatus(sel.first);
+              },
       );
     }
-    return SegmentedButton<_WatchStatus>(
-      segments: const [
-        ButtonSegment(
-          value: _WatchStatus.notWatched,
-          icon: Icon(Icons.radio_button_unchecked, size: 16),
-          label: Text('Not'),
-        ),
-        ButtonSegment(
-          value: _WatchStatus.watching,
-          icon: Icon(Icons.play_circle_outline, size: 16),
-          label: Text('Watching'),
-        ),
-        ButtonSegment(
-          value: _WatchStatus.watched,
-          icon: Icon(Icons.check_circle, size: 16),
-          label: Text('Watched'),
-        ),
-      ],
-      selected: {status},
-      showSelectedIcon: false,
-      style: const ButtonStyle(
-        visualDensity: VisualDensity.compact,
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          pill(
+            icon: _watchlistIcon,
+            label: _watchlistLabel,
+            onPressed: watchlistBusy ? null : onWatchlistTap,
+          ),
+          watchControl,
+          pill(
+            icon: Icons.star_outline,
+            label: 'Rate',
+            onPressed: onRate,
+          ),
+          if (canPredict)
+            pill(
+              icon: Icons.psychology_outlined,
+              label: 'Predict',
+              onPressed: onPredict,
+            ),
+          if (canReveal)
+            pill(
+              icon: Icons.emoji_events_outlined,
+              label: 'See Reveal',
+              onPressed: onReveal,
+            ),
+          if (hasImdb) ...[
+            IconButton(
+              icon: const Icon(Icons.play_circle_outline, size: 20),
+              tooltip: 'Open in Stremio',
+              onPressed: onStremio,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            ),
+            IconButton(
+              icon: const Icon(Icons.open_in_new, size: 20),
+              tooltip: 'Open on IMDb',
+              onPressed: onImdb,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            ),
+          ],
+        ],
       ),
-      onSelectionChanged: busy
-          ? null
-          : (sel) {
-              if (sel.isEmpty) return;
-              onSelect(sel.first);
-            },
     );
   }
 }
@@ -1008,7 +1070,8 @@ String? pickTrailerKey(List<dynamic>? videos) {
 
 class _TrailerSection extends StatefulWidget {
   final Map<String, dynamic> details;
-  const _TrailerSection({required this.details});
+  final ValueChanged<bool>? onPlayingChanged;
+  const _TrailerSection({required this.details, this.onPlayingChanged});
 
   @override
   State<_TrailerSection> createState() => _TrailerSectionState();
@@ -1042,12 +1105,14 @@ class _TrailerSectionState extends State<_TrailerSection> {
         ),
       );
     });
+    widget.onPlayingChanged?.call(true);
   }
 
   void _collapse() {
     _ctrl?.pause();
     _ctrl?.dispose();
     setState(() => _ctrl = null);
+    widget.onPlayingChanged?.call(false);
   }
 
   @override
@@ -1084,6 +1149,141 @@ class _TrailerSectionState extends State<_TrailerSection> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RatingsSourcesSection extends StatelessWidget {
+  final Map<String, dynamic> details;
+  final String mediaType;
+  final String? imdbId;
+
+  const _RatingsSourcesSection({
+    required this.details,
+    required this.mediaType,
+    required this.imdbId,
+  });
+
+  double? get _tmdbAverage {
+    final v = details['vote_average'];
+    if (v is num) return v.toDouble();
+    return null;
+  }
+
+  int? get _tmdbVoteCount {
+    final v = details['vote_count'];
+    if (v is num) return v.toInt();
+    return null;
+  }
+
+  String get _title {
+    final t = (details['title'] ?? details['name']) as String?;
+    return t ?? '';
+  }
+
+  Future<void> _open(BuildContext context, Uri uri) async {
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open link: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final avg = _tmdbAverage;
+    final votes = _tmdbVoteCount;
+    final title = _title;
+    if (avg == null && title.isEmpty) return const SizedBox.shrink();
+
+    final encodedTitle = Uri.encodeComponent(title);
+    final rtUri = Uri.parse(
+        'https://www.rottentomatoes.com/search?search=$encodedTitle');
+    final letterboxdUri =
+        Uri.parse('https://letterboxd.com/search/films/$encodedTitle/');
+    final imdbReviewsUri = imdbId != null
+        ? Uri.parse('https://www.imdb.com/title/$imdbId/reviews/')
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Ratings & reviews',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          if (avg != null)
+            Row(
+              children: [
+                const Icon(Icons.star_rounded,
+                    size: 18, color: Color(0xFFFFB300)),
+                const SizedBox(width: 4),
+                Text(
+                  '${avg.toStringAsFixed(1)} / 10',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  votes != null ? '· TMDB (${_fmtVotes(votes)})' : '· TMDB',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ],
+            ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              if (imdbReviewsUri != null)
+                _RatingLinkChip(
+                  label: 'IMDb reviews',
+                  onTap: () => _open(context, imdbReviewsUri),
+                ),
+              _RatingLinkChip(
+                label: 'Rotten Tomatoes',
+                onTap: () => _open(context, rtUri),
+              ),
+              if (mediaType == 'movie')
+                _RatingLinkChip(
+                  label: 'Letterboxd',
+                  onTap: () => _open(context, letterboxdUri),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmtVotes(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+    return '$n';
+  }
+}
+
+class _RatingLinkChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _RatingLinkChip({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.open_in_new, size: 14),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        minimumSize: const Size(0, 32),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       ),
     );
   }
