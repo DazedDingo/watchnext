@@ -13,6 +13,8 @@ import '../../providers/external_ratings_provider.dart';
 import '../../providers/genre_filter_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/include_watched_provider.dart';
+import '../../providers/onboarding_provider.dart';
+import '../onboarding/onboarding_screen.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/oscar_filter_provider.dart';
@@ -113,6 +115,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Onboarding gate — show the first-run poster-rating grid when BOTH:
+    //   (a) the user hasn't flipped the local "done" flag yet, AND
+    //   (b) the household has no ratings and no watch entries (so we're
+    //       not forcing existing users through onboarding after updates).
+    // Self-heals: once any rating or watch entry exists, the gate is
+    // permanently skipped on this device. Skipping the flag also works
+    // (it sets the flag directly).
+    final onboardingDone = ref.watch(onboardingDoneProvider);
+    if (!onboardingDone) {
+      final ratingsAsync = ref.watch(ratingsProvider);
+      final entriesAsync = ref.watch(watchEntriesProvider);
+      final ratingsEmpty = ratingsAsync.asData?.value.isEmpty ?? true;
+      final entriesEmpty = entriesAsync.asData?.value.isEmpty ?? true;
+      if (ratingsEmpty && entriesEmpty) {
+        return const OnboardingScreen();
+      }
+      // Household has data — silently flip the flag so future builds
+      // skip the async checks entirely.
+      Future.microtask(
+          () => ref.read(onboardingDoneProvider.notifier).markDone());
+    }
+
     final mode = ref.watch(viewModeProvider);
     final selectedGenres = ref.watch(selectedGenresProvider);
     final runtime = ref.watch(runtimeFilterProvider);

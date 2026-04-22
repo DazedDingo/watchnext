@@ -182,11 +182,12 @@ Make watching feel like an activity.
 
 ---
 
-## Phase 11 — Polish ⬜
+## Phase 11 — Polish 🟡
 
-Nothing here yet. On the list:
+**Shipped:**
+- **Poster-grid onboarding** — 15 curated seed titles, 1–5 star picker on tap, "Skip" / "Done" footer. Gated by a local `wn_onboarding_done` flag + household emptiness check so existing users aren't forced through it after updates. Ratings written with `context: null` so they seed both Solo and Together taste profiles as shared backdrop.
 
-- **Poster-grid onboarding** — 15 smart-picked titles with 1–5 overlay + skip, pre-filled from Trakt.
+On the list:
 - **Offline caching** — local SQLite of the most-recent recs + history.
 - **Export watch history** (CSV).
 - **Collection Completionist tracking** — waits on curated collections above.
