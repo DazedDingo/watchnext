@@ -35,6 +35,7 @@ export {
   revokeStremioToken,
 } from "./stremio";
 export { fetchExternalRatings } from "./externalRatings";
+export { updateTonightsPickDaily } from "./tonightsPick";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

@@ -56,6 +56,14 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Tonight's Pick — deterministic daily pick written by the
+      // `updateTonightsPickDaily` CF (admin SDK). Read by the Android widget
+      // and any future surface that wants a stable household-wide pick.
+      match /tonightsPick/{id} {
+        allow read: if isMember(householdId);
+        allow write: if false;
+      }
+
       // Reserved for Phase 11+ (trusted circle).
       match /trustedCircle/{friendUid}    { allow read, write: if isMember(householdId); }
       match /friendSuggestions/{sid}      { allow read, write: if isMember(householdId); }

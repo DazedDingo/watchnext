@@ -130,7 +130,7 @@ The brain.
 - **Race-safe refresh** — an epoch counter drops stale fan-outs so a slow older refresh can't overwrite a newer pool.
 
 *Gaps:*
-- **Tonight's Pick Cloud Function** — the scheduled daily pick that the Phase 10 widget would consume isn't exported yet. Home picks locally today.
+- **Home-screen uses the CF pick** — currently Home picks locally from the top of its filtered rec list so "Not tonight" dismissals work. The new `/tonightsPick/current` doc (Phase 10) is there for the widget. Could optionally have Home surface the CF pick as a "Today's pick (from both of you)" header.
 - **Curated Collections in Discover** — "Best of A24", "Reddit All-Time Favorites", "Oscar Winners You Haven't Seen" aren't implemented as dedicated surfaces. (The Oscar-winners filter on Home covers the third.)
 - **"Rewatch?" card** — occasional highly-rated mood-matching resurface hasn't shipped.
 
@@ -171,10 +171,10 @@ Make watching feel like an activity.
 
 **Shipped:**
 - **Rating-nudge push** — partner gets a notification when you rate a title you both predicted on.
+- **Tonight's Pick Cloud Function** — `updateTonightsPickDaily` runs at 08:00 UTC, picks each household's top unwatched scored rec, writes to `/households/{hh}/tonightsPick/current`. Household-scoped read, admin-only write. Home screen still picks locally (interactive, respects "Not tonight" dismissals); this doc is for the widget + future surfaces that want a deterministic daily pick.
 
 *Gaps:*
-- **Android home-screen widget** — Tonight's Pick widget isn't built yet.
-- **Tonight's Pick Cloud Function** — same one called out under Phase 7.
+- **Android home-screen widget** — the Kotlin/Glance module that consumes `/tonightsPick/current`. Scaffolding TBD.
 - **Release-day notifications** — watchlist items becoming available.
 - **Wrapped generator** — annual recap with sharable image cards.
 - **Unrated Queue weekly digest** — reminder to catch up on missed ratings.
