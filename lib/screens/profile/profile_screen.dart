@@ -84,7 +84,14 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
             loading: () => const ListTile(title: Text('Loading…')),
-            error: (e, _) => ListTile(title: Text('Error: $e')),
+            error: (e, _) => ListTile(
+              leading:
+                  const Icon(Icons.error_outline, color: Colors.redAccent),
+              title: const Text('Couldn\'t load invite code'),
+              subtitle: Text('$e',
+                  style: const TextStyle(
+                      fontSize: 11, color: Colors.white38)),
+            ),
           ),
           const Divider(),
 
@@ -126,7 +133,14 @@ class ProfileScreen extends ConsumerWidget {
               onTap: () => context.push('/profile/trakt'),
             ),
             loading: () => const ListTile(title: Text('Loading…')),
-            error: (e, _) => ListTile(title: Text('Trakt error: $e')),
+            error: (e, _) => ListTile(
+              leading:
+                  const Icon(Icons.error_outline, color: Colors.redAccent),
+              title: const Text('Couldn\'t read Trakt status'),
+              subtitle: Text('$e',
+                  style: const TextStyle(
+                      fontSize: 11, color: Colors.white38)),
+            ),
           ),
           const Divider(),
 

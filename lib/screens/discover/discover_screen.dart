@@ -8,6 +8,8 @@ import '../../providers/discover_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/async_error.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
 
@@ -230,9 +232,10 @@ class _SearchResults extends ConsumerWidget {
     return data.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      error: (_, _) => const Center(
-        child:
-            Text('Search failed', style: TextStyle(color: Colors.white38)),
+      error: (e, _) => AsyncErrorView(
+        error: e,
+        title: 'Search failed',
+        onRetry: () => ref.invalidate(searchResultsProvider),
       ),
       data: (raw) {
         final items = _filterWatched(
@@ -241,9 +244,10 @@ class _SearchResults extends ConsumerWidget {
           fallbackMediaType: 'movie',
         );
         if (items.isEmpty) {
-          return const Center(
-            child: Text('No matches',
-                style: TextStyle(color: Colors.white38)),
+          return const EmptyState(
+            icon: Icons.search_off,
+            title: 'No matches',
+            subtitle: 'Try a shorter or more common term.',
           );
         }
         return GridView.builder(
@@ -308,17 +312,19 @@ class _PosterSection extends StatelessWidget {
           child: data.when(
             loading: () =>
                 const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            error: (_, _) => const Center(
-              child: Text('Failed to load',
-                  style: TextStyle(color: Colors.white38)),
+            error: (e, _) => AsyncErrorView(
+              error: e,
+              compact: true,
+              title: 'Failed to load',
             ),
             data: (raw) {
               final items = _filterWatched(raw, watchedKeys,
                   fallbackMediaType: mediaType);
               if (items.isEmpty) {
-                return const Center(
-                  child: Text("You've seen them all.",
-                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+                return const EmptyState(
+                  compact: true,
+                  icon: Icons.check_circle_outline,
+                  title: "You've seen them all.",
                 );
               }
               return ListView.separated(
@@ -402,17 +408,19 @@ class _GenreRowBody extends ConsumerWidget {
       child: data.when(
         loading: () =>
             const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (_, _) => const Center(
-          child:
-              Text('Failed to load', style: TextStyle(color: Colors.white38)),
+        error: (e, _) => AsyncErrorView(
+          error: e,
+          compact: true,
+          title: 'Failed to load',
         ),
         data: (raw) {
           final items = _filterWatched(raw, watchedKeys,
               fallbackMediaType: 'movie');
           if (items.isEmpty) {
-            return const Center(
-              child: Text('No titles in this genre',
-                  style: TextStyle(color: Colors.white38)),
+            return const EmptyState(
+              compact: true,
+              icon: Icons.theater_comedy_outlined,
+              title: 'No titles in this genre',
             );
           }
           return ListView.separated(

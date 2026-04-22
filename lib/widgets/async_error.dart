@@ -7,29 +7,65 @@ class AsyncErrorView extends StatelessWidget {
   final Object error;
   final VoidCallback? onRetry;
 
-  const AsyncErrorView({super.key, required this.error, this.onRetry});
+  /// Compact variant — smaller icon + shorter message. Use inside
+  /// constrained sections (horizontal rows, 160px strips, etc). The
+  /// full-size version is for whole-screen fallbacks.
+  final bool compact;
+
+  /// Optional short headline, e.g. 'Search failed'. When null, we show
+  /// the generic 'Something went wrong'.
+  final String? title;
+
+  const AsyncErrorView({
+    super.key,
+    required this.error,
+    this.onRetry,
+    this.compact = false,
+    this.title,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final iconSize = compact ? 24.0 : 48.0;
+    final padding = compact ? 12.0 : 24.0;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(padding),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.white38),
-            const SizedBox(height: 12),
-            const Text('Something went wrong',
-                style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
+            Icon(Icons.error_outline, size: iconSize, color: Colors.white38),
+            SizedBox(height: compact ? 6 : 12),
             Text(
-              '$error',
+              title ?? 'Something went wrong',
+              style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: compact ? 13 : 15),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
+            if (!compact) ...[
+              const SizedBox(height: 6),
+              Text(
+                '$error',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
             if (onRetry != null) ...[
-              const SizedBox(height: 16),
-              FilledButton.tonal(onPressed: onRetry, child: const Text('Retry')),
+              SizedBox(height: compact ? 8 : 16),
+              FilledButton.tonal(
+                onPressed: onRetry,
+                style: compact
+                    ? FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        minimumSize: const Size(0, 28),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                      )
+                    : null,
+                child: const Text('Retry'),
+              ),
             ],
           ],
         ),

@@ -186,6 +186,7 @@ Make watching feel like an activity.
 
 **Shipped:**
 - **Poster-grid onboarding** — 15 curated seed titles, 1–5 star picker on tap, "Skip" / "Done" footer. Gated by a local `wn_onboarding_done` flag + household emptiness check so existing users aren't forced through it after updates. Ratings written with `context: null` so they seed both Solo and Together taste profiles as shared backdrop.
+- **Consistent error + empty states across screens** — shared `EmptyState` widget (icon + title + subtitle + optional action), `AsyncErrorView` now supports a `compact` variant for in-section use. Watchlist, History (all 3 tabs), Discover (search + browse rows + genre rows) + Profile (invite code + Trakt) replaced their bare `Text('Error: $e')` with proper error surfaces and their ad-hoc empty-string placeholders with `EmptyState`.
 
 On the list:
 - **Offline caching** — local SQLite of the most-recent recs + history.

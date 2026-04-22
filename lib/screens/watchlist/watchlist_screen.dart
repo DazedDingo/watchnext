@@ -10,6 +10,8 @@ import '../../providers/mode_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/async_error.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/mode_toggle.dart';
 
@@ -90,7 +92,10 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => AsyncErrorView(
+          error: e,
+          onRetry: () => ref.invalidate(watchlistProvider),
+        ),
         data: (_) {
           return Column(children: [
             Padding(
@@ -132,24 +137,28 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
 
   Widget _buildList(List<WatchlistItem> items) {
     if (items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            switch (_filter) {
-              _WatchedFilter.unwatched =>
-                'No unwatched titles. Try the Watched or All filter.',
-              _WatchedFilter.watched =>
-                'Nothing here has been marked watched yet.',
-              _WatchedFilter.all =>
-                'Nothing saved yet. Add titles from their detail screen.',
-              _WatchedFilter.watching =>
-                '', // unreachable — _buildWatchingList owns this state
-            },
-            textAlign: TextAlign.center,
+      return switch (_filter) {
+        _WatchedFilter.unwatched => const EmptyState(
+            icon: Icons.visibility_off_outlined,
+            title: 'No unwatched titles',
+            subtitle:
+                'Everything on your list has been watched. Try the Watched or All filter.',
           ),
-        ),
-      );
+        _WatchedFilter.watched => const EmptyState(
+            icon: Icons.check_circle_outline,
+            title: 'Nothing watched yet',
+            subtitle:
+                'Once you mark a saved title as watched, it will show up here.',
+          ),
+        _WatchedFilter.all => const EmptyState(
+            icon: Icons.bookmark_border,
+            title: 'Your watchlist is empty',
+            subtitle:
+                'Add titles from their detail screen — tap "Add to watchlist" to save them here for both of you.',
+          ),
+        _WatchedFilter.watching =>
+          const SizedBox.shrink(), // unreachable — _buildWatchingList owns this
+      };
     }
     return ListView.separated(
       itemCount: items.length,
@@ -195,14 +204,11 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
 
   Widget _buildWatchingList(List<WatchEntry> entries) {
     if (entries.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Text(
-            'No shows in progress. Shows appear here once Trakt reports activity or you mark them "Watching" from their detail screen.',
-            textAlign: TextAlign.center,
-          ),
-        ),
+      return const EmptyState(
+        icon: Icons.play_circle_outline,
+        title: 'No shows in progress',
+        subtitle:
+            'TV shows appear here once Trakt reports activity or you mark them "Watching" from their detail screen.',
       );
     }
     return ListView.separated(

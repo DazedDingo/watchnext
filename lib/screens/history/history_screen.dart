@@ -10,6 +10,8 @@ import '../../providers/household_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../services/tmdb_service.dart';
+import '../../widgets/async_error.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/help_button.dart';
 import '../rating/rating_sheet.dart';
 
@@ -53,10 +55,21 @@ class _WatchedTab extends ConsumerWidget {
     final async = ref.watch(watchEntriesProvider);
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => AsyncErrorView(
+        error: e,
+        onRetry: () => ref.invalidate(watchEntriesProvider),
+      ),
       data: (entries) {
-        final watched = entries.where((e) => e.inProgressStatus != 'watching').toList();
-        if (watched.isEmpty) return const _Empty(text: 'No watched titles yet — link Trakt to import.');
+        final watched =
+            entries.where((e) => e.inProgressStatus != 'watching').toList();
+        if (watched.isEmpty) {
+          return const EmptyState(
+            icon: Icons.history_toggle_off,
+            title: 'No watch history yet',
+            subtitle:
+                'Link Trakt from Profile to import what you\'ve watched, or start rating titles.',
+          );
+        }
         return ListView.separated(
           itemCount: watched.length,
           separatorBuilder: (_, _) => const Divider(height: 0),
@@ -75,10 +88,21 @@ class _InProgressTab extends ConsumerWidget {
     final async = ref.watch(watchEntriesProvider);
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => AsyncErrorView(
+        error: e,
+        onRetry: () => ref.invalidate(watchEntriesProvider),
+      ),
       data: (entries) {
-        final wip = entries.where((e) => e.inProgressStatus == 'watching').toList();
-        if (wip.isEmpty) return const _Empty(text: 'Nothing in progress. Start a show and Trakt will put it here.');
+        final wip =
+            entries.where((e) => e.inProgressStatus == 'watching').toList();
+        if (wip.isEmpty) {
+          return const EmptyState(
+            icon: Icons.play_circle_outline,
+            title: 'Nothing in progress',
+            subtitle:
+                'Start a show and Trakt will put it here — or mark a TV title "Watching" from its detail screen.',
+          );
+        }
         return ListView.separated(
           itemCount: wip.length,
           separatorBuilder: (_, _) => const Divider(height: 0),
@@ -105,7 +129,11 @@ class _UnratedTab extends ConsumerWidget {
     if (loading) return const Center(child: CircularProgressIndicator());
 
     if (shows.isEmpty && epsByEntry.isEmpty) {
-      return const _Empty(text: 'Caught up! Nothing unrated.');
+      return const EmptyState(
+        icon: Icons.check_circle_outline,
+        title: 'Caught up!',
+        subtitle: 'Nothing waiting to be rated.',
+      );
     }
 
     // Build a flat item list: show-level items first, then episode groups.
@@ -434,11 +462,3 @@ class _EntryTile extends ConsumerWidget {
   }
 }
 
-class _Empty extends StatelessWidget {
-  final String text;
-  const _Empty({required this.text});
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(padding: const EdgeInsets.all(32), child: Text(text, textAlign: TextAlign.center)),
-  );
-}
