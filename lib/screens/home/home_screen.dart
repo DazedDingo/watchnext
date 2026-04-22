@@ -11,6 +11,7 @@ import '../../providers/curated_source_provider.dart';
 import '../../providers/exclude_animation_provider.dart';
 import '../../providers/external_ratings_provider.dart';
 import '../../providers/genre_filter_provider.dart';
+import '../../providers/household_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
@@ -64,6 +65,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // combinations only fires one request. 700ms is tight enough to feel
   // immediate and loose enough to coalesce bursts.
   Timer? _autoRefreshDebounce;
+
+  // One-shot: kick off a backfill of `imdb_id` on existing rec docs as soon
+  // as Home loads. Without this, the row-level IMDb chip only populates
+  // after a pull-to-refresh, which feels broken if you just installed the
+  // app and opened Home. Fire once per session.
+  bool _imdbBackfillStarted = false;
 
   @override
   void dispose() {
@@ -119,6 +126,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final watchedKeys = ref.watch(watchedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
+
+    // First-open imdb_id backfill — fires once per session as soon as the
+    // household id resolves. Without this the row-level IMDb chip stays
+    // blank until the user pulls to refresh, which feels like the feature
+    // isn't working at all on fresh installs.
+    if (!_imdbBackfillStarted) {
+      final hh = ref.watch(householdIdProvider).value;
+      if (hh != null) {
+        _imdbBackfillStarted = true;
+        unawaited(ref
+            .read(recommendationsServiceProvider)
+            .backfillMissingImdbIds(hh));
+      }
+    }
 
     // Any filter change schedules a debounced auto-refresh so the pool is
     // rebuilt against the current filter state. Without this, narrowing to a

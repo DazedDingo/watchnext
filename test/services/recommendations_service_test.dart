@@ -1061,6 +1061,56 @@ void main() {
       final doc = await db.doc(path('movie:999')).get();
       expect(doc.exists, isFalse);
     });
+
+    test('backfillMissingImdbIds stamps every unstamped rec doc', () async {
+      // Install a mock TMDB client that returns imdb_id based on tmdb_id.
+      final mockClient = MockClient((req) async {
+        final id =
+            int.parse(req.url.pathSegments[req.url.pathSegments.length - 2]);
+        return http.Response(
+          jsonEncode({'imdb_id': 'tt$id'}),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      });
+      final tmdb = TmdbService(client: mockClient);
+      final localSvc = RecommendationsService(db: db, tmdb: tmdb);
+
+      // Pre-seed two unstamped rec docs and one that already has imdb_id.
+      await db.doc(path('movie:1')).set({
+        'media_type': 'movie', 'tmdb_id': 1, 'title': 'A',
+      });
+      await db.doc(path('tv:2')).set({
+        'media_type': 'tv', 'tmdb_id': 2, 'title': 'B',
+      });
+      await db.doc(path('movie:3')).set({
+        'media_type': 'movie', 'tmdb_id': 3, 'title': 'C',
+        'imdb_id': 'tt_existing',
+      });
+
+      await localSvc.backfillMissingImdbIds(hh);
+
+      expect((await db.doc(path('movie:1')).get()).data()!['imdb_id'], 'tt1');
+      expect((await db.doc(path('tv:2')).get()).data()!['imdb_id'], 'tt2');
+      // Existing imdb_id not overwritten.
+      expect((await db.doc(path('movie:3')).get()).data()!['imdb_id'],
+          'tt_existing');
+    });
+
+    test('backfillMissingImdbIds silently swallows a TMDB error', () async {
+      final errorClient = MockClient((_) async => http.Response('boom', 500));
+      final tmdb = TmdbService(client: errorClient);
+      final localSvc = RecommendationsService(db: db, tmdb: tmdb);
+
+      await db.doc(path('movie:1')).set({
+        'media_type': 'movie', 'tmdb_id': 1, 'title': 'A',
+      });
+
+      // Must not throw.
+      await localSvc.backfillMissingImdbIds(hh);
+      expect((await db.doc(path('movie:1')).get()).data()!['imdb_id'],
+          isNull);
+    });
   });
 
   group('buildCandidates — oscar discover tagging', () {

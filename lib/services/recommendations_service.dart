@@ -476,6 +476,40 @@ class RecommendationsService {
     }
   }
 
+  /// Reads the top of the rec collection and fires a background resolver
+  /// for every doc that doesn't yet carry `imdb_id`. Invoked from Home's
+  /// initState so the row-level IMDb chip can start populating as soon as
+  /// the user opens the app — without waiting for them to pull-to-refresh.
+  ///
+  /// Fire-and-forget. Bounds reads to [limit] (default: the stream window)
+  /// so cold pools with hundreds of un-stamped legacy docs don't fan out
+  /// into a huge TMDB burst. The background resolver that follows is
+  /// already concurrency-limited.
+  Future<void> backfillMissingImdbIds(
+    String householdId, {
+    int limit = 300,
+  }) async {
+    try {
+      final snap = await _col(householdId).limit(limit).get();
+      final missing = <({String mediaType, int tmdbId})>[];
+      for (final d in snap.docs) {
+        final data = d.data();
+        final imdb = data['imdb_id'];
+        if (imdb is String && imdb.isNotEmpty) continue;
+        final mt = data['media_type'] as String?;
+        final id = (data['tmdb_id'] as num?)?.toInt();
+        if (mt == null || id == null) continue;
+        missing.add((mediaType: mt, tmdbId: id));
+      }
+      if (missing.isNotEmpty) {
+        await _backgroundResolveImdbIds(householdId, missing);
+      }
+    } catch (_) {
+      // Best-effort — if this fails, pull-to-refresh will still fire the
+      // same resolver with a fresh pool.
+    }
+  }
+
   /// Opportunistic imdb_id write — used by TitleDetail, which already has
   /// the imdb_id in its details payload. Zero-cost compared to the TMDB
   /// round-trip in `_backgroundResolveImdbIds`, so it's worth skipping the

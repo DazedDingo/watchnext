@@ -1317,12 +1317,6 @@ class _RatingsSourcesSection extends ConsumerWidget {
     return null;
   }
 
-  int? get _tmdbVoteCount {
-    final v = details['vote_count'];
-    if (v is num) return v.toInt();
-    return null;
-  }
-
   String get _title {
     final t = (details['title'] ?? details['name']) as String?;
     return t ?? '';
@@ -1342,7 +1336,6 @@ class _RatingsSourcesSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tmdbAvg = _tmdbAverage;
-    final tmdbVotes = _tmdbVoteCount;
     final title = _title;
     if (tmdbAvg == null && title.isEmpty && imdbId == null) {
       return const SizedBox.shrink();
@@ -1354,14 +1347,12 @@ class _RatingsSourcesSection extends ConsumerWidget {
         : const AsyncValue<ExternalRatings?>.data(null);
     final ext = externalAsync.asData?.value;
 
-    final encodedTitle = Uri.encodeComponent(title);
-    final rtUri = Uri.parse(
-        'https://www.rottentomatoes.com/search?search=$encodedTitle');
-    final letterboxdUri =
-        Uri.parse('https://letterboxd.com/search/films/$encodedTitle/');
     final imdbTitleUri = imdbId != null
         ? Uri.parse('https://www.imdb.com/title/$imdbId/')
         : null;
+    final encodedTitle = Uri.encodeComponent(title);
+    final rtUri = Uri.parse(
+        'https://www.rottentomatoes.com/search?search=$encodedTitle');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -1370,30 +1361,28 @@ class _RatingsSourcesSection extends ConsumerWidget {
         children: [
           Text('Ratings & reviews',
               style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 10),
-          // Primary ratings row — IMDb / RT / Metascore / TMDB. Each tile is
-          // silent when the corresponding score is missing so sparsely-rated
-          // titles don't leave awkward empty boxes.
+          const SizedBox(height: 8),
+          // Inline ratings row — IMDb / RT / Metacritic / TMDB as compact
+          // pills rather than full-width tiles. Each pill is silent when
+          // the corresponding score is missing so sparse titles don't
+          // leave awkward empty space.
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               if (ext?.imdbRating != null)
-                _ScoreTile(
+                _ScorePill(
                   label: 'IMDb',
                   value: ext!.imdbRating!.toStringAsFixed(1),
-                  suffix: '/ 10',
-                  sub: ext.imdbVotes != null
-                      ? _fmtVotes(ext.imdbVotes!)
-                      : null,
+                  suffix: '/10',
                   color: const Color(0xFFF5C518),
                   onTap: imdbTitleUri != null
                       ? () => _open(context, imdbTitleUri)
                       : null,
                 ),
               if (ext?.rtRating != null)
-                _ScoreTile(
-                  label: 'Rotten Tomatoes',
+                _ScorePill(
+                  label: 'RT',
                   value: '${ext!.rtRating!.toInt()}',
                   suffix: '%',
                   color: (ext.rtRating! >= 60)
@@ -1402,58 +1391,33 @@ class _RatingsSourcesSection extends ConsumerWidget {
                   onTap: () => _open(context, rtUri),
                 ),
               if (ext?.metascore != null)
-                _ScoreTile(
-                  label: 'Metacritic',
+                _ScorePill(
+                  label: 'MC',
                   value: '${ext!.metascore!.toInt()}',
-                  suffix: '/ 100',
+                  suffix: '/100',
                   color: _metascoreColor(ext.metascore!),
                 ),
               if (tmdbAvg != null)
-                _ScoreTile(
+                _ScorePill(
                   label: 'TMDB',
                   value: tmdbAvg.toStringAsFixed(1),
-                  suffix: '/ 10',
-                  sub: tmdbVotes != null ? _fmtVotes(tmdbVotes) : null,
+                  suffix: '/10',
                   color: const Color(0xFF01B4E4),
                 ),
             ],
           ),
           if (externalAsync.isLoading && imdbId != null) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 8),
-                Text('Loading IMDb & Rotten Tomatoes…',
-                    style: Theme.of(context).textTheme.labelSmall),
-              ],
+            const SizedBox(height: 6),
+            Text(
+              'Fetching IMDb / Rotten Tomatoes…',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.white38,
+                  ),
             ),
           ],
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              if (mediaType == 'movie')
-                _RatingLinkChip(
-                  label: 'Letterboxd',
-                  onTap: () => _open(context, letterboxdUri),
-                ),
-            ],
-          ),
         ],
       ),
     );
-  }
-
-  String _fmtVotes(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
-    return '$n';
   }
 
   Color _metascoreColor(double score) {
@@ -1463,83 +1427,69 @@ class _RatingsSourcesSection extends ConsumerWidget {
   }
 }
 
-/// A compact ratings tile with a coloured accent strip and the score inline.
-/// Tappable when [onTap] is non-null — the IMDb and Rotten Tomatoes tiles
-/// route to their respective sites when pressed.
-class _ScoreTile extends StatelessWidget {
+/// Compact single-line rating pill — label + value + optional suffix, all
+/// on one row. Much tighter than a two-line tile: lets four ratings fit
+/// comfortably on a single Wrap line without the section spanning the
+/// whole screen width. Tappable pills deep-link to the source site.
+class _ScorePill extends StatelessWidget {
   final String label;
   final String value;
   final String suffix;
-  final String? sub;
   final Color color;
   final VoidCallback? onTap;
 
-  const _ScoreTile({
+  const _ScorePill({
     required this.label,
     required this.value,
     required this.suffix,
     required this.color,
-    this.sub,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final tile = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    final pill = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.5), width: 0.5),
       ),
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
         children: [
           Text(
             label,
             style: TextStyle(
                 fontSize: 10,
                 color: color,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.2),
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3),
           ),
-          const SizedBox(height: 2),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(width: 3),
-              Text(
-                suffix,
-                style: const TextStyle(fontSize: 11, color: Colors.white54),
-              ),
-              if (sub != null) ...[
-                const SizedBox(width: 6),
-                Text(
-                  sub!,
-                  style:
-                      const TextStyle(fontSize: 11, color: Colors.white38),
-                ),
-              ],
-            ],
+          const SizedBox(width: 5),
+          Text(
+            value,
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 1),
+          Text(
+            suffix,
+            style: const TextStyle(fontSize: 10, color: Colors.white54),
           ),
         ],
       ),
     );
 
-    if (onTap == null) return tile;
+    if (onTap == null) return pill;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         onTap: onTap,
-        child: tile,
+        child: pill,
       ),
     );
   }
@@ -1682,24 +1632,3 @@ class _ReviewCardState extends State<_ReviewCard> {
   }
 }
 
-class _RatingLinkChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _RatingLinkChip({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      icon: const Icon(Icons.open_in_new, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      onPressed: onTap,
-      style: OutlinedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        minimumSize: const Size(0, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      ),
-    );
-  }
-}
