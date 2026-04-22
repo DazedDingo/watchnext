@@ -60,28 +60,38 @@ final upcomingForYouProvider =
   final movieRows = (results[0]['results'] as List?) ?? const [];
   final tvRows = (results[1]['results'] as List?) ?? const [];
 
-  // TMDB's /movie/upcoming occasionally returns rows whose `release_date`
-  // is the ORIGINAL primary release (theatrical re-releases, TMDB data
-  // edits) — we've seen a 1986 title land here. Gate movies on a
-  // future-ish release date so the carousel actually shows upcoming
-  // content. Allow a 14-day past window so just-released hits still
-  // surface while the feed rotates. TV is unaffected: on_the_air returns
-  // shows currently airing new episodes, and `first_air_date` being
-  // decades old is legitimate (long-running series).
-  final cutoff = DateTime.now().subtract(const Duration(days: 14));
+  // "Upcoming" means strictly unreleased. Earlier passes leaked content:
+  //   - /movie/upcoming occasionally returns rows whose `release_date`
+  //     is the ORIGINAL primary release (theatrical re-releases,
+  //     community-edited TMDB data) — we saw a 1986 title surface.
+  //   - /tv/on_the_air returns long-running series (The Simpsons,
+  //     Family Guy, etc.) — the show is still producing new episodes
+  //     but the `first_air_date` is decades ago, which reads as "old"
+  //     in an Upcoming carousel that's meant to highlight new content.
+  // Strict gates: movies must release today or later, TV series must
+  // have debuted within the last 2 years (captures recent premieres
+  // while dropping long-runners). For "new seasons of older shows",
+  // the regular Recommended list is the right surface — this carousel
+  // exists specifically to spotlight NEW titles.
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final tvDebutFloor = DateTime(now.year - 2, now.month, now.day);
 
   final out = <UpcomingTitle>[];
   for (final row in movieRows) {
     final t = _rowToTitle(row, 'movie', genreWeights);
     if (t == null) continue;
     if (watchedKeys.contains(t.key)) continue;
-    if (t.releaseDate == null || t.releaseDate!.isBefore(cutoff)) continue;
+    if (t.releaseDate == null || t.releaseDate!.isBefore(today)) continue;
     out.add(t);
   }
   for (final row in tvRows) {
     final t = _rowToTitle(row, 'tv', genreWeights);
     if (t == null) continue;
     if (watchedKeys.contains(t.key)) continue;
+    if (t.releaseDate == null || t.releaseDate!.isBefore(tvDebutFloor)) {
+      continue;
+    }
     out.add(t);
   }
 

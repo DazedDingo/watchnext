@@ -324,15 +324,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onRetry: () => ref.invalidate(recommendationsProvider),
             )
           : RefreshIndicator(
+        // Deliberately heavy: standard displacement is 40 — too easy to
+        // trip by accident on a scroll overshoot. 140 forces a real pull
+        // gesture before the indicator activates. strokeWidth 3.5 makes
+        // the spinner visually substantial so the feedback reads clearly.
+        displacement: 140,
+        strokeWidth: 3.5,
         onRefresh: () async {
+          final messenger = ScaffoldMessenger.of(context);
+          messenger.clearSnackBars();
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Row(children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                ),
+                SizedBox(width: 12),
+                Text('Refreshing recommendations…'),
+              ]),
+              duration: Duration(seconds: 8),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
           try {
-            // Force full refresh; let failures bubble up to a SnackBar so
-            // the pull-to-refresh spinner doesn't spin until the CF times
-            // out silently.
-            await ref.read(refreshRecommendationsProvider(true).future);
+            // Fire the refresh AND a minimum-visible delay in parallel, so
+            // the indicator + snackbar stay up for at least 1.2s even if
+            // Phase A returns faster. Prevents a one-frame spinner flash
+            // that doesn't register as deliberate feedback.
+            await Future.wait([
+              ref.read(refreshRecommendationsProvider(true).future),
+              Future<void>.delayed(const Duration(milliseconds: 1200)),
+            ]);
+            messenger.clearSnackBars();
           } catch (e) {
+            messenger.clearSnackBars();
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              messenger.showSnackBar(
                 SnackBar(content: Text('Refresh failed: $e')),
               );
             }
