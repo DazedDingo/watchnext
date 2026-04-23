@@ -118,6 +118,18 @@ class ProfileScreen extends ConsumerWidget {
           const _AccentPicker(),
           const Divider(),
 
+          // ── Stats ──────────────────────────────────────────────────────
+          const _SectionHeader('Insights'),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.bar_chart_outlined),
+            title: const Text('Stats'),
+            subtitle: const Text('Watch habits, badges, predictions'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/profile/stats'),
+          ),
+          const Divider(),
+
           // ── Trakt ──────────────────────────────────────────────────────
           const _SectionHeader('Trakt'),
           traktAsync.when(

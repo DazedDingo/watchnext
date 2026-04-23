@@ -3,12 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recommendation.dart';
 import '../services/recommendations_service.dart';
+import 'awards_filter_provider.dart';
 import 'curated_source_provider.dart';
-import 'exclude_animation_provider.dart';
 import 'genre_filter_provider.dart';
 import 'household_provider.dart';
 import 'media_type_filter_provider.dart';
-import 'oscar_filter_provider.dart';
 import 'runtime_filter_provider.dart';
 import 'sort_mode_provider.dart';
 import 'watchlist_provider.dart';
@@ -58,8 +57,7 @@ final refreshRecommendationsProvider =
   final year = ref.read(yearRangeProvider);
   final runtime = ref.read(runtimeFilterProvider);
   final mediaType = ref.read(mediaTypeFilterProvider);
-  final oscarOnly = ref.read(oscarFilterProvider);
-  final excludeAnimation = ref.read(excludeAnimationProvider);
+  final awards = ref.read(awardsFilterProvider);
   final sortMode = ref.read(sortModeProvider);
   final curatedSource = ref.read(curatedSourceProvider);
   await service.refresh(
@@ -69,8 +67,7 @@ final refreshRecommendationsProvider =
     yearRange: year,
     runtimeBucket: runtime,
     mediaTypeFilter: mediaType,
-    oscarOnly: oscarOnly,
-    excludeAnimation: excludeAnimation,
+    awardsFilter: awards,
     sortMode: sortMode,
     curatedSource: curatedSource,
     forceTasteProfile: force,

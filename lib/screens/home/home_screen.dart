@@ -8,9 +8,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/recommendation.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/awards_filter_provider.dart';
 import '../../providers/curated_source_provider.dart';
 import '../../providers/rewatch_provider.dart';
-import '../../providers/exclude_animation_provider.dart';
 import '../../providers/external_ratings_provider.dart';
 import '../../providers/genre_filter_provider.dart';
 import '../../providers/household_provider.dart';
@@ -19,7 +19,6 @@ import '../../providers/onboarding_provider.dart';
 import '../onboarding/onboarding_screen.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
-import '../../providers/oscar_filter_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
@@ -30,6 +29,7 @@ import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../screens/like_these/like_these_sheet.dart';
 import '../../services/tmdb_service.dart';
+import '../../utils/oscar_winners.dart';
 import '../../utils/rec_explainer.dart';
 import '../../utils/surprise_picker.dart';
 import '../../widgets/async_error.dart';
@@ -43,7 +43,7 @@ const _homeHelp =
     'WatchNext picks something to watch that works for both of you.\n\n'
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
-    '• Filters — tap to expand. Genres (multi-select), media type, runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), Oscar-winners-only, and Exclude-animation live here. The header summarises what\'s active.\n'
+    '• Filters — tap to expand. Genres (multi-select), runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), and awards (Best Picture, Palme d\'Or, BAFTA Best Film) live here. The header summarises what\'s active.\n'
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
@@ -144,8 +144,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final runtime = ref.watch(runtimeFilterProvider);
     final yearRange = ref.watch(yearRangeProvider);
     final mediaType = ref.watch(mediaTypeFilterProvider);
-    final oscarOnly = ref.watch(oscarFilterProvider);
-    final excludeAnimation = ref.watch(excludeAnimationProvider);
+    final awards = ref.watch(awardsFilterProvider);
     final sortMode = ref.watch(sortModeProvider);
     final curatedSource = ref.watch(curatedSourceProvider);
     final includeWatched = ref.watch(includeWatchedProvider);
@@ -184,10 +183,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.listen<MediaTypeFilter?>(mediaTypeFilterProvider, (prev, curr) {
       if (prev != curr) _scheduleAutoRefresh();
     });
-    ref.listen<bool>(oscarFilterProvider, (prev, curr) {
-      if (prev != curr) _scheduleAutoRefresh();
-    });
-    ref.listen<bool>(excludeAnimationProvider, (prev, curr) {
+    ref.listen<AwardCategory?>(awardsFilterProvider, (prev, curr) {
       if (prev != curr) _scheduleAutoRefresh();
     });
     ref.listen<SortMode>(sortModeProvider, (prev, curr) {
@@ -237,22 +233,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((r) => r.mediaType == mediaType.recMediaType)
             .toList();
 
-    // Oscar filter — strict: only recs the discover pass tagged with
-    // `is_oscar_winner=true` survive. Trending/top-rated rows that haven't
-    // been confirmed via the oscar discover keyword drop out, even if the
-    // title is a real Oscar winner. The auto-refresh on toggle-on populates
-    // the pool with confirmed winners within a debounce.
-    final oscarFiltered = !oscarOnly
+    // Awards filter — strict: only recs with the is_oscar_winner sticky tag
+    // survive (the storage field is reused for every award type; see
+    // gotcha 25). The specific list spliced into the pool is keyed off
+    // `awards`, so toggling between Best Picture / Palme d'Or / BAFTA
+    // narrows the visible set to just the matching baked list.
+    final awardIds = awards == null
+        ? null
+        : (kAwardWinners[awards] ?? const <AwardWinner>[])
+            .map((w) => 'movie:${w.tmdbId}')
+            .toSet();
+    final oscarFiltered = awards == null
         ? mediaFiltered
-        : mediaFiltered.where((r) => r.isOscarWinner).toList();
-
-    // Exclude-animation filter — drops any rec carrying the Animation genre
-    // name. Applied client-side so the toggle takes effect immediately on the
-    // existing pool; the debounced refresh reshapes the pool server-side too.
-    final animationFiltered = !excludeAnimation
-        ? oscarFiltered
-        : oscarFiltered
-            .where((r) => !r.genres.contains('Animation'))
+        : mediaFiltered
+            .where((r) => r.isOscarWinner && awardIds!.contains(r.id))
             .toList();
 
     // Curated-source filter — strict: only recs a past discover pass tagged
@@ -261,8 +255,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // curator filter because the filter scopes TMDB server-side, not the
     // existing Firestore pool.
     final curatorFiltered = curatedSource == CuratedSource.none
-        ? animationFiltered
-        : animationFiltered
+        ? oscarFiltered
+        : oscarFiltered
             .where((r) => r.curator == curatedSource.name)
             .toList();
 
@@ -418,13 +412,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
               ),
             ),
+            _MediaTypeBar(
+              selected: mediaType,
+              onSelect: (v) =>
+                  ref.read(modeMediaTypeProvider.notifier).set(mode, v),
+            ),
             _FiltersPanel(
               selectedGenres: selectedGenres,
               runtime: runtime,
               yearRange: yearRange,
               mediaType: mediaType,
-              oscarOnly: oscarOnly,
-              excludeAnimation: excludeAnimation,
+              awards: awards,
               sortMode: sortMode,
               curatedSource: curatedSource,
               includeWatched: includeWatched,
@@ -437,10 +435,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeYearRangeProvider.notifier).set(mode, r),
               onMediaTypeSelect: (v) =>
                   ref.read(modeMediaTypeProvider.notifier).set(mode, v),
-              onOscarChanged: (v) =>
-                  ref.read(modeOscarProvider.notifier).set(mode, v),
-              onExcludeAnimationChanged: (v) =>
-                  ref.read(modeExcludeAnimationProvider.notifier).set(mode, v),
+              onAwardsSelect: (v) =>
+                  ref.read(modeAwardsProvider.notifier).set(mode, v),
               onSortModeSelect: (v) =>
                   ref.read(modeSortProvider.notifier).set(mode, v),
               onCuratedSourceSelect: (v) =>
@@ -572,8 +568,7 @@ class _FiltersPanel extends StatefulWidget {
   final RuntimeBucket? runtime;
   final YearRange yearRange;
   final MediaTypeFilter? mediaType;
-  final bool oscarOnly;
-  final bool excludeAnimation;
+  final AwardCategory? awards;
   final SortMode sortMode;
   final CuratedSource curatedSource;
   final bool includeWatched;
@@ -582,8 +577,7 @@ class _FiltersPanel extends StatefulWidget {
   final ValueChanged<RuntimeBucket?> onRuntimeSelect;
   final ValueChanged<YearRange> onYearRangeChanged;
   final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
-  final ValueChanged<bool> onOscarChanged;
-  final ValueChanged<bool> onExcludeAnimationChanged;
+  final ValueChanged<AwardCategory?> onAwardsSelect;
   final ValueChanged<SortMode> onSortModeSelect;
   final ValueChanged<CuratedSource> onCuratedSourceSelect;
   final ValueChanged<bool> onIncludeWatchedChanged;
@@ -593,8 +587,7 @@ class _FiltersPanel extends StatefulWidget {
     required this.runtime,
     required this.yearRange,
     required this.mediaType,
-    required this.oscarOnly,
-    required this.excludeAnimation,
+    required this.awards,
     required this.sortMode,
     required this.curatedSource,
     required this.includeWatched,
@@ -603,8 +596,7 @@ class _FiltersPanel extends StatefulWidget {
     required this.onRuntimeSelect,
     required this.onYearRangeChanged,
     required this.onMediaTypeSelect,
-    required this.onOscarChanged,
-    required this.onExcludeAnimationChanged,
+    required this.onAwardsSelect,
     required this.onSortModeSelect,
     required this.onCuratedSourceSelect,
     required this.onIncludeWatchedChanged,
@@ -623,8 +615,7 @@ class _FiltersPanelState extends State<_FiltersPanel> {
     if (widget.runtime != null) n += 1;
     if (widget.yearRange.hasAnyBound) n += 1;
     if (widget.mediaType != null) n += 1;
-    if (widget.oscarOnly) n += 1;
-    if (widget.excludeAnimation) n += 1;
+    if (widget.awards != null) n += 1;
     if (widget.sortMode != SortMode.topRated) n += 1;
     if (widget.curatedSource != CuratedSource.none) n += 1;
     // "Include watched" is counted as an active filter when it diverges from
@@ -659,8 +650,7 @@ class _FiltersPanelState extends State<_FiltersPanel> {
     if (widget.curatedSource != CuratedSource.none) {
       parts.add(widget.curatedSource.label);
     }
-    if (widget.oscarOnly) parts.add('Oscar winners');
-    if (widget.excludeAnimation) parts.add('No animation');
+    if (widget.awards != null) parts.add(widget.awards!.label);
     if (widget.includeWatched) parts.add('+ watched');
     return parts.isEmpty ? 'None' : parts.join(' · ');
   }
@@ -763,11 +753,6 @@ class _FiltersPanelState extends State<_FiltersPanel> {
                   onEdit: widget.onEditGenres,
                   onClear: widget.onClearGenres,
                 ),
-                const _FilterSectionLabel('Type'),
-                _MediaTypeSegment(
-                  selected: widget.mediaType,
-                  onSelect: widget.onMediaTypeSelect,
-                ),
                 const _FilterSectionLabel('Length'),
                 _RuntimeSegment(
                   selected: widget.runtime,
@@ -777,6 +762,11 @@ class _FiltersPanelState extends State<_FiltersPanel> {
                 _SortModeSegment(
                   selected: widget.sortMode,
                   onSelect: widget.onSortModeSelect,
+                ),
+                const _FilterSectionLabel('Awards'),
+                _AwardsDropdown(
+                  selected: widget.awards,
+                  onSelect: widget.onAwardsSelect,
                 ),
                 const _FilterSectionLabel('Curated'),
                 _CuratedSourceSegment(
@@ -790,18 +780,6 @@ class _FiltersPanelState extends State<_FiltersPanel> {
                 ),
                 const SizedBox(height: 4),
                 const Divider(height: 1, indent: 16, endIndent: 16),
-                _FilterSwitchRow(
-                  icon: Icons.emoji_events_outlined,
-                  label: 'Oscar winners only',
-                  value: widget.oscarOnly,
-                  onChanged: widget.onOscarChanged,
-                ),
-                _FilterSwitchRow(
-                  icon: Icons.animation,
-                  label: 'Exclude animation',
-                  value: widget.excludeAnimation,
-                  onChanged: widget.onExcludeAnimationChanged,
-                ),
                 _FilterSwitchRow(
                   icon: Icons.visibility_outlined,
                   label: 'Include watched',
@@ -934,27 +912,51 @@ Widget _segmentWrapper({required Widget child}) => Padding(
       ),
     );
 
-// ─── Media-type segment ───────────────────────────────────────────────────────
-
-class _MediaTypeSegment extends StatelessWidget {
+// ─── Media-type bar (top-level, above filters panel) ──────────────────────────
+//
+// Media type is the most common first-pass filter ("I want a movie tonight" vs
+// "let's pick up a show"), so it sits as a full-width SegmentedButton under the
+// action row instead of behind the Filters ExpansionTile. Haptics on selection
+// match the rest of the top-level chrome (mode toggle, nav bar).
+class _MediaTypeBar extends StatelessWidget {
   final MediaTypeFilter? selected;
   final void Function(MediaTypeFilter?) onSelect;
 
-  const _MediaTypeSegment({required this.selected, required this.onSelect});
+  const _MediaTypeBar({required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    return _segmentWrapper(
-      child: SegmentedButton<MediaTypeFilter?>(
-        style: _segmentStyle(),
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: null, label: Text('Any')),
-          ButtonSegment(value: MediaTypeFilter.movie, label: Text('Movies')),
-          ButtonSegment(value: MediaTypeFilter.tv, label: Text('TV')),
-        ],
-        selected: {selected},
-        onSelectionChanged: (s) => onSelect(s.first),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<MediaTypeFilter?>(
+          showSelectedIcon: false,
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            minimumSize: WidgetStatePropertyAll(Size(0, 40)),
+            textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 13)),
+          ),
+          segments: const [
+            ButtonSegment(value: null, label: Text('All')),
+            ButtonSegment(
+              value: MediaTypeFilter.movie,
+              icon: Icon(Icons.movie_outlined, size: 18),
+              label: Text('Movies'),
+            ),
+            ButtonSegment(
+              value: MediaTypeFilter.tv,
+              icon: Icon(Icons.tv, size: 18),
+              label: Text('TV'),
+            ),
+          ],
+          selected: {selected},
+          onSelectionChanged: (s) {
+            HapticFeedback.selectionClick();
+            onSelect(s.first);
+          },
+        ),
       ),
     );
   }
@@ -1028,26 +1030,96 @@ class _CuratedSourceSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final active = selected != CuratedSource.none;
+    return _FilterDropdownShell<CuratedSource>(
+      tooltip: 'Pick a curator',
+      activeLabel: active ? selected.label : null,
+      placeholder: selected.label,
+      onSelected: onSelect,
+      items: [
+        for (final v in CuratedSource.values)
+          (value: v, label: v.label, isSelected: v == selected),
+      ],
+    );
+  }
+}
+
+// ─── Awards dropdown ──────────────────────────────────────────────────────────
+//
+// Replaces the original Oscar-only switch with a picker. Supports Best Picture,
+// Palme d'Or, and BAFTA Best Film — the underlying baked lists are declared in
+// `utils/oscar_winners.dart`. When an award is selected the control accent-
+// themes itself so "a filter is active" reads at a glance.
+
+class _AwardsDropdown extends StatelessWidget {
+  final AwardCategory? selected;
+  final ValueChanged<AwardCategory?> onSelect;
+
+  const _AwardsDropdown({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return _FilterDropdownShell<AwardCategory?>(
+      tooltip: 'Pick an award',
+      activeLabel: selected?.label,
+      placeholder: 'Any',
+      onSelected: onSelect,
+      items: [
+        (value: null, label: 'Any', isSelected: selected == null),
+        for (final v in AwardCategory.values)
+          (value: v, label: v.label, isSelected: v == selected),
+      ],
+    );
+  }
+}
+
+typedef _DropdownItem<T> = ({T value, String label, bool isSelected});
+
+/// Shared dropdown shell for the filter panel's popup-menu-backed controls.
+/// When [activeLabel] is non-null the border + label + chevron pick up the
+/// accent colour, so Awards and Curator share the "an option is selected"
+/// visual without duplicating button chrome.
+class _FilterDropdownShell<T> extends StatelessWidget {
+  final String tooltip;
+  final String? activeLabel;
+  final String placeholder;
+  final ValueChanged<T> onSelected;
+  final List<_DropdownItem<T>> items;
+
+  const _FilterDropdownShell({
+    required this.tooltip,
+    required this.activeLabel,
+    required this.placeholder,
+    required this.onSelected,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final active = activeLabel != null;
+    final borderColor = active ? cs.primary : cs.outline;
+    final textColor = active ? cs.primary : null;
     return _segmentWrapper(
-      child: PopupMenuButton<CuratedSource>(
-        tooltip: 'Pick a curator',
+      child: PopupMenuButton<T>(
+        tooltip: tooltip,
         position: PopupMenuPosition.under,
         onSelected: (v) {
           HapticFeedback.selectionClick();
-          onSelect(v);
+          onSelected(v);
         },
         itemBuilder: (_) => [
-          for (final v in CuratedSource.values)
-            PopupMenuItem(
-              value: v,
+          for (final item in items)
+            PopupMenuItem<T>(
+              value: item.value,
               child: Row(
                 children: [
-                  if (v == selected)
+                  if (item.isSelected)
                     const Icon(Icons.check, size: 16)
                   else
                     const SizedBox(width: 16),
                   const SizedBox(width: 8),
-                  Text(v.label),
+                  Text(item.label),
                 ],
               ),
             ),
@@ -1056,22 +1128,24 @@ class _CuratedSourceSegment extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 34),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outline,
-              width: 1,
-            ),
+            border: Border.all(color: borderColor, width: active ? 1.5 : 1),
             borderRadius: BorderRadius.circular(8),
+            color: active ? cs.primary.withValues(alpha: 0.08) : null,
           ),
           child: Row(
             children: [
               Expanded(
                 child: Text(
-                  selected.label,
-                  style: const TextStyle(fontSize: 12),
+                  activeLabel ?? placeholder,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: textColor,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Icon(Icons.arrow_drop_down, size: 18),
+              Icon(Icons.arrow_drop_down, size: 18, color: textColor),
             ],
           ),
         ),

@@ -84,11 +84,15 @@ final _router = GoRouter(
         // can still point at the retired routes.
         GoRoute(path: '/watchlist', redirect: (_, _) => '/library'),
         GoRoute(path: '/history', redirect: (_, _) => '/library'),
-        GoRoute(path: '/stats', builder: (_, _) => const StatsScreen()),
+        // Stats moved under Profile (dropped from top-level nav to keep the
+        // bar at four destinations). Legacy /stats + /stats/* redirect so
+        // old deep links still land.
+        GoRoute(path: '/stats', redirect: (_, _) => '/profile/stats'),
         GoRoute(
           path: '/profile',
           builder: (_, _) => const ProfileScreen(),
           routes: [
+            GoRoute(path: 'stats', builder: (_, _) => const StatsScreen()),
             GoRoute(path: 'trakt', builder: (_, _) => const TraktLinkScreen()),
             GoRoute(
               path: 'report-issue',
@@ -231,14 +235,18 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
         location.startsWith('/history')) {
       selectedIndex = 2;
     }
-    if (location.startsWith('/stats')) selectedIndex = 3;
-    if (location.startsWith('/profile')) selectedIndex = 4;
+    // Stats now lives under Profile as a nested route (/profile/stats); the
+    // Profile tab stays highlighted while the user is inside Stats.
+    if (location.startsWith('/profile') || location.startsWith('/stats')) {
+      selectedIndex = 3;
+    }
 
     return Scaffold(
       body: widget.child,
-      // Flat 56px icon-only bar — 5 destinations since Watchlist + History
-      // merged into Library (see CLAUDE.md gotcha "Library tab"). Selected-
-      // icon fill + accent indicator communicates the active tab.
+      // Flat 56px icon-only bar — 4 destinations. Stats was folded into the
+      // Profile tab (see CLAUDE.md gotcha "Library tab" for the Library
+      // consolidation history). Selected-icon fill + accent indicator
+      // communicates the active tab.
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         height: 56,
@@ -247,11 +255,10 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Discover'),
           NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library), label: 'Library'),
-          NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Stats'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
         ],
         onDestinationSelected: (i) {
-          const routes = ['/home', '/discover', '/library', '/stats', '/profile'];
+          const routes = ['/home', '/discover', '/library', '/profile'];
           HapticFeedback.selectionClick();
           context.go(routes[i]);
         },

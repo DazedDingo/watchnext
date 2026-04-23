@@ -12,6 +12,7 @@ import 'package:watchnext/providers/sort_mode_provider.dart';
 import 'package:watchnext/providers/year_filter_provider.dart';
 import 'package:watchnext/services/recommendations_service.dart';
 import 'package:watchnext/services/tmdb_service.dart';
+import 'package:watchnext/utils/oscar_winners.dart';
 
 WatchlistItem _w({
   required String mediaType,
@@ -1202,64 +1203,6 @@ void main() {
     });
   });
 
-  group('buildCandidates — excludeAnimation', () {
-    test('drops rows carrying genre id 16 from baseline TMDB sources', () {
-      final out = buildCandidates(
-        watchlist: const [],
-        trendingMoviesPayload: {
-          'results': [
-            {
-              'id': 1,
-              'title': 'Live Action Crime',
-              'release_date': '2020-01-01',
-              'genre_ids': [80, 18],
-            },
-            {
-              'id': 2,
-              'title': 'Animated Crime',
-              'release_date': '2020-01-01',
-              'genre_ids': [16, 80],
-            },
-          ],
-        },
-        trendingTvPayload: {
-          'results': [
-            {
-              'id': 10,
-              'name': 'Animated Show',
-              'first_air_date': '2021-01-01',
-              'genre_ids': [16, 35],
-            },
-          ],
-        },
-        excludeAnimation: true,
-      );
-      final ids = out.map((c) => c['tmdb_id']).toSet();
-      expect(ids, contains(1));
-      expect(ids, isNot(contains(2)),
-          reason: 'animated crime movie must be filtered out');
-      expect(ids, isNot(contains(10)),
-          reason: 'animated TV must be filtered out');
-    });
-
-    test('leaves animation rows in place when excludeAnimation=false', () {
-      final out = buildCandidates(
-        watchlist: const [],
-        trendingMoviesPayload: {
-          'results': [
-            {
-              'id': 2,
-              'title': 'Animated Crime',
-              'release_date': '2020-01-01',
-              'genre_ids': [16, 80],
-            },
-          ],
-        },
-      );
-      expect(out.map((c) => c['tmdb_id']), contains(2));
-    });
-  });
-
   group('buildCandidates — curator tagging', () {
     test('stamps curator only on discover rows when discoverCurator set', () {
       final out = buildCandidates(
@@ -1364,9 +1307,8 @@ void main() {
   group('buildCandidates — fuzz: every flag combo is crash-free', () {
     // Regression guard: exhaustively exercise the boolean/payload combinations
     // the service composes when the user stacks filters. A regression that
-    // only triggers under, say, "excludeAnimation=true + discoverIsOscar=true
-    // + empty trending" would otherwise slip through the single-concern tests
-    // above.
+    // only triggers under, say, "discoverIsOscar=true + empty trending" would
+    // otherwise slip through the single-concern tests above.
     final samplePayload = {
       'results': [
         {
@@ -1395,53 +1337,36 @@ void main() {
       },
     ];
 
-    for (final excludeAnim in [false, true]) {
-      for (final oscar in [false, true]) {
-        for (final hasBaseline in [false, true]) {
-          for (final hasDiscover in [false, true]) {
-            test(
-                'exclude=$excludeAnim oscar=$oscar baseline=$hasBaseline discover=$hasDiscover',
-                () {
-              final out = buildCandidates(
-                watchlist: watchlist,
-                redditMentions: reddit,
-                trendingMoviesPayload: hasBaseline ? samplePayload : const {},
-                trendingTvPayload: hasBaseline ? samplePayload : const {},
-                topRatedMoviesPayload: hasBaseline ? samplePayload : const {},
-                topRatedTvPayload: hasBaseline ? samplePayload : const {},
-                discoverMoviesPayload: hasDiscover ? samplePayload : const {},
-                discoverTvPayload: hasDiscover ? samplePayload : const {},
-                discoverIsOscar: oscar,
-                excludeAnimation: excludeAnim,
-              );
-              // Watchlist always survives — it bypasses the animation filter
-              // because it's user-curated content (documented contract).
-              expect(out.any((c) => c['tmdb_id'] == 500), isTrue,
-                  reason: 'watchlist bypasses the animation filter');
-              // When any TMDB source fires AND oscar tag is on, the discover
-              // rows must carry is_oscar_winner=true — nothing else should.
-              if (hasDiscover && oscar) {
-                final oscarTagged =
-                    out.where((c) => c['is_oscar_winner'] == true).toList();
-                expect(oscarTagged, isNotEmpty);
-                expect(oscarTagged.every((c) => c['source'] == 'discover'),
-                    isTrue);
-              }
-              // Exclude-animation invariant: no TMDB-source row with Animation
-              // in its resolved genre list should survive. (Watchlist + reddit
-              // bypass by design.)
-              if (excludeAnim) {
-                final animTmdb = out.where((c) =>
-                    (c['source'] == 'discover' ||
-                        c['source'] == 'trending' ||
-                        c['source'] == 'top_rated') &&
-                    (c['genres'] as List?)?.contains('Animation') == true);
-                expect(animTmdb, isEmpty,
-                    reason:
-                        'animation leaked through TMDB source under excludeAnimation=true');
-              }
-            });
-          }
+    for (final oscar in [false, true]) {
+      for (final hasBaseline in [false, true]) {
+        for (final hasDiscover in [false, true]) {
+          test(
+              'oscar=$oscar baseline=$hasBaseline discover=$hasDiscover',
+              () {
+            final out = buildCandidates(
+              watchlist: watchlist,
+              redditMentions: reddit,
+              trendingMoviesPayload: hasBaseline ? samplePayload : const {},
+              trendingTvPayload: hasBaseline ? samplePayload : const {},
+              topRatedMoviesPayload: hasBaseline ? samplePayload : const {},
+              topRatedTvPayload: hasBaseline ? samplePayload : const {},
+              discoverMoviesPayload: hasDiscover ? samplePayload : const {},
+              discoverTvPayload: hasDiscover ? samplePayload : const {},
+              discoverIsOscar: oscar,
+            );
+            // Watchlist always survives — user-curated content always shows.
+            expect(out.any((c) => c['tmdb_id'] == 500), isTrue,
+                reason: 'watchlist always surfaces');
+            // When any TMDB source fires AND oscar tag is on, the discover
+            // rows must carry is_oscar_winner=true — nothing else should.
+            if (hasDiscover && oscar) {
+              final oscarTagged =
+                  out.where((c) => c['is_oscar_winner'] == true).toList();
+              expect(oscarTagged, isNotEmpty);
+              expect(oscarTagged.every((c) => c['source'] == 'discover'),
+                  isTrue);
+            }
+          });
         }
       }
     }
@@ -1740,6 +1665,84 @@ void main() {
     });
   });
 
+  // Award-specific splicing: when the user picks Palme d'Or or BAFTA Best
+  // Film from the Awards dropdown, `buildCandidates` must splice the right
+  // list rather than defaulting to Best Picture. These tests lock that
+  // contract and verify the lists compose with genre/year/runtime filters
+  // downstream on the Home screen.
+  group('buildCandidates — Awards category routing', () {
+    test('bestPicture routes the full Best Picture list', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: AwardCategory.bestPicture,
+      );
+      // Same contract as includeOscarBakedList=true: the baked list is the
+      // full Best Picture canon (>=90 titles).
+      expect(out.length, greaterThanOrEqualTo(90));
+      expect(out.every((c) => c['is_oscar_winner'] == true), isTrue);
+    });
+
+    test('palmeDor routes only the Palme d\'Or cross-ref list', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: AwardCategory.palmeDor,
+      );
+      expect(out, isNotEmpty);
+      expect(out.length, lessThan(10),
+          reason:
+              'Palme list is the small Best-Picture intersection, not the full canon');
+      final titles = out.map((c) => c['title']).toSet();
+      expect(titles, contains('Parasite'));
+      expect(titles, contains('Marty'));
+      expect(titles, contains('The Lost Weekend'));
+      // Godfather isn't a Palme winner — must not leak across categories.
+      expect(titles, isNot(contains('The Godfather')));
+    });
+
+    test('baftaBestFilm routes only the BAFTA cross-ref list', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: AwardCategory.baftaBestFilm,
+      );
+      expect(out, isNotEmpty);
+      final titles = out.map((c) => c['title']).toSet();
+      expect(titles, contains('Gandhi'));
+      expect(titles, contains('Schindler\'s List'));
+      // Parasite didn't win BAFTA Best Film — must not leak from Palme list.
+      expect(titles, isNot(contains('Parasite')));
+    });
+
+    test('awards rows carry the genre/runtime/year metadata needed for '
+        'client-side filter composition', () {
+      // Regression guard for the Home filter stack: if an award row ships
+      // without genres/runtime/year it'll silently drop out under a
+      // narrowing filter (genre / runtime bucket / year range), and the
+      // user will see an empty list instead of the winners they asked
+      // for. Check every Palme row is fully populated.
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: AwardCategory.palmeDor,
+      );
+      for (final c in out) {
+        expect(c['genres'], isA<List>());
+        expect((c['genres'] as List), isNotEmpty,
+            reason: '${c['title']} has no genres — breaks genre filter');
+        expect(c['runtime'], isA<int>(),
+            reason: '${c['title']} has no runtime — breaks runtime filter');
+        expect(c['year'], isA<int>(),
+            reason: '${c['title']} has no year — breaks year filter');
+      }
+    });
+
+    test('null includeAwardsList omits the list entirely', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: null,
+      );
+      expect(out.where((c) => c['source'] == 'oscar'), isEmpty);
+    });
+  });
+
   // ─── isNarrowFilterCombo ────────────────────────────────────────────────
   //
   // Locks in which filter combinations should trigger the widened-pool
@@ -1818,9 +1821,9 @@ void main() {
     });
 
     test('non-narrowing knobs do not tip the score', () {
-      // excludeAnimation + mediaType + non-default sort (other than underseen)
-      // don't shrink the pool meaningfully — they just reshape it. Caller
-      // deliberately excludes these from the narrowness detector.
+      // mediaType + non-default sort (other than underseen) don't shrink
+      // the pool meaningfully — they just reshape it. Caller deliberately
+      // excludes these from the narrowness detector.
       expect(call(sortMode: SortMode.popularity), isFalse);
       expect(call(sortMode: SortMode.recent), isFalse);
     });

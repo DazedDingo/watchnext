@@ -120,17 +120,11 @@ class RecommendationsService {
   /// When [forceTasteProfile] is true, the taste profile is regenerated
   /// alongside the background score pass — refresh UX: scores reflect the
   /// latest ratings on the *next* stream update after this pass.
-  /// TMDB keyword id for the "oscar-winning-film" keyword. Used to narrow
-  /// the discover pool to Academy-Award-winning titles when the user has
-  /// the Oscar Winners filter on. Constant here (rather than buried in the
-  /// caller) so tests can assert the param made it through.
+  /// TMDB keyword id for the "oscar-winning-film" keyword. No longer passed
+  /// to discover (see gotcha 35c — the keyword is dominated by films that
+  /// won technical/animated categories and was replaced with the baked
+  /// Best Picture list). Kept for test back-compat.
   static const int kOscarKeywordId = 210024;
-
-  /// TMDB's Animation genre id. Same id on movie + TV genre lists. Used by
-  /// the `excludeAnimation` filter to pass `without_genres=16` to
-  /// `/discover` and to drop animation-tagged rows from baseline TMDB
-  /// sources in `buildCandidates`.
-  static const int kAnimationGenreId = 16;
 
   Future<void> refresh(
     String householdId, {
@@ -140,12 +134,12 @@ class RecommendationsService {
     YearRange yearRange = const YearRange.unbounded(),
     RuntimeBucket? runtimeBucket,
     MediaTypeFilter? mediaTypeFilter,
-    bool oscarOnly = false,
-    bool excludeAnimation = false,
+    AwardCategory? awardsFilter,
     SortMode sortMode = SortMode.topRated,
     CuratedSource curatedSource = CuratedSource.none,
     bool forceTasteProfile = false,
   }) async {
+    final oscarOnly = awardsFilter != null;
     // Claim this refresh's epoch up-front. If a newer refresh starts before
     // our TMDB fetches return, `_refreshEpoch` will advance past `myEpoch`
     // and the guards below the TMDB fan-out will bail silently without
@@ -194,7 +188,6 @@ class RecommendationsService {
         runtimeBucket != null ||
         mediaTypeFilter != null ||
         oscarOnly ||
-        excludeAnimation ||
         sortMode != SortMode.topRated ||
         curatedSource != CuratedSource.none;
     final fetchMovies = mediaTypeFilter != MediaTypeFilter.tv;
@@ -238,19 +231,12 @@ class RecommendationsService {
       // the constant around for back-compat (tests reference it) but
       // the refresh path no longer uses it.
       const List<int> keywordIds = <int>[];
-      // If the user explicitly picked Animation as a genre, the exclude toggle
-      // is self-contradictory — honour the explicit pick and skip the exclude.
-      final excludeIds = (excludeAnimation &&
-              !genreFilters.contains('Animation'))
-          ? const [kAnimationGenreId]
-          : const <int>[];
       final discoverResults = await Future.wait([
         if (fetchMovies)
           _safeTmdb(() => _tmdb.discoverPaged(
                 mediaType: 'movie',
                 genreIds: movieIds,
                 keywordIds: keywordIds,
-                excludeGenreIds: excludeIds,
                 withCompanies: curatedSource.withCompanies,
                 sortBy: sortMode.tmdbSortBy('movie'),
                 maxVoteCount: sortMode.maxVoteCount,
@@ -267,7 +253,6 @@ class RecommendationsService {
                 mediaType: 'tv',
                 genreIds: tvIds,
                 keywordIds: keywordIds,
-                excludeGenreIds: excludeIds,
                 withCompanies: curatedSource.withCompanies,
                 sortBy: sortMode.tmdbSortBy('tv'),
                 maxVoteCount: sortMode.maxVoteCount,
@@ -314,11 +299,9 @@ class RecommendationsService {
       discoverCurator: curatedSource == CuratedSource.none
           ? ''
           : curatedSource.name,
-      excludeAnimation:
-          excludeAnimation && !genreFilters.contains('Animation'),
       tmdbCap: tmdbCap,
       discoverCap: dDiscoverCap,
-      includeOscarBakedList: oscarOnly,
+      includeAwardsList: awardsFilter,
     );
 
     if (candidates.isEmpty) return;
@@ -613,25 +596,29 @@ List<Map<String, dynamic>> buildCandidates({
   Map<String, dynamic> discoverTvPayload = const {},
   bool discoverIsOscar = false,
   String discoverCurator = '',
-  bool excludeAnimation = false,
   int tmdbCap = 20,
   int discoverCap = 40,
+  AwardCategory? includeAwardsList,
+  @Deprecated('Use includeAwardsList. Back-compat shim for tests.')
   bool includeOscarBakedList = false,
 }) {
   final candidates = <Map<String, dynamic>>[];
   final seen = <String>{};
 
-  // When the user turns on "Oscar winners", inject the curated Best
-  // Picture winners list as a dedicated candidate source. TMDB's Oscar
-  // keyword (210024) is unreliable — most entries are films that won
-  // technical/animated categories, not Best Picture — so combining it
-  // with genre+year filters routinely returns zero. The baked list is
-  // ground truth and every row carries enough metadata (genres, year,
-  // runtime, poster, imdb_id) to survive the client-side filter stack
-  // on its own. Placed first so these rows lead the merge order — if
-  // one is also in trending, it keeps the Oscar tag.
-  if (includeOscarBakedList) {
-    for (final w in kBestPictureWinners) {
+  // When the user turns on an award filter, inject the curated winners
+  // list as a dedicated candidate source. TMDB's Oscar keyword (210024)
+  // is unreliable — most entries are films that won technical/animated
+  // categories rather than Best Picture — so the baked list is ground
+  // truth, and the same splicing strategy extends to Palme d'Or / BAFTA.
+  // Every row carries enough metadata (genres, year, runtime, poster,
+  // imdb_id) to survive the client-side filter stack on its own. Placed
+  // first so these rows lead the merge order — if one is also trending,
+  // it keeps the award tag.
+  final awards = includeAwardsList ??
+      (includeOscarBakedList ? AwardCategory.bestPicture : null);
+  if (awards != null) {
+    final list = kAwardWinners[awards] ?? const <AwardWinner>[];
+    for (final w in list) {
       final key = 'movie:${w.tmdbId}';
       if (!seen.add(key)) continue;
       candidates.add({
@@ -643,6 +630,9 @@ List<Map<String, dynamic>> buildCandidates({
         'genres': w.genres,
         'runtime': w.runtime,
         'overview': w.overview,
+        // Storage uses `oscar` / `is_oscar_winner` for back-compat — the
+        // existing Firestore merge semantics treat this as the generic
+        // "won a pool-entry-worthy award" sticky tag. See gotcha 25.
         'source': 'oscar',
         'is_oscar_winner': true,
         'imdb_id': w.imdbId,
@@ -717,12 +707,6 @@ List<Map<String, dynamic>> buildCandidates({
       // `without_genres=16` applied server-side so this is a defensive
       // belt-and-braces pass. Watchlist + reddit rows skip this loop, which
       // is intentional — saved titles are user-curated and stay visible.
-      if (excludeAnimation) {
-        final raw = m['genre_ids'];
-        if (raw is List && raw.any((g) => g is num && g.toInt() == 16)) {
-          continue;
-        }
-      }
       if (!seen.add(key)) continue;
       final date = (m['release_date'] ?? m['first_air_date']) as String?;
       final row = <String, dynamic>{
