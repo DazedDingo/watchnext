@@ -35,6 +35,7 @@ import '../../utils/surprise_picker.dart';
 import '../../widgets/async_error.dart';
 import '../../widgets/genre_sheet.dart';
 import '../../widgets/help_button.dart';
+import '../../widgets/liquid_segmented_button.dart';
 import '../../widgets/mode_toggle.dart';
 import '../../widgets/watchnext_logo.dart';
 import '../../widgets/year_range_slider.dart';
@@ -892,18 +893,6 @@ class _FilterSectionLabel extends StatelessWidget {
   }
 }
 
-/// Shared style for every SegmentedButton inside the filter panel so they
-/// read as a single family rather than a grab-bag of pill shapes.
-ButtonStyle _segmentStyle() => const ButtonStyle(
-      visualDensity: VisualDensity.compact,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-      ),
-      minimumSize: WidgetStatePropertyAll(Size(0, 34)),
-      textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
-    );
-
 Widget _segmentWrapper({required Widget child}) => Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       child: SizedBox(
@@ -915,9 +904,9 @@ Widget _segmentWrapper({required Widget child}) => Padding(
 // ─── Media-type bar (top-level, above filters panel) ──────────────────────────
 //
 // Media type is the most common first-pass filter ("I want a movie tonight" vs
-// "let's pick up a show"), so it sits as a full-width SegmentedButton under the
-// action row instead of behind the Filters ExpansionTile. Haptics on selection
-// match the rest of the top-level chrome (mode toggle, nav bar).
+// "let's pick up a show"), so it sits as a full-width selector under the
+// action row instead of behind the Filters ExpansionTile. LiquidSegmentedButton
+// carries the haptics + matches the nav bar's selector styling.
 class _MediaTypeBar extends StatelessWidget {
   final MediaTypeFilter? selected;
   final void Function(MediaTypeFilter?) onSelect;
@@ -928,35 +917,23 @@ class _MediaTypeBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<MediaTypeFilter?>(
-          showSelectedIcon: false,
-          style: const ButtonStyle(
-            visualDensity: VisualDensity.compact,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            minimumSize: WidgetStatePropertyAll(Size(0, 40)),
-            textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 13)),
+      child: LiquidSegmentedButton<MediaTypeFilter?>(
+        density: LiquidSegmentDensity.standard,
+        selected: selected,
+        segments: const [
+          LiquidSegment(value: null, label: 'All'),
+          LiquidSegment(
+            value: MediaTypeFilter.movie,
+            label: 'Movies',
+            icon: Icons.movie_outlined,
           ),
-          segments: const [
-            ButtonSegment(value: null, label: Text('All')),
-            ButtonSegment(
-              value: MediaTypeFilter.movie,
-              icon: Icon(Icons.movie_outlined, size: 18),
-              label: Text('Movies'),
-            ),
-            ButtonSegment(
-              value: MediaTypeFilter.tv,
-              icon: Icon(Icons.tv, size: 18),
-              label: Text('TV'),
-            ),
-          ],
-          selected: {selected},
-          onSelectionChanged: (s) {
-            HapticFeedback.selectionClick();
-            onSelect(s.first);
-          },
-        ),
+          LiquidSegment(
+            value: MediaTypeFilter.tv,
+            label: 'TV',
+            icon: Icons.tv,
+          ),
+        ],
+        onChanged: onSelect,
       ),
     );
   }
@@ -973,16 +950,15 @@ class _RuntimeSegment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _segmentWrapper(
-      child: SegmentedButton<RuntimeBucket?>(
-        style: _segmentStyle(),
-        showSelectedIcon: false,
+      child: LiquidSegmentedButton<RuntimeBucket?>(
+        density: LiquidSegmentDensity.compact,
+        selected: selected,
         segments: [
-          const ButtonSegment(value: null, label: Text('Any')),
+          const LiquidSegment(value: null, label: 'Any'),
           for (final b in RuntimeBucket.values)
-            ButtonSegment(value: b, label: Text(b.label)),
+            LiquidSegment(value: b, label: b.label),
         ],
-        selected: {selected},
-        onSelectionChanged: (s) => onSelect(s.first),
+        onChanged: onSelect,
       ),
     );
   }
@@ -999,15 +975,14 @@ class _SortModeSegment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _segmentWrapper(
-      child: SegmentedButton<SortMode>(
-        style: _segmentStyle(),
-        showSelectedIcon: false,
+      child: LiquidSegmentedButton<SortMode>(
+        density: LiquidSegmentDensity.compact,
+        selected: selected,
         segments: [
           for (final m in SortMode.values)
-            ButtonSegment(value: m, label: Text(m.label)),
+            LiquidSegment(value: m, label: m.label),
         ],
-        selected: {selected},
-        onSelectionChanged: (s) => onSelect(s.first),
+        onChanged: onSelect,
       ),
     );
   }

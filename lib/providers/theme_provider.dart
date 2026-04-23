@@ -59,14 +59,28 @@ final accentProvider =
 /// Derived theme that rebuilds when the accent changes. All screens receive
 /// this via the MaterialApp.theme so swapping the accent recolors the whole
 /// app instantly without restart.
+///
+/// The AppBarTheme paints a 0.5px `outlineVariant` hairline at the bottom of
+/// every AppBar — same line the `LiquidNavBar` paints at its top edge. The
+/// pair frames the content area so the top/bottom chrome reads as a matching
+/// set rather than two unrelated surfaces.
 final themeDataProvider = Provider<ThemeData>((ref) {
   final accent = ref.watch(accentProvider);
+  final scheme = ColorScheme.fromSeed(
+    seedColor: accent.seed,
+    brightness: Brightness.dark,
+  );
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: accent.seed,
-      brightness: Brightness.dark,
+    colorScheme: scheme,
+    appBarTheme: AppBarTheme(
+      shape: Border(
+        bottom: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: 0.35),
+          width: 0.5,
+        ),
+      ),
     ),
   );
 });
