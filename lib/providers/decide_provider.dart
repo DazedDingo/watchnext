@@ -7,8 +7,11 @@ import '../models/watchlist_item.dart';
 import '../services/decide_service.dart';
 import '../services/recommendations_service.dart';
 import '../services/tmdb_service.dart';
+import '../utils/tmdb_genres.dart';
 import 'household_provider.dart';
+import 'media_type_filter_provider.dart';
 import 'recommendations_provider.dart';
+import 'runtime_filter_provider.dart';
 import 'tmdb_provider.dart';
 
 final decideServiceProvider = Provider<DecideService>((_) => DecideService());
@@ -40,6 +43,7 @@ class DecideCandidate {
   final String? posterPath;
   final int? year;
   final List<String> genres;
+  final int? runtime;
   final String source;
 
   const DecideCandidate({
@@ -49,6 +53,7 @@ class DecideCandidate {
     this.posterPath,
     this.year,
     this.genres = const [],
+    this.runtime,
     this.source = 'watchlist',
   });
 
@@ -61,6 +66,7 @@ class DecideCandidate {
         posterPath: w.posterPath,
         year: w.year,
         genres: w.genres,
+        runtime: w.runtime,
         source: 'watchlist',
       );
 
@@ -79,6 +85,10 @@ class DecideCandidate {
     final mediaType = (m['media_type'] as String?) ?? fallbackMediaType;
     final title = (m['title'] ?? m['name']) as String? ?? 'Untitled';
     final date = (m['release_date'] ?? m['first_air_date']) as String?;
+    final rawIds = (m['genre_ids'] as List?)
+            ?.whereType<num>()
+            .map((n) => n.toInt()) ??
+        const <int>[];
     return DecideCandidate(
       mediaType: mediaType,
       tmdbId: (m['id'] as num).toInt(),
@@ -87,8 +97,61 @@ class DecideCandidate {
       year: (date != null && date.length >= 4)
           ? int.tryParse(date.substring(0, 4))
           : null,
+      genres: genreNamesFromIds(rawIds, mediaType: mediaType),
       source: source,
     );
+  }
+}
+
+/// Snapshot of the Home filter state passed into a Decide session. Kept as a
+/// plain data carrier so the controller stays framework-agnostic (tests don't
+/// need a ProviderContainer just to exercise filter composition).
+///
+/// Scope is intentionally narrower than Home: awards / sort / curated are
+/// deliberately omitted — awards lists rarely overlap with the watchlist +
+/// trending pool Decide draws from, and sort/curated reshape the TMDB query
+/// (no analogue here). Genre / year / runtime / media type compose cleanly
+/// because they're orthogonal narrowing predicates.
+class DecideFilters {
+  final Set<String> genres;
+  final int? minYear;
+  final int? maxYear;
+  final RuntimeBucket? runtime;
+  final MediaTypeFilter? mediaType;
+
+  const DecideFilters({
+    this.genres = const {},
+    this.minYear,
+    this.maxYear,
+    this.runtime,
+    this.mediaType,
+  });
+
+  bool get isEmpty =>
+      genres.isEmpty &&
+      minYear == null &&
+      maxYear == null &&
+      runtime == null &&
+      mediaType == null;
+
+  /// Same "strict on unknowns" contract the Home filter uses:
+  /// - year range drops null-year candidates when either bound is set
+  /// - runtime bucket drops null-runtime candidates (matches Home semantics;
+  ///   TMDB trending rows never carry runtime so they fall out automatically)
+  /// - genre set requires at least one overlap
+  /// - media type is straight equality against `recMediaType`
+  bool matches(DecideCandidate c) {
+    if (mediaType != null && c.mediaType != mediaType!.recMediaType) {
+      return false;
+    }
+    if (minYear != null || maxYear != null) {
+      if (c.year == null) return false;
+      if (minYear != null && c.year! < minYear!) return false;
+      if (maxYear != null && c.year! > maxYear!) return false;
+    }
+    if (runtime != null && !runtime!.matches(c.runtime)) return false;
+    if (genres.isNotEmpty && !c.genres.any(genres.contains)) return false;
+    return true;
   }
 }
 
@@ -180,6 +243,7 @@ class DecideController extends StateNotifier<DecideSessionState> {
   Future<void> start(
     List<WatchlistItem> watchlist, {
     Set<String> watchedKeys = const {},
+    DecideFilters filters = const DecideFilters(),
   }) async {
     state = DecideSessionState(
       phase: DecidePhase.loading,
@@ -189,18 +253,22 @@ class DecideController extends StateNotifier<DecideSessionState> {
       final fromWatchlist = watchlist
           .map(DecideCandidate.fromWatchlist)
           .where((c) => !watchedKeys.contains(c.key))
+          .where(filters.matches)
           .toList();
 
       List<DecideCandidate> merged = fromWatchlist;
       if (merged.length < 5) {
-        final trending = await _tmdb.trendingMovies();
+        final trending = await _trendingFor(filters.mediaType);
         final rows = (trending['results'] as List? ?? const [])
             .cast<Map<String, dynamic>>();
+        final trendingMediaType =
+            filters.mediaType?.recMediaType ?? 'movie';
         final extra = rows
             .take(15)
             .map((m) => DecideCandidate.fromTmdb(m,
-                fallbackMediaType: 'movie', source: 'trending'))
+                fallbackMediaType: trendingMediaType, source: 'trending'))
             .where((c) => !watchedKeys.contains(c.key))
+            .where(filters.matches)
             .where((c) => !merged.any((w) => w.key == c.key))
             .take(5 - merged.length)
             .toList();
@@ -218,11 +286,17 @@ class DecideController extends StateNotifier<DecideSessionState> {
         candidates: watchlist
             .map(DecideCandidate.fromWatchlist)
             .where((c) => !watchedKeys.contains(c.key))
+            .where(filters.matches)
             .take(5)
             .toList(),
         error: 'Could not load trending titles — using watchlist only.',
       );
     }
+  }
+
+  Future<Map<String, dynamic>> _trendingFor(MediaTypeFilter? mt) {
+    if (mt == MediaTypeFilter.tv) return _tmdb.trendingTv();
+    return _tmdb.trendingMovies();
   }
 
   /// Both users agreed on this title in the negotiate view.
@@ -394,6 +468,7 @@ class DecideController extends StateNotifier<DecideSessionState> {
   Future<void> rerollCandidates(
     List<WatchlistItem> watchlist, {
     Set<String> watchedKeys = const {},
+    DecideFilters filters = const DecideFilters(),
   }) async {
     final exclude = {
       ...state.excluded,
@@ -404,19 +479,23 @@ class DecideController extends StateNotifier<DecideSessionState> {
     final fromWatchlist = watchlist
         .map(DecideCandidate.fromWatchlist)
         .where((c) => !exclude.contains(c.key))
+        .where(filters.matches)
         .toList();
 
     List<DecideCandidate> merged = fromWatchlist;
     if (merged.length < 5) {
       try {
-        final trending = await _tmdb.trendingMovies();
+        final trending = await _trendingFor(filters.mediaType);
         final rows = (trending['results'] as List? ?? const [])
             .cast<Map<String, dynamic>>();
+        final trendingMediaType =
+            filters.mediaType?.recMediaType ?? 'movie';
         final extra = rows
             .take(30)
             .map((m) => DecideCandidate.fromTmdb(m,
-                fallbackMediaType: 'movie', source: 'trending'))
+                fallbackMediaType: trendingMediaType, source: 'trending'))
             .where((c) => !exclude.contains(c.key))
+            .where(filters.matches)
             .where((c) => !merged.any((w) => w.key == c.key))
             .take(5 - merged.length)
             .toList();

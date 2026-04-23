@@ -6,10 +6,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/decision.dart';
 import '../../providers/decide_provider.dart';
+import '../../providers/genre_filter_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/include_watched_provider.dart';
+import '../../providers/media_type_filter_provider.dart';
+import '../../providers/runtime_filter_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
+import '../../providers/year_filter_provider.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/help_button.dart';
 import '../predict/prediction_sheet.dart';
@@ -98,7 +102,19 @@ class _DecideScreenState extends ConsumerState<DecideScreen> {
         : ref.read(watchedKeysProvider);
     await ref
         .read(decideSessionProvider.notifier)
-        .start(watchlist, watchedKeys: watchedKeys);
+        .start(watchlist,
+            watchedKeys: watchedKeys, filters: _readFilters());
+  }
+
+  DecideFilters _readFilters() {
+    final year = ref.read(yearRangeProvider);
+    return DecideFilters(
+      genres: ref.read(selectedGenresProvider),
+      minYear: year.minYear,
+      maxYear: year.maxYear,
+      runtime: ref.read(runtimeFilterProvider),
+      mediaType: ref.read(mediaTypeFilterProvider),
+    );
   }
 
   @override
@@ -175,9 +191,18 @@ class _NegotiateState extends ConsumerState<_Negotiate> {
       final includeWatched = ref.read(includeWatchedProvider);
       final watchedKeys =
           includeWatched ? const <String>{} : ref.read(watchedKeysProvider);
+      final year = ref.read(yearRangeProvider);
+      final filters = DecideFilters(
+        genres: ref.read(selectedGenresProvider),
+        minYear: year.minYear,
+        maxYear: year.maxYear,
+        runtime: ref.read(runtimeFilterProvider),
+        mediaType: ref.read(mediaTypeFilterProvider),
+      );
       await ref
           .read(decideSessionProvider.notifier)
-          .rerollCandidates(watchlist, watchedKeys: watchedKeys);
+          .rerollCandidates(watchlist,
+              watchedKeys: watchedKeys, filters: filters);
     } finally {
       if (mounted) setState(() => _shuffling = false);
     }
