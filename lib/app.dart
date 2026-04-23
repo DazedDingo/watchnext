@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -25,6 +24,7 @@ import 'screens/predict/reveal_screen.dart';
 import 'screens/share/share_confirm_sheet.dart';
 import 'screens/title_detail/title_detail_screen.dart';
 import 'services/notification_service.dart';
+import 'widgets/liquid_nav_bar.dart';
 
 /// Pure redirect rule for the app router. Extracted so it can be unit-tested
 /// without Firebase init. Called on every navigation attempt.
@@ -243,23 +243,20 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
 
     return Scaffold(
       body: widget.child,
-      // Flat 56px icon-only bar — 4 destinations. Stats was folded into the
-      // Profile tab (see CLAUDE.md gotcha "Library tab" for the Library
-      // consolidation history). Selected-icon fill + accent indicator
-      // communicates the active tab.
-      bottomNavigationBar: NavigationBar(
+      // 56px icon-only bar — 4 destinations. Stats was folded into Profile
+      // (see CLAUDE.md gotcha "Library tab"). LiquidNavBar keeps the same
+      // footprint as the retired M3 NavigationBar but renders a gradient
+      // accent "blob" indicator with a soft glow that slides between tabs.
+      bottomNavigationBar: LiquidNavBar(
         selectedIndex: selectedIndex,
-        height: 56,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Discover'),
-          NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library), label: 'Library'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
+          LiquidNavDestination(icon: Icons.home_outlined, selectedIcon: Icons.home, label: 'Home'),
+          LiquidNavDestination(icon: Icons.explore_outlined, selectedIcon: Icons.explore, label: 'Discover'),
+          LiquidNavDestination(icon: Icons.video_library_outlined, selectedIcon: Icons.video_library, label: 'Library'),
+          LiquidNavDestination(icon: Icons.person_outline, selectedIcon: Icons.person, label: 'Profile'),
         ],
         onDestinationSelected: (i) {
           const routes = ['/home', '/discover', '/library', '/profile'];
-          HapticFeedback.selectionClick();
           context.go(routes[i]);
         },
       ),
