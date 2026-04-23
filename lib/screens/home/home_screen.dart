@@ -491,18 +491,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               )
             else if (available.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
                 child: Column(
                   children: [
-                    Icon(Icons.filter_alt_off_outlined,
+                    const Icon(Icons.filter_alt_off_outlined,
                         size: 56, color: Colors.white24),
-                    SizedBox(height: 12),
+                    const SizedBox(height: 12),
                     Text(
-                      'No matches for your current filters.\nWiden genre, year, runtime, or media type — '
-                      'or pull down to rebuild the pool.',
+                      _emptyFilterMessage(selectedGenres),
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white54),
+                      style: const TextStyle(color: Colors.white54),
                     ),
                   ],
                 ),
@@ -512,6 +511,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+}
+
+/// Copy for the Home "no matches" empty state. Genre filter is AND
+/// (intersection), so multi-genre selections can produce rare combos with
+/// zero results — call that out specifically so the user doesn't think the
+/// app is broken.
+String _emptyFilterMessage(Set<String> selectedGenres) {
+  if (selectedGenres.length >= 2) {
+    final sorted = selectedGenres.toList()..sort();
+    return 'No titles match all of ${sorted.join(' + ')}.\n'
+        'Try removing one — or pull down to rebuild the pool.';
+  }
+  return 'No matches for your current filters.\n'
+      'Widen genre, year, runtime, or media type — '
+      'or pull down to rebuild the pool.';
 }
 
 // ─── Home action row ──────────────────────────────────────────────────────────
