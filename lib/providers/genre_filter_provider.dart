@@ -11,8 +11,10 @@ import 'mode_provider.dart';
 ///
 /// Genre names are stored — not TMDB ids — because recommendations already
 /// carry resolved names on `Recommendation.genres`, and the home filter does
-/// client-side `r.genres.any(selected.contains)`. Names are the stable point
-/// across movie + TV domains (the two id maps overlap but aren't identical).
+/// client-side `selected.every(r.genres.contains)` (intersection — selecting
+/// Western + Sci-Fi shows only titles tagged as both). Names are the stable
+/// point across movie + TV domains (the two id maps overlap but aren't
+/// identical).
 ///
 /// Persistence: a JSON array of names under `wn_genres_solo` /
 /// `wn_genres_together`, mirroring the other mode-keyed filter providers.

@@ -375,8 +375,9 @@ void main() {
 
     test('mood filter simulation — Documentary now hits reddit+trending+watchlist',
         () {
-      // End-to-end: the actual predicate the UI runs to populate a mood pill
-      // is `r.genres.any(moodGenres.contains)`. Simulate it over a mixed pool.
+      // End-to-end: the home filter uses `selected.every(r.genres.contains)`
+      // (intersection). With a single-entry filter like 'Documentary' the
+      // every/any outcomes coincide; this test locks the pipeline shape.
       final candidates = buildCandidates(
         watchlist: [
           _w(

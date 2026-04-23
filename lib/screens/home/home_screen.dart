@@ -197,15 +197,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final recsAsync = ref.watch(recommendationsProvider);
     final recs = recsAsync.value ?? const [];
 
-    // Genre filter — if no genres selected, show everything.
-    // Graceful on empty rec.genres: recs scored before coerceGenres landed
-    // have genres=[]; dropping them would leave only watchlist candidates
-    // visible on the list (same contract the old mood filter had).
+    // Genre filter — intersection, not union: selecting Western + Sci-Fi
+    // must surface only titles tagged as BOTH. Empty-genre recs drop out
+    // under an active filter because "classed as all of these" can't be
+    // verified on an unclassified title.
     final genreFiltered = selectedGenres.isEmpty
         ? recs
         : recs
-            .where((r) =>
-                r.genres.isEmpty || r.genres.any(selectedGenres.contains))
+            .where((r) => selectedGenres.every(r.genres.contains))
             .toList();
 
     // Runtime filter — null bucket = show everything. An active bucket is

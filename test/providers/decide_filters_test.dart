@@ -109,7 +109,7 @@ void main() {
       expect(filters.matches(unknown), isFalse);
     });
 
-    test('genre set requires at least one overlap', () {
+    test('genre set requires AT LEAST one tag with a single selection', () {
       const filters = DecideFilters(genres: {'Drama'});
       final drama = DecideCandidate(
           mediaType: 'movie', tmdbId: 1, title: 't', genres: const ['Drama']);
@@ -123,6 +123,37 @@ void main() {
       expect(filters.matches(drama), isTrue);
       expect(filters.matches(horror), isFalse);
       expect(filters.matches(mixed), isTrue);
+    });
+
+    test('multi-genre selection is intersection (AND), not union (OR)', () {
+      const filters = DecideFilters(genres: {'Western', 'Science Fiction'});
+      final both = DecideCandidate(
+          mediaType: 'movie',
+          tmdbId: 1,
+          title: 'Westworld-ish',
+          genres: const ['Western', 'Science Fiction']);
+      final westernOnly = DecideCandidate(
+          mediaType: 'movie',
+          tmdbId: 2,
+          title: 'Unforgiven',
+          genres: const ['Western', 'Drama']);
+      final scifiOnly = DecideCandidate(
+          mediaType: 'movie',
+          tmdbId: 3,
+          title: 'Arrival',
+          genres: const ['Science Fiction', 'Drama']);
+      expect(filters.matches(both), isTrue);
+      expect(filters.matches(westernOnly), isFalse,
+          reason: 'Western-only must NOT pass an AND filter for Western+Sci-Fi');
+      expect(filters.matches(scifiOnly), isFalse);
+    });
+
+    test('empty genres on a candidate never satisfy an active AND filter', () {
+      const filters = DecideFilters(genres: {'Drama'});
+      final unclassified = DecideCandidate(
+          mediaType: 'movie', tmdbId: 1, title: 't', genres: const []);
+      expect(filters.matches(unclassified), isFalse,
+          reason: 'can\'t verify "classed as all" on an unclassified title');
     });
 
     test('composes across all axes — AND, not OR', () {
