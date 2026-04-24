@@ -83,6 +83,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // pick up cross-genre titles TMDB tags narrowly.
   bool _keywordsBackfillStarted = false;
 
+  // Inline refresh indicator state. True while any refresh (filter-change
+  // auto-refresh or explicit CTA) is in-flight; drives the 2px progress bar
+  // at the top of the rec list. Replaces the old SnackBar + RefreshIndicator
+  // spinner combo — pull-to-refresh was retired; the "Show recommendations"
+  // CTA inside the filter panel is the explicit-commit path.
+  bool _refreshing = false;
+
   @override
   void dispose() {
     _autoRefreshDebounce?.cancel();
@@ -92,22 +99,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Kicks off a non-forcing refresh after the debounce window elapses.
   /// Non-forcing = don't regenerate the taste profile; just rebuild the pool
-  /// with the currently selected filters. Errors are surfaced via snackbar.
+  /// with the currently selected filters.
   void _scheduleAutoRefresh() {
     _autoRefreshDebounce?.cancel();
     _autoRefreshDebounce = Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
-      ref.invalidate(refreshRecommendationsProvider);
-      unawaited(
-        ref.read(refreshRecommendationsProvider(false).future).catchError((e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Refresh failed: $e')),
-            );
-          }
-        }),
-      );
+      _fireRefresh();
     });
+  }
+
+  /// Fires a non-forcing refresh and drives the inline progress indicator.
+  /// Centralises refresh invocation so both the auto-refresh debounce and
+  /// the "Show recommendations" CTA share progress-bar wiring.
+  void _fireRefresh() {
+    ref.invalidate(refreshRecommendationsProvider);
+    if (mounted) setState(() => _refreshing = true);
+    unawaited(
+      ref.read(refreshRecommendationsProvider(false).future).whenComplete(() {
+        if (mounted) setState(() => _refreshing = false);
+      }).catchError((_) {
+        // Silent: inline progress bar already communicated "done"; we
+        // don't want a modal snackbar on a background pool rebuild.
+      }),
+    );
   }
 
   Future<void> _openGenreSheet(
@@ -350,57 +364,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               error: recsAsync.error!,
               onRetry: () => ref.invalidate(recommendationsProvider),
             )
-          : RefreshIndicator(
-        // Deliberately heavy: standard displacement is 40 — too easy to
-        // trip by accident on a scroll overshoot. 140 forces a real pull
-        // gesture before the indicator activates. strokeWidth 3.5 makes
-        // the spinner visually substantial so the feedback reads clearly.
-        displacement: 140,
-        strokeWidth: 3.5,
-        onRefresh: () async {
-          HapticFeedback.mediumImpact();
-          final messenger = ScaffoldMessenger.of(context);
-          messenger.clearSnackBars();
-          messenger.showSnackBar(
-            const SnackBar(
-              content: Row(children: [
+          : Column(
+              children: [
+                // Inline refresh cue — 2px primary-accent bar pinned above
+                // the rec list. Visible whenever any refresh (filter-change
+                // auto-refresh or explicit "Show recommendations" CTA) is
+                // in-flight. Replaces the retired SnackBar + RefreshIndicator
+                // spinner; pull-to-refresh was removed in favour of the
+                // explicit CTA inside the filter panel.
                 SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
+                  height: 2,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 160),
+                    child: _refreshing
+                        ? LinearProgressIndicator(
+                            key: const ValueKey('refreshing'),
+                            minHeight: 2,
+                            backgroundColor: Colors.transparent,
+                            color: Theme.of(context).colorScheme.primary,
+                          )
+                        : const SizedBox.shrink(key: ValueKey('idle')),
+                  ),
                 ),
-                SizedBox(width: 12),
-                Text('Refreshing recommendations…'),
-              ]),
-              duration: Duration(seconds: 8),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-          try {
-            // Fire the refresh AND a minimum-visible delay in parallel, so
-            // the indicator + snackbar stay up for at least 1.2s even if
-            // Phase A returns faster. Prevents a one-frame spinner flash
-            // that doesn't register as deliberate feedback.
-            await Future.wait([
-              ref.read(refreshRecommendationsProvider(true).future),
-              Future<void>.delayed(const Duration(milliseconds: 1200)),
-            ]);
-            messenger.clearSnackBars();
-          } catch (e) {
-            messenger.clearSnackBars();
-            if (context.mounted) {
-              messenger.showSnackBar(
-                SnackBar(content: Text('Refresh failed: $e')),
-              );
-            }
-          } finally {
-            // Force the provider to re-run on next pull rather than returning
-            // the cached completed future.
-            ref.invalidate(refreshRecommendationsProvider);
-          }
-        },
-        child: ListView(
+                Expanded(
+                  child: ListView(
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             Padding(
@@ -476,20 +463,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(includeWatchedProvider.notifier).set(v),
               onApplyAndClose: () {
                 // Skip the 700ms filter-change debounce — user explicitly
-                // committed. Non-forcing so we don't regenerate the taste
-                // profile (filters reshape the pool, not the preferences).
+                // committed. `_fireRefresh` drives the inline progress bar.
                 _autoRefreshDebounce?.cancel();
-                final messenger = ScaffoldMessenger.of(context);
-                ref.invalidate(refreshRecommendationsProvider);
-                unawaited(
-                  ref.read(refreshRecommendationsProvider(false).future).catchError((e) {
-                    if (mounted) {
-                      messenger.showSnackBar(
-                        SnackBar(content: Text('Refresh failed: $e')),
-                      );
-                    }
-                  }),
-                );
+                _fireRefresh();
               },
             ),
             _SearchField(
@@ -556,7 +532,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
           ],
         ),
-      ),
+                ),
+              ],
+            ),
     );
   }
 }
