@@ -602,8 +602,16 @@ class RecommendationsService {
           .toList();
       final augmented =
           augmentGenresWithKeywords(currentGenres, keywordIds);
-      if (augmented.length == currentGenres.length) return;
-      await docRef.update({'genres': augmented});
+      final storedVersion = (data['keywords_version'] as num?)?.toInt() ?? 0;
+      final grew = augmented.length > currentGenres.length;
+      final needsVersionBump = storedVersion < kKeywordsVersion;
+      if (!grew && !needsVersionBump) return;
+      final update = <String, dynamic>{
+        'keywords_fetched': true,
+        'keywords_version': kKeywordsVersion,
+      };
+      if (grew) update['genres'] = augmented;
+      await docRef.update(update);
     } catch (_) {
       // Same rationale as stampImdbId — a missing doc or transient
       // Firestore error shouldn't bubble into the detail screen UI.
@@ -621,10 +629,11 @@ class RecommendationsService {
   /// forever on rows with no interesting keywords). Genre write only
   /// happens when the set actually grew.
   ///
-  /// Caveat: the flag is sticky, so existing rec docs won't be
-  /// re-augmented when new entries land in `kKeywordToExtraGenres`. Bump
-  /// the map + clear the flag manually (or via a versioned field) if the
-  /// map expands meaningfully.
+  /// Re-augmentation on map growth is handled via `kKeywordsVersion`:
+  /// each write stamps the live version, and `backfillMissingAugmentedGenres`
+  /// treats a doc as needing re-fetch whenever its stored version is older.
+  /// Bumping the version in `utils/keyword_genre_augment.dart` is the
+  /// mechanism for making new entries retroactive.
   Future<void> _backgroundAugmentGenres(
     String householdId,
     List<({String mediaType, int tmdbId})> pairs,
@@ -656,7 +665,10 @@ class RecommendationsService {
           final augmented =
               augmentGenresWithKeywords(currentGenres, keywordIds);
 
-          final update = <String, dynamic>{'keywords_fetched': true};
+          final update = <String, dynamic>{
+            'keywords_fetched': true,
+            'keywords_version': kKeywordsVersion,
+          };
           if (augmented.length > currentGenres.length) {
             update['genres'] = augmented;
           }
@@ -686,7 +698,9 @@ class RecommendationsService {
       final missing = <({String mediaType, int tmdbId})>[];
       for (final d in snap.docs) {
         final data = d.data();
-        if (data['keywords_fetched'] == true) continue;
+        final fetched = data['keywords_fetched'] == true;
+        final version = (data['keywords_version'] as num?)?.toInt() ?? 0;
+        if (fetched && version >= kKeywordsVersion) continue;
         final mt = data['media_type'] as String?;
         final id = (data['tmdb_id'] as num?)?.toInt();
         if (mt == null || id == null) continue;

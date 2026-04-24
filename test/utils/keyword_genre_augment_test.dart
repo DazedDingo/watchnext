@@ -79,5 +79,47 @@ void main() {
       );
       expect(out, ['Drama', 'Action']);
     });
+
+    test('sci-fi + war crossover keywords widen into War', () {
+      // Regression lock for the "Sci-Fi + War returns nothing" bug: titles
+      // like Starship Troopers are canonically {Action, Adventure, Sci-Fi}
+      // on TMDB, so AND-intersection filters zero out without keyword
+      // augmentation.
+      for (final kid in const [1826, 14909, 2902]) {
+        final out = augmentGenresWithKeywords(
+          const ['Action', 'Adventure', 'Science Fiction'],
+          [kid],
+        );
+        expect(out, contains('War'),
+            reason: 'keyword $kid should pull in War');
+        expect(out, contains('Science Fiction'));
+      }
+    });
+
+    test('space western widens into both Sci-Fi and Western', () {
+      final out = augmentGenresWithKeywords(
+        const ['Action'],
+        const [11606], // space western
+      );
+      expect(out, containsAll(const ['Science Fiction', 'Western']));
+    });
+
+    test('cosmic horror widens into Horror AND Sci-Fi', () {
+      final out = augmentGenresWithKeywords(
+        const ['Drama'],
+        const [215959], // cosmic horror
+      );
+      expect(out, containsAll(const ['Horror', 'Science Fiction']));
+    });
+  });
+
+  group('kKeywordsVersion', () {
+    test('is a positive int; bump when adding retroactive entries', () {
+      // This test doesn't assert a specific value — it just ensures the
+      // version exists and is sane. The semantics (rec docs with an older
+      // stored version get re-augmented) are covered in
+      // recommendations_service_test.dart.
+      expect(kKeywordsVersion, greaterThan(0));
+    });
   });
 }

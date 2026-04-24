@@ -12,6 +12,7 @@ import 'package:watchnext/providers/sort_mode_provider.dart';
 import 'package:watchnext/providers/year_filter_provider.dart';
 import 'package:watchnext/services/recommendations_service.dart';
 import 'package:watchnext/services/tmdb_service.dart';
+import 'package:watchnext/utils/keyword_genre_augment.dart';
 import 'package:watchnext/utils/oscar_winners.dart';
 
 WatchlistItem _w({
@@ -1216,11 +1217,12 @@ void main() {
         'media_type': 'tv', 'tmdb_id': 11, 'title': 'B',
         'genres': ['Drama'],
       });
-      // Already-flagged rec doc should be skipped — no rewrite.
+      // Already-flagged rec doc with CURRENT version should be skipped.
       await db.doc(path('movie:12')).set({
         'media_type': 'movie', 'tmdb_id': 12, 'title': 'C',
         'genres': ['Comedy'],
         'keywords_fetched': true,
+        'keywords_version': kKeywordsVersion,
       });
 
       await localSvc.backfillMissingAugmentedGenres(hh);
@@ -1228,14 +1230,50 @@ void main() {
       final m10 = (await db.doc(path('movie:10')).get()).data()!;
       expect(m10['genres'], ['Action', 'Science Fiction']);
       expect(m10['keywords_fetched'], true);
+      expect(m10['keywords_version'], kKeywordsVersion);
 
       final t11 = (await db.doc(path('tv:11')).get()).data()!;
       expect(t11['genres'], ['Drama', 'Animation']);
       expect(t11['keywords_fetched'], true);
+      expect(t11['keywords_version'], kKeywordsVersion);
 
-      // Unchanged — flag was already present.
+      // Unchanged — flag + current version were already present.
       final m12 = (await db.doc(path('movie:12')).get()).data()!;
       expect(m12['genres'], ['Comedy']);
+    });
+
+    test(
+        'backfillMissingAugmentedGenres re-augments docs with an older version',
+        () async {
+      // Rec doc stamped under an older kKeywordsVersion should be re-fetched
+      // + re-augmented so newly-added map entries become retroactive.
+      final mockClient = MockClient((_) async {
+        return http.Response(
+          jsonEncode({
+            'keywords': [
+              {'id': 14909, 'name': 'alien invasion'},
+            ]
+          }),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      });
+      final tmdb = TmdbService(client: mockClient);
+      final localSvc = RecommendationsService(db: db, tmdb: tmdb);
+
+      await db.doc(path('movie:20')).set({
+        'media_type': 'movie', 'tmdb_id': 20, 'title': 'Invaders',
+        'genres': ['Action', 'Science Fiction'],
+        'keywords_fetched': true,
+        'keywords_version': kKeywordsVersion - 1,
+      });
+
+      await localSvc.backfillMissingAugmentedGenres(hh);
+
+      final doc = (await db.doc(path('movie:20')).get()).data()!;
+      expect(doc['genres'], contains('War'),
+          reason: 'older version → re-augmented with new mapping');
+      expect(doc['keywords_version'], kKeywordsVersion);
     });
 
     test(
