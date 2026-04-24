@@ -1,15 +1,19 @@
 import * as admin from "firebase-admin";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
-import Anthropic from "@anthropic-ai/sdk";
 
 import {
   Candidate,
+  GEMINI_API_KEY,
   scoreAndWriteCandidates,
   trimProfileForPrompt,
 } from "./scoreRecommendations";
+import {
+  DEFAULT_GEMINI_MODEL,
+  GeminiClient,
+  makeGeminiClient,
+} from "./ai/gemini";
 import { buildAndWriteTasteProfile } from "./tasteProfile";
 
 /**
@@ -22,21 +26,20 @@ import { buildAndWriteTasteProfile } from "./tasteProfile";
  *
  *   1. `onRatingWritten` — Firestore trigger on any rating create/update.
  *      Cheap: just stamps a marker at /rescoreQueue/{householdId} so the
- *      household joins the drain backlog. No Claude calls here.
+ *      household joins the drain backlog. No Gemini calls here.
  *
  *   2. `processRescoreQueue` — scheduled drain (every 10 min). For each dirty
  *      household it regenerates the taste profile, reads current /recommendations
- *      as the candidate list, and runs the same Claude batch scorer the on-demand
+ *      as the candidate list, and runs the same Gemini batch scorer the on-demand
  *      callable uses — so existing recs get refreshed in place.
  *
  * Natural debounce: many rating writes in a 10-min window collapse into one
  * drain pass because the marker doc is overwritten each time. The drain clears
- * the marker only after a successful run, so transient Claude errors leave the
+ * the marker only after a successful run, so transient Gemini errors leave the
  * household dirty for the next sweep.
  */
 
-const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MODEL = DEFAULT_GEMINI_MODEL;
 const QUEUE_COLLECTION = "rescoreQueue";
 /** Cap candidates per drain run to stay within scheduled-function budget. */
 const MAX_CANDIDATES_PER_DRAIN = 50;
@@ -135,17 +138,16 @@ export function selectDirtyHouseholds(docs: QueueDoc[]): string[] {
 
 /**
  * Re-scores one household end-to-end: regenerates taste profile, reads current
- * recs as candidates, runs Claude batch scorer, writes back. Clears the queue
+ * recs as candidates, runs Gemini batch scorer, writes back. Clears the queue
  * marker on success. Transient failures leave the marker dirty so the next
  * sweep retries.
  */
 export async function rescoreOneHousehold(params: {
   db: admin.firestore.Firestore;
-  anthropic: Anthropic;
+  gemini: GeminiClient;
   householdId: string;
-  model: string;
 }): Promise<{ written: number; scored: number; skipped?: string }> {
-  const { db, anthropic, householdId, model } = params;
+  const { db, gemini, householdId } = params;
 
   const candidates = await loadCandidatesFromRecs(db, householdId);
   if (candidates.length === 0) {
@@ -167,11 +169,10 @@ export async function rescoreOneHousehold(params: {
 
   const result = await scoreAndWriteCandidates({
     db,
-    anthropic,
+    gemini,
     householdId,
     candidates,
     profile,
-    model,
   });
 
   await db
@@ -192,7 +193,7 @@ export const processRescoreQueue = onSchedule(
   {
     schedule: "every 10 minutes",
     region: "europe-west2",
-    secrets: [ANTHROPIC_API_KEY],
+    secrets: [GEMINI_API_KEY],
     timeoutSeconds: 540,
   },
   async () => {
@@ -202,8 +203,8 @@ export const processRescoreQueue = onSchedule(
     const dirty = selectDirtyHouseholds(docs);
     if (dirty.length === 0) return;
 
-    const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
-    const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+    const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+    const gemini = makeGeminiClient(GEMINI_API_KEY.value(), model);
 
     let succeeded = 0;
     let failed = 0;
@@ -211,9 +212,8 @@ export const processRescoreQueue = onSchedule(
       try {
         const r = await rescoreOneHousehold({
           db,
-          anthropic,
+          gemini,
           householdId: hh,
-          model,
         });
         logger.info("rescored household", { householdId: hh, ...r });
         succeeded += 1;

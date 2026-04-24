@@ -1,25 +1,24 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
-import Anthropic from "@anthropic-ai/sdk";
+
+import { GEMINI_API_KEY } from "./scoreRecommendations";
+import { DEFAULT_GEMINI_MODEL, makeGeminiClient } from "./ai/gemini";
 
 /**
  * Conversational AI concierge (Phase 8).
  *
  * Receives a user message + recent conversation history from the client,
- * builds a rich household-context prompt, calls Claude, and returns a
+ * builds a rich household-context prompt, calls Gemini, and returns a
  * structured response with a text reply and 3-5 tappable title suggestions.
- *
- * The household context block (taste profile + history + watchlist) is marked
- * with cache_control so Claude reuses it across turns in the same session,
- * cutting latency and cost on follow-up messages.
  *
  * Session turns are persisted to /households/{hh}/conciergeHistory so the
  * chat survives app restarts.
+ *
+ * Migrated off Anthropic to Gemini 2.5 Flash (free tier). See CLAUDE.md
+ * gotcha 16.
  */
 
-const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
-const MODEL = "claude-sonnet-4-6";
+const MODEL = DEFAULT_GEMINI_MODEL;
 
 const SYSTEM_PROMPT = `You are a film and TV recommendation assistant for a two-person household.
 Be direct and helpful. No filler, no cheerfulness, no personality quirks.
@@ -135,17 +134,18 @@ export function buildContextBlock(
 }
 
 export function parseResponse(text: string): ConciergeResponse {
-  // Claude sometimes wraps the required JSON in prose ("Here you go: { ... }")
-  // or adds a trailing sentence. Strip markdown fences first, then extract the
-  // outermost JSON object by scanning for the first top-level { ... } pair —
-  // depth-counted so nested braces inside strings/values don't confuse us.
+  // Gemini (like Claude before it) sometimes wraps the required JSON in prose
+  // ("Here you go: { ... }") or adds a trailing sentence. Strip markdown
+  // fences first, then extract the outermost JSON object by scanning for the
+  // first top-level { ... } pair — depth-counted so nested braces inside
+  // strings/values don't confuse us.
   const fenced = text.trim()
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/, "")
     .trim();
 
   const start = fenced.indexOf("{");
-  if (start < 0) throw new Error("No JSON object in Claude response.");
+  if (start < 0) throw new Error("No JSON object in LLM response.");
 
   let depth = 0;
   let end = -1;
@@ -166,7 +166,7 @@ export function parseResponse(text: string): ConciergeResponse {
       if (depth === 0) { end = i; break; }
     }
   }
-  if (end < 0) throw new Error("Unterminated JSON object in Claude response.");
+  if (end < 0) throw new Error("Unterminated JSON object in LLM response.");
 
   const parsed = JSON.parse(fenced.slice(start, end + 1)) as ConciergeResponse;
   return {
@@ -176,7 +176,7 @@ export function parseResponse(text: string): ConciergeResponse {
 }
 
 export const concierge = onCall(
-  { secrets: [ANTHROPIC_API_KEY], region: "europe-west2", timeoutSeconds: 60 },
+  { secrets: [GEMINI_API_KEY], region: "europe-west2", timeoutSeconds: 60 },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
@@ -247,44 +247,41 @@ export const concierge = onCall(
       moodLabel,
     );
 
-    // Build Claude messages from history + current turn.
-    const claudeMessages: Anthropic.MessageParam[] = [];
+    // Build turn list from history + current message. Gemini uses "model"
+    // for assistant turns (vs Anthropic's "assistant"); the wrapper converts
+    // these to Content parts for generateContent.
+    const turns: Array<{ role: "user" | "model"; text: string }> = [];
     for (const turn of (history ?? []).slice(-5)) {
-      claudeMessages.push({ role: "user", content: turn.user });
-      claudeMessages.push({ role: "assistant", content: turn.assistant });
+      turns.push({ role: "user", text: turn.user });
+      turns.push({ role: "model", text: turn.assistant });
     }
-    claudeMessages.push({ role: "user", content: message });
+    turns.push({ role: "user", text: message });
 
-    const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    const gemini = makeGeminiClient(GEMINI_API_KEY.value(), MODEL);
 
-    // Stable `messages.create` — concierge is low-frequency (one chat at a
-    // time), so dropping `cache_control` costs nothing user-visible and
-    // avoids SDK-version drift on the deprecated beta.promptCaching path.
-    let res: Anthropic.Message;
+    let rawText: string;
     try {
-      res = await anthropic.messages.create({
-        model: MODEL,
-        max_tokens: 1024,
-        system: `${SYSTEM_PROMPT}\n\nHOUSEHOLD CONTEXT:\n${contextBlock}`,
-        messages: claudeMessages,
+      rawText = await gemini.generate({
+        systemInstruction: `${SYSTEM_PROMPT}\n\nHOUSEHOLD CONTEXT:\n${contextBlock}`,
+        messages: turns,
+        maxOutputTokens: 1024,
       });
     } catch (err) {
-      console.error("concierge: Claude call failed", { err, model: MODEL });
+      console.error("concierge: Gemini call failed", { err, model: MODEL });
       const msg = err instanceof Error ? err.message : "AI call failed.";
       throw new HttpsError("internal", msg);
     }
 
-    const block = res.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") {
-      throw new HttpsError("internal", "No text in Claude response.");
+    if (!rawText) {
+      throw new HttpsError("internal", "No text in Gemini response.");
     }
 
     let parsed: ConciergeResponse;
     try {
-      parsed = parseResponse(block.text);
+      parsed = parseResponse(rawText);
     } catch {
-      // If Claude returned prose instead of JSON, wrap it gracefully.
-      parsed = { text: block.text.slice(0, 500), titles: [] };
+      // If the model returned prose instead of JSON, wrap it gracefully.
+      parsed = { text: rawText.slice(0, 500), titles: [] };
     }
 
     // Persist turn to Firestore (best-effort — don't fail the response if this errors).

@@ -28,7 +28,7 @@ Each release comes with a short *What's new* so you always know what you're gett
 - **Upcoming for you** — a carousel of movies and TV about to release, ranked by how well they match your household's genre mix.
 - **Discover** — browse Trending, New Releases, or any TMDB genre.
 - **"Surprise me"** — random pull from the top of your rec list for when nothing's landing.
-- **"More like these"** — pick 2–8 titles you love, Claude suggests films that fit the group as a whole.
+- **"More like these"** — pick 2–8 titles you love, the AI concierge suggests films that fit the group as a whole.
 - **Live search** — find anything on TMDB from the Home search bar.
 
 ### 🧑‍🤝‍🧑 Deciding together
@@ -99,7 +99,7 @@ See [**ROADMAP.md**](ROADMAP.md) for the full phase-by-phase build plan — what
 | Routing | go_router 14.2 |
 | Backend | Firebase Auth, Firestore, Cloud Functions (`europe-west2`), Cloud Messaging |
 | Cloud Functions | Node 22 TypeScript, firebase-admin 13 |
-| AI | Anthropic Claude (Sonnet 4.6) — batch scoring + concierge chat |
+| AI | Google Gemini 2.5 Flash (free tier, 1,500 req/day) — batch scoring + concierge chat |
 | Movie data | TMDB |
 | Watch tracking | Trakt (OAuth 2.0) |
 
@@ -138,7 +138,7 @@ For the architecture deep-dive, known gotchas, and conventions, see [`CLAUDE.md`
 - A Firebase project with Auth, Firestore, Cloud Functions, and Messaging enabled
 - A TMDB API key
 - A Trakt application (redirect URI `com.household.watchnext://trakt-callback`)
-- An Anthropic API key
+- A Gemini API key (free at https://aistudio.google.com/apikey)
 
 **Setup:**
 
@@ -160,7 +160,7 @@ For the architecture deep-dive, known gotchas, and conventions, see [`CLAUDE.md`
 5. Push your Cloud Functions secrets:
    ```bash
    firebase functions:secrets:set TRAKT_CLIENT_SECRET
-   firebase functions:secrets:set ANTHROPIC_API_KEY
+   firebase functions:secrets:set GEMINI_API_KEY
    firebase functions:secrets:set TMDB_API_KEY
    ```
 

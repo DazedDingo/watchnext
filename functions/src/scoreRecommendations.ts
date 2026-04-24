@@ -1,10 +1,14 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import Anthropic from "@anthropic-ai/sdk";
+import {
+  DEFAULT_GEMINI_MODEL,
+  GeminiClient,
+  makeGeminiClient,
+} from "./ai/gemini";
 
 /**
- * Claude batch scorer — takes a candidate list, reads the household's
+ * Gemini batch scorer — takes a candidate list, reads the household's
  * tasteProfile, and writes scored docs to /households/{id}/recommendations.
  *
  * Contract (per rec doc):
@@ -18,13 +22,13 @@ import Anthropic from "@anthropic-ai/sdk";
  *     generated_at
  *   }
  *
- * Spec-called model `claude-sonnet-4-20250514`; we default to the current
- * Sonnet (`claude-sonnet-4-6`) and allow override via ANTHROPIC_MODEL secret.
+ * Migrated off Anthropic (paid per-token) onto Gemini 2.5 Flash (1,500
+ * req/day free tier). See CLAUDE.md gotcha 16 for the rationale.
  */
 
-const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
+export const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MODEL = DEFAULT_GEMINI_MODEL;
 const BATCH_SIZE = 10;
 // Upped from 50 → 100 after the client went to two-phase refresh: the
 // spinner no longer blocks on this CF, so scoring ~100 candidates (10
@@ -135,11 +139,11 @@ export function trimProfileForPrompt(
 
 /**
  * The "static" half of the batch prompt — instructions + household taste.
- * Identical across every batch in a single refresh run, so it's eligible
- * for Anthropic's prompt cache (≈90% input-token discount on hits). Call
- * sites must send this via `system:` with `cache_control: ephemeral` so
- * subsequent batches hit the cache; the batch-specific candidate list
- * goes in the user message (see `buildBatchPrompt`).
+ * Identical across every batch in a single refresh run. Kept split from
+ * `buildBatchPrompt` (the candidate-specific half) as clean hygiene even
+ * though the Gemini migration removed the prompt-caching motivation
+ * (free-tier Flash has no per-token cost). Call sites pass this as
+ * `systemInstruction` on the Gemini client.
  */
 export function buildSystemPrompt(
   profile: ReturnType<typeof trimProfileForPrompt>,
@@ -218,7 +222,7 @@ export function parseScores(text: string): Score[] {
 }
 
 /**
- * Runs the Claude batch-scoring loop over `candidates` and writes one doc per
+ * Runs the Gemini batch-scoring loop over `candidates` and writes one doc per
  * candidate to /households/{householdId}/recommendations. Batches that error
  * out are skipped (logged) rather than failing the whole run — individual
  * candidates in a failed batch fall back to the default 50 score.
@@ -229,43 +233,31 @@ export function parseScores(text: string): Score[] {
  */
 export async function scoreAndWriteCandidates(params: {
   db: admin.firestore.Firestore;
-  anthropic: Anthropic;
+  gemini: GeminiClient;
   householdId: string;
   candidates: Candidate[];
   profile: ReturnType<typeof trimProfileForPrompt>;
-  model: string;
 }): Promise<{ written: number; scored: number }> {
-  const { db, anthropic, householdId, candidates, profile, model } = params;
+  const { db, gemini, householdId, candidates, profile } = params;
   const allScores = new Map<string, Score>();
-  const systemPrompt = buildSystemPrompt(profile);
+  const systemInstruction = buildSystemPrompt(profile);
   for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
     const batch = candidates.slice(i, i + BATCH_SIZE);
     let scores: Score[] = [];
     try {
-      // Prompt caching: the system block holds the instructions + household
-      // taste profile (identical across every batch in this run). Marking it
-      // `cache_control: ephemeral` means batch #1 writes the cache and
-      // batches #2-#10 hit it for a ~90% input-token discount. SDK 0.30.1
-      // only exposes cache_control on the beta namespace (see CLAUDE.md
-      // gotcha 16); upgrade the SDK if we want to ride stable.
-      const res = await anthropic.beta.promptCaching.messages.create({
-        model,
-        max_tokens: 2000,
-        system: [
-          {
-            type: "text",
-            text: systemPrompt,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
-        messages: [{ role: "user", content: buildBatchPrompt(batch) }],
+      // The systemInstruction carries the batch-invariant instructions +
+      // household taste profile; the user message holds the per-batch
+      // candidate list. Gemini handles the system instruction separately
+      // and is forgiving about JSON output wrapped in ```json fences —
+      // parseScores strips them either way.
+      const text = await gemini.generate({
+        systemInstruction,
+        messages: [{ role: "user", text: buildBatchPrompt(batch) }],
+        maxOutputTokens: 2048,
       });
-      const block = res.content.find((b) => b.type === "text");
-      if (block && "text" in block) {
-        scores = parseScores(block.text);
-      }
+      scores = parseScores(text);
     } catch (err) {
-      console.error("Claude batch failed", { batchStart: i, err });
+      console.error("Gemini batch failed", { batchStart: i, err });
       continue;
     }
     for (const s of scores) allScores.set(s.key, s);
@@ -305,7 +297,7 @@ export async function scoreAndWriteCandidates(params: {
 }
 
 export const scoreRecommendations = onCall(
-  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 540, region: "europe-west2" },
+  { secrets: [GEMINI_API_KEY], timeoutSeconds: 540, region: "europe-west2" },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
@@ -338,19 +330,18 @@ export const scoreRecommendations = onCall(
       .get();
     const profileSummary = trimProfileForPrompt(profileSnap.data());
 
-    const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
-    const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+    const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+    const gemini = makeGeminiClient(GEMINI_API_KEY.value(), model);
 
     let written: number;
     let scored: number;
     try {
       ({ written, scored } = await scoreAndWriteCandidates({
         db,
-        anthropic,
+        gemini,
         householdId,
         candidates,
         profile: profileSummary,
-        model,
       }));
     } catch (err) {
       console.error("scoreAndWriteCandidates failed", { householdId, err });

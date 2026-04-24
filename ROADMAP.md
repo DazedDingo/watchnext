@@ -97,7 +97,7 @@ How you actually pick something tonight.
 - **Decision history** — every pick logged, "whose turn" counters updated automatically.
 - **Predict & Rate** trigger after a decision — optional but encouraged.
 
-*Gaps:* compromise picks could use a Claude call with both taste profiles instead of TMDB similar — straight swap when appetite permits.
+*Gaps:* compromise picks could use a Gemini call with both taste profiles instead of TMDB similar — straight swap when appetite permits.
 
 ---
 
@@ -120,7 +120,7 @@ Calibrate taste by guessing before you watch.
 The brain.
 
 **Shipped:**
-- **Claude batch scoring** — a Cloud Function scores up to 100 candidates per refresh, writing `match_score` / `match_score_solo` + an AI blurb to each rec.
+- **Gemini batch scoring** — a Cloud Function scores up to 100 candidates per refresh on Gemini 2.5 Flash's free tier, writing `match_score` / `match_score_solo` + an AI blurb to each rec.
 - **Taste profile generation** — per-user + combined top genres, decades, and liked/disliked titles. Two slots (solo vs together) so a partner's solo-horror weekends don't contaminate the shared profile.
 - **Background rescoring** — whenever anyone rates a title, a scheduled CF (every 10 min) regenerates the taste profile and rescores the 50 most recent recs.
 - **Home screen** — Tonight's Pick hero, Upcoming-for-you carousel, scored rec list (120 items, streamed in real time).
@@ -141,10 +141,9 @@ The brain.
 Chat with an AI that knows your household.
 
 - **Full-screen chat sheet.**
-- **Claude-powered** — the Cloud Function sends your taste profile, last 50 history rows, watchlist, current mode and mood into the prompt.
+- **Gemini-powered** — the Cloud Function sends your taste profile, last 50 history rows, watchlist, current mode and mood into the prompt.
 - **Multi-turn chat with session persistence.**
-- **Tappable title cards** in responses — Claude suggestions that don't resolve on TMDB are silently dropped so we never show a broken tile.
-- **Prompt caching** on the context block.
+- **Tappable title cards** in responses — AI suggestions that don't resolve on TMDB are silently dropped so we never show a broken tile.
 
 ---
 
@@ -204,7 +203,7 @@ Cross-cutting work to make sure your solo tastes and your shared tastes stay cle
 - [x] **`Rating.context` field** — every rating stamped `solo` / `together` / `null` (legacy). Rating sheet has an override toggle.
 - [x] **`WatchlistItem.scope` + `owner_uid`** — share-confirm sheet picks Shared or Solo; solo items only visible to owner in solo mode.
 - [x] **Per-mode filter state** — mood, runtime, media type, Oscar filter, sort, and curated source all persist independently for solo and together.
-- [x] **Taste profile schema** — `per_user_solo` and `per_user_together` alongside the legacy cross-context slot. Scorer feeds both into Claude.
+- [x] **Taste profile schema** — `per_user_solo` and `per_user_together` alongside the legacy cross-context slot. Scorer feeds both into Gemini.
 - [x] **Prediction counters split** — `predict_total_solo/_together` and `predict_wins_solo/_together` on member doc; a prediction made in solo stays solo even if you flip mode before revealing.
 - [x] **Trakt scope flag** — Shared / Personal / Mixed per user. Imported Trakt ratings get stamped accordingly so the taste engine learns cleanly.
 
@@ -247,7 +246,7 @@ These are deliberately *not* planned:
 - `google-services.json` → `android/app/`
 - TMDB API key (dart-define + Firebase secret for server-side Stremio addon)
 - Trakt Client ID + Secret
-- Anthropic API key (Firebase secret)
+- Gemini API key (Firebase secret — free at https://aistudio.google.com/apikey)
 
 **Model versioning:**
-Phase 7 batch scoring + Phase 8 concierge currently use **`claude-sonnet-4-6`**. Update when a newer Sonnet lands. Opus 4.7 (`claude-opus-4-7`) and Haiku 4.5 (`claude-haiku-4-5-20251001`) are the other families — could split model choice for cost/quality trades if scoring cost becomes an issue.
+Phase 7 batch scoring + Phase 8 concierge currently use **`gemini-2.5-flash`** (Google Generative AI SDK), pinned in `functions/src/ai/gemini.ts` as `DEFAULT_GEMINI_MODEL`. Override per deploy via the `GEMINI_MODEL` env var. Flash's free tier (1,500 req/day) covers a two-person household indefinitely — day-to-day app usage is effectively free. Migrated off Anthropic Claude in April 2026; the core motivation was cost, and paid Gemini Pro / Anthropic Sonnet are both on the table again if quality regressions surface (they haven't yet).

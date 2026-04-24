@@ -5,7 +5,27 @@ import {
   buildSystemPrompt,
   buildBatchPrompt,
   parseScores,
+  scoreAndWriteCandidates,
 } from "../src/scoreRecommendations";
+import { GeminiClient } from "../src/ai/gemini";
+// Mock Firestore from the firebase-functions-test suite if available;
+// fall back to a lightweight stub that records writes.
+type Write = { path: string; data: Record<string, unknown>; merge: boolean };
+function stubFirestore(writes: Write[]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const writer: any = {
+    set: (ref: { path: string }, data: Record<string, unknown>, opts?: { merge?: boolean }) => {
+      writes.push({ path: ref.path, data, merge: !!opts?.merge });
+    },
+    close: async () => undefined,
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db: any = {
+    bulkWriter: () => writer,
+    doc: (path: string) => ({ path }),
+  };
+  return db;
+}
 
 describe("isCandidate", () => {
   test("accepts a minimal valid candidate", () => {
@@ -306,11 +326,7 @@ describe("buildSystemPrompt / buildBatchPrompt split (prompt caching)", () => {
     expect(batch).not.toContain("Return ONLY");
   });
 
-  test("system prompt is identical across different batches (cacheable)", () => {
-    // Prompt caching only hits when the cached prefix byte-matches across
-    // requests. If anything batch-specific bled into the system prompt, we'd
-    // miss the cache on every batch — which would silently wipe the
-    // ~90%-off discount we're chasing. Lock the invariant.
+  test("system prompt is identical across different calls (pure function)", () => {
     expect(buildSystemPrompt(profile)).toBe(buildSystemPrompt(profile));
   });
 
@@ -321,6 +337,140 @@ describe("buildSystemPrompt / buildBatchPrompt split (prompt caching)", () => {
     );
     expect(combined).toContain("Top shared genres");
     expect(combined).toContain("[key=movie:1]");
+  });
+});
+
+describe("scoreAndWriteCandidates (Gemini)", () => {
+  const profile = {
+    member_uids: ["u1"],
+    combined_top_genres: ["Drama"],
+    per_user_summary: { u1: "avg 4.0" },
+    per_user_solo_summary: { u1: "" },
+    per_user_together_summary: { u1: "" },
+  };
+
+  type Call = { systemInstruction: string; userText: string };
+
+  function fakeGemini(responder: (call: Call) => string): {
+    client: GeminiClient;
+    calls: Call[];
+  } {
+    const calls: Call[] = [];
+    const client: GeminiClient = {
+      async generate({ systemInstruction, messages }) {
+        const userTurn = messages.filter((m) => m.role === "user").at(-1);
+        const call: Call = {
+          systemInstruction,
+          userText: userTurn?.text ?? "",
+        };
+        calls.push(call);
+        return responder(call);
+      },
+    };
+    return { client, calls };
+  }
+
+  test("writes one rec doc per candidate, merging scores when returned", async () => {
+    const candidates = [
+      { media_type: "movie" as const, tmdb_id: 1, title: "A" },
+      { media_type: "tv" as const, tmdb_id: 2, title: "B" },
+    ];
+    const { client, calls } = fakeGemini(() =>
+      JSON.stringify([
+        { key: "movie:1", together: 82, solo: { u1: 88 }, blurb: "great", blurb_solo: { u1: "yes" } },
+        { key: "tv:2", together: 55, solo: { u1: 60 }, blurb: "ok", blurb_solo: { u1: "meh" } },
+      ]),
+    );
+    const writes: Write[] = [];
+    const db = stubFirestore(writes);
+
+    const out = await scoreAndWriteCandidates({
+      db,
+      gemini: client,
+      householdId: "hh1",
+      candidates,
+      profile,
+    });
+
+    expect(out.written).toBe(2);
+    expect(out.scored).toBe(2);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].systemInstruction).toContain("Top shared genres: Drama");
+    expect(calls[0].userText).toContain("[key=movie:1]");
+    expect(calls[0].userText).toContain("[key=tv:2]");
+
+    const byPath = Object.fromEntries(writes.map((w) => [w.path, w.data]));
+    expect(byPath["households/hh1/recommendations/movie:1"].match_score).toBe(82);
+    expect(byPath["households/hh1/recommendations/movie:1"].ai_blurb).toBe("great");
+    expect(byPath["households/hh1/recommendations/tv:2"].match_score).toBe(55);
+  });
+
+  test("markdown-fenced JSON output is still parsed cleanly", async () => {
+    // Gemini Flash commonly wraps output in ```json fences despite the
+    // system instruction. parseScores strips them — lock the behaviour
+    // end-to-end so a quirky wrapper doesn't degrade to match_score=50.
+    const candidates = [{ media_type: "movie" as const, tmdb_id: 9, title: "Z" }];
+    const { client } = fakeGemini(
+      () =>
+        "```json\n[{\"key\":\"movie:9\",\"together\":77,\"solo\":{\"u1\":80},\"blurb\":\"x\",\"blurb_solo\":{\"u1\":\"y\"}}]\n```",
+    );
+    const writes: Write[] = [];
+    const db = stubFirestore(writes);
+
+    const out = await scoreAndWriteCandidates({
+      db,
+      gemini: client,
+      householdId: "hh1",
+      candidates,
+      profile,
+    });
+
+    expect(out.scored).toBe(1);
+    expect(writes[0].data.match_score).toBe(77);
+    expect(writes[0].data.scored).toBe(true);
+  });
+
+  test("batch failure falls back to match_score=50 for that batch only", async () => {
+    // BATCH_SIZE is 10, so two batches here. First batch errors; second
+    // succeeds. The failed batch's candidates must still be written with
+    // defaults so they surface in Firestore at a neutral score.
+    const candidates = Array.from({ length: 12 }, (_, i) => ({
+      media_type: "movie" as const,
+      tmdb_id: i + 1,
+      title: `T${i + 1}`,
+    }));
+    let call = 0;
+    const client: GeminiClient = {
+      async generate() {
+        call++;
+        if (call === 1) throw new Error("rate limited");
+        // second batch has candidates 11 and 12 (0-indexed tmdb_ids 11, 12)
+        return JSON.stringify([
+          { key: "movie:11", together: 70, solo: {}, blurb: "", blurb_solo: {} },
+          { key: "movie:12", together: 72, solo: {}, blurb: "", blurb_solo: {} },
+        ]);
+      },
+    };
+    const writes: Write[] = [];
+    const db = stubFirestore(writes);
+
+    const out = await scoreAndWriteCandidates({
+      db,
+      gemini: client,
+      householdId: "hh1",
+      candidates,
+      profile,
+    });
+
+    expect(out.written).toBe(12);
+    expect(out.scored).toBe(2);
+    const byPath = Object.fromEntries(writes.map((w) => [w.path, w.data]));
+    // First batch (1-10) all default to 50 because the Gemini call threw.
+    expect(byPath["households/hh1/recommendations/movie:1"].match_score).toBe(50);
+    expect(byPath["households/hh1/recommendations/movie:1"].scored).toBe(false);
+    // Second batch came through.
+    expect(byPath["households/hh1/recommendations/movie:11"].match_score).toBe(70);
+    expect(byPath["households/hh1/recommendations/movie:11"].scored).toBe(true);
   });
 });
 
