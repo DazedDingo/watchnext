@@ -114,16 +114,25 @@ class TmdbService {
       _get(_uri('/discover/tv', params));
 
   /// Fills a candidate pool via `/discover` with a fallback ladder so narrow
-  /// filters (e.g. "War, 1970-1989") don't produce ~0 results.
+  /// filters (e.g. "Sci-Fi + War" or "War, 1970-1989") don't produce ~0
+  /// results after the client-side AND intersection.
   ///
-  /// Ladder:
-  ///  1. OR-join all genre ids (`|` delimiter) + year bounds. Paginate until
-  ///     the pool hits [poolFloor] or [maxPages].
-  ///  2. If still below [poolFloor] and there are multiple genres, fire one
-  ///     discover per genre and merge (catches obscure genres starved by
-  ///     popularity sort).
-  ///  3. If still below [poolFloor] and year bounds were applied, drop the
-  ///     year constraint and retry step 1.
+  /// Ladder (short-circuits once [poolFloor] is hit):
+  ///  1. AND-join genres (`,`) + year bounds — matches the client-side
+  ///     intersection exactly, so every row returned here survives the
+  ///     filter. Skipped when only one genre is selected (AND ≡ OR for len
+  ///     1, so rung 2 covers it).
+  ///  2. OR-join genres (`|`) + year bounds — widens the pool to the union.
+  ///     Feeds the keyword-augmenter: sci-fi titles with `space marine` /
+  ///     `alien invasion` keywords get `War` added and pass the client
+  ///     intersection.
+  ///  3. Per-genre fallback (one discover per genre, year preserved) —
+  ///     catches obscure single genres starved by the OR-joined popularity
+  ///     sort.
+  ///  4. AND-join without year — year was the limiter; try the strict
+  ///     intersection again with a wider window.
+  ///  5. OR-join without year — same union, no year floor.
+  ///  6. Per-genre without year — last-resort catch for tiny pools.
   ///
   /// All results are deduped by `id` and returned in the normal
   /// `{results: [...]}` shape so [buildCandidates] treats them uniformly.
@@ -165,6 +174,7 @@ class TmdbService {
     Map<String, String> baseParams({
       required List<int> ids,
       required bool withYear,
+      required String joinOp,
     }) {
       final p = <String, String>{
         'sort_by': sortBy ?? 'vote_average.desc',
@@ -181,7 +191,7 @@ class TmdbService {
       if (withCompanies != null && withCompanies.isNotEmpty) {
         p['with_companies'] = withCompanies;
       }
-      if (ids.isNotEmpty) p['with_genres'] = ids.join('|');
+      if (ids.isNotEmpty) p['with_genres'] = ids.join(joinOp);
       // Keywords (e.g. TMDB's "oscar-winning-film" keyword 210024) are
       // preserved across every fallback rung — dropping them would defeat
       // the whole point of the filter (e.g. an Oscar-only query that fell
@@ -205,10 +215,17 @@ class TmdbService {
       return p;
     }
 
-    Future<void> drainPages(List<int> ids, {required bool withYear}) async {
+    Future<void> drainPages(
+      List<int> ids, {
+      required bool withYear,
+      String joinOp = '|',
+    }) async {
       for (var page = 1; page <= maxPages; page++) {
         if (merged.length >= poolFloor) return;
-        final params = {...baseParams(ids: ids, withYear: withYear), 'page': '$page'};
+        final params = {
+          ...baseParams(ids: ids, withYear: withYear, joinOp: joinOp),
+          'page': '$page',
+        };
         try {
           final payload = isTv ? await discoverTv(params) : await discoverMovies(params);
           consume(payload);
@@ -223,21 +240,53 @@ class TmdbService {
       }
     }
 
-    // Rung 1: OR-joined genres with year bounds.
-    await drainPages(genreIds, withYear: true);
+    final multiGenre = genreIds.length > 1;
+    final hasYear = minYear != null || maxYear != null;
 
-    // Rung 2: per-genre fallback if multi-genre query was sparse.
-    if (merged.length < poolFloor && genreIds.length > 1) {
+    // Rung 1: AND-joined genres + year. Only meaningful for multi-genre
+    // queries — for a single genre, AND ≡ OR and rung 2 would re-fetch the
+    // identical page. Matches the client-side intersection exactly so every
+    // row here survives the filter.
+    if (multiGenre) {
+      await drainPages(genreIds, withYear: true, joinOp: ',');
+    }
+
+    // Rung 2: OR-joined genres + year. For single-genre queries this is the
+    // primary rung; for multi-genre it widens the pool so the keyword
+    // augmenter has more candidates to promote (e.g. sci-fi titles with
+    // `alien invasion` → add War → pass intersection).
+    if (merged.length < poolFloor) {
+      await drainPages(genreIds, withYear: true, joinOp: '|');
+    }
+
+    // Rung 3: per-genre fallback (year preserved). Catches obscure single
+    // genres starved by the union's popularity sort.
+    if (merged.length < poolFloor && multiGenre) {
       for (final id in genreIds) {
         if (merged.length >= poolFloor) break;
-        await drainPages([id], withYear: true);
+        await drainPages([id], withYear: true, joinOp: ',');
       }
     }
 
-    // Rung 3: drop year entirely if the year constraint was the limiter.
-    final hasYear = minYear != null || maxYear != null;
+    // Rung 4: AND-joined genres without year. Year bounds were the limiter;
+    // retry the strict intersection with a wider window.
+    if (merged.length < poolFloor && hasYear && multiGenre) {
+      await drainPages(genreIds, withYear: false, joinOp: ',');
+    }
+
+    // Rung 5: OR-joined genres without year. Existing behaviour pre-AND —
+    // last-ditch union across the whole catalog.
     if (merged.length < poolFloor && hasYear) {
-      await drainPages(genreIds, withYear: false);
+      await drainPages(genreIds, withYear: false, joinOp: '|');
+    }
+
+    // Rung 6: per-genre without year. Final safety net — ensures we always
+    // surface *something* for any individual genre that has entries on TMDB.
+    if (merged.length < poolFloor && multiGenre) {
+      for (final id in genreIds) {
+        if (merged.length >= poolFloor) break;
+        await drainPages([id], withYear: false, joinOp: ',');
+      }
     }
 
     return {'results': merged};

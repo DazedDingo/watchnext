@@ -254,12 +254,16 @@ void main() {
 
   // ─── discoverPaged fallback ladder ────────────────────────────────────────
   //
-  // The narrow-filter problem: "War, 1970-1989" would return ~2 hits if we
-  // only asked `/discover/movie?with_genres=10752&primary_release_date.gte=…`
-  // once. `discoverPaged` has three rungs:
-  //   1. OR-join genres + year bounds, paginate until [poolFloor] or [maxPages]
-  //   2. If still below floor and multiple genres → per-genre retry
-  //   3. If still below floor and year active → drop year and retry
+  // The narrow-filter problem: "Sci-Fi + War" or "War, 1970-1989" returns ~0
+  // useful hits from a single OR-joined discover call because the union
+  // pool is dominated by single-genre popular titles that fail the client's
+  // AND intersection. `discoverPaged` has a six-rung ladder:
+  //   1. AND-join genres + year (multi-genre only — matches client intersection)
+  //   2. OR-join genres + year (widens pool for keyword-augmented titles)
+  //   3. Per-genre + year (multi-genre only — salvages sparse single genres)
+  //   4. AND-join without year (multi-genre + year-active only)
+  //   5. OR-join without year
+  //   6. Per-genre without year (multi-genre only — last resort)
   //
   // These tests script the mock server to simulate each rung being the one
   // that finally fills the pool, asserting the right queries fire + results
@@ -332,7 +336,7 @@ void main() {
       expect(q.containsKey('primary_release_date.gte'), isFalse);
     });
 
-    test('OR-joins multiple genre ids with the pipe delimiter', () async {
+    test('AND-joins multiple genre ids with comma on rung 1', () async {
       Uri? captured;
       final tmdb = TmdbService(
         client: MockClient((req) async {
@@ -350,9 +354,11 @@ void main() {
       );
       await tmdb.discoverPaged(
         mediaType: 'movie',
-        genreIds: const [10752, 36, 18], // War | History | Drama
+        genreIds: const [10752, 36, 18], // War & History & Drama
       );
-      expect(captured!.queryParameters['with_genres'], '10752|36|18');
+      // Rung 1 is AND-joined now — the strict intersection matches what the
+      // client-side AND filter expects, so rows returned here survive.
+      expect(captured!.queryParameters['with_genres'], '10752,36,18');
     });
 
     test('stops paginating once total_pages reached even below poolFloor',
@@ -386,10 +392,12 @@ void main() {
     });
   });
 
-  group('TmdbService.discoverPaged — rung 2 (per-genre fallback)', () {
-    test('fires per-genre retries when OR-join is sparse with >1 genre',
-        () async {
-      // Script: OR-join returns 1 row; single-genre retries each return more.
+  group('TmdbService.discoverPaged — AND → OR → per-genre ladder', () {
+    test('AND rung empty + OR sparse → per-genre fallback fires', () async {
+      // Script the three primary multi-genre rungs:
+      //   - AND (comma) → 0 rows (strict intersection is empty)
+      //   - OR (pipe)   → 1 row (popularity-dominated union)
+      //   - per-genre   → 10 rows each, ids namespaced by genre
       final calls = <Uri>[];
       final tmdb = TmdbService(
         client: MockClient((req) async {
@@ -407,7 +415,15 @@ void main() {
               headers: const {'content-type': 'application/json'},
             );
           }
-          // Per-genre: return 10 rows each, ids offset by genre id
+          if (genres.contains(',')) {
+            // AND rung — intersection empty to force fallback down the ladder.
+            return http.Response(
+              json.encode({'results': const [], 'total_pages': 1}),
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }
+          // Per-genre: return 10 rows each, ids offset by genre id.
           final id = int.parse(genres);
           return http.Response(
             json.encode({
@@ -425,13 +441,22 @@ void main() {
         genreIds: const [10752, 36, 18],
         poolFloor: 15,
       );
+      final andCalls = calls.where((u) {
+        final g = u.queryParameters['with_genres']!;
+        return g.contains(',') && !g.contains('|');
+      });
       final unionCalls =
           calls.where((u) => u.queryParameters['with_genres']!.contains('|'));
-      final perGenreCalls =
-          calls.where((u) => !u.queryParameters['with_genres']!.contains('|'));
-      expect(unionCalls.length, greaterThanOrEqualTo(1));
+      final perGenreCalls = calls.where((u) {
+        final g = u.queryParameters['with_genres']!;
+        return !g.contains(',') && !g.contains('|');
+      });
+      expect(andCalls.length, greaterThanOrEqualTo(1),
+          reason: 'rung 1 (AND-join) must fire first for multi-genre');
+      expect(unionCalls.length, greaterThanOrEqualTo(1),
+          reason: 'rung 2 (OR-join) must fire when rung 1 is short');
       expect(perGenreCalls.length, greaterThanOrEqualTo(1),
-          reason: 'rung 2 must fire at least one per-genre discover');
+          reason: 'rung 3 (per-genre) must fire when rung 2 is still short');
       // Pool should include union row + per-genre rows.
       final ids = (res['results'] as List)
           .map((r) => (r as Map)['id'])
@@ -467,26 +492,39 @@ void main() {
       expect(calls, hasLength(1));
     });
 
-    test('per-genre results dedup against union rung', () async {
-      // Rung 1 (OR) returns id=1; rung 2 per-genre also returns id=1 — the
-      // final merged list must contain id=1 only once.
+    test('results dedup across AND + OR + per-genre rungs', () async {
+      // AND and OR both return id=1; per-genre returns id=1 + id=99. Final
+      // merged list must contain id=1 only once.
       final tmdb = TmdbService(
         client: MockClient((req) async {
           final g = req.url.queryParameters['with_genres']!;
-          final payload = g.contains('|')
-              ? {
-                  'results': [
-                    {'id': 1, 'title': 'shared'},
-                  ],
-                  'total_pages': 1,
-                }
-              : {
-                  'results': [
-                    {'id': 1, 'title': 'shared again'},
-                    {'id': 99, 'title': 'unique to per-genre'},
-                  ],
-                  'total_pages': 1,
-                };
+          Map<String, dynamic> payload;
+          if (g.contains('|')) {
+            // OR
+            payload = {
+              'results': [
+                {'id': 1, 'title': 'shared'},
+              ],
+              'total_pages': 1,
+            };
+          } else if (g.contains(',')) {
+            // AND
+            payload = {
+              'results': [
+                {'id': 1, 'title': 'shared (AND)'},
+              ],
+              'total_pages': 1,
+            };
+          } else {
+            // per-genre
+            payload = {
+              'results': [
+                {'id': 1, 'title': 'shared again'},
+                {'id': 99, 'title': 'unique to per-genre'},
+              ],
+              'total_pages': 1,
+            };
+          }
           return http.Response(json.encode(payload), 200,
               headers: const {'content-type': 'application/json'});
         }),
@@ -578,7 +616,8 @@ void main() {
         genreIds: const [10752],
         poolFloor: 20,
       );
-      // Rung 1 fires once, no rung 2 (single genre), no rung 3 (no year).
+      // Single genre + no year: rung 1 AND skips (single), rung 2 OR fires
+      // once, rungs 3-6 all skip (single or no-year gated). One call total.
       expect(callCount, 1);
     });
 
@@ -611,9 +650,10 @@ void main() {
   });
 
   group('TmdbService.discoverPaged — defensive paths', () {
-    test('rung 1 HTTP error is swallowed; later rungs can still fire',
+    test('first HTTP error is swallowed; later rungs can still fire',
         () async {
-      // First call (rung 1) errors. Rung 3 (drop year) should succeed.
+      // First call errors. Subsequent rungs (including the drop-year OR
+      // rung) salvage the pool.
       bool firstCall = true;
       final tmdb = TmdbService(
         client: MockClient((req) async {
