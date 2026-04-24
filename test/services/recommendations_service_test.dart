@@ -1181,6 +1181,113 @@ void main() {
       expect((await db.doc(path('movie:1')).get()).data()!['imdb_id'],
           isNull);
     });
+
+    test(
+        'backfillMissingAugmentedGenres widens genres + stamps keywords_fetched',
+        () async {
+      // Mock TMDB `/movie/{id}/keywords` returning dystopia keyword (4565) →
+      // Science Fiction in kKeywordToExtraGenres. Movie payload uses
+      // `keywords: [...]`; TV payload uses `results: [...]`.
+      final mockClient = MockClient((req) async {
+        final seg = req.url.pathSegments; // [3, movie, 10, keywords]
+        final mediaType = seg[seg.length - 3];
+        final body = mediaType == 'movie'
+            ? {
+                'keywords': [
+                  {'id': 4565, 'name': 'dystopia'},
+                ]
+              }
+            : {
+                'results': [
+                  {'id': 10084, 'name': 'anime'},
+                ]
+              };
+        return http.Response(jsonEncode(body), 200,
+            headers: const {'content-type': 'application/json'});
+      });
+      final tmdb = TmdbService(client: mockClient);
+      final localSvc = RecommendationsService(db: db, tmdb: tmdb);
+
+      await db.doc(path('movie:10')).set({
+        'media_type': 'movie', 'tmdb_id': 10, 'title': 'A',
+        'genres': ['Action'],
+      });
+      await db.doc(path('tv:11')).set({
+        'media_type': 'tv', 'tmdb_id': 11, 'title': 'B',
+        'genres': ['Drama'],
+      });
+      // Already-flagged rec doc should be skipped — no rewrite.
+      await db.doc(path('movie:12')).set({
+        'media_type': 'movie', 'tmdb_id': 12, 'title': 'C',
+        'genres': ['Comedy'],
+        'keywords_fetched': true,
+      });
+
+      await localSvc.backfillMissingAugmentedGenres(hh);
+
+      final m10 = (await db.doc(path('movie:10')).get()).data()!;
+      expect(m10['genres'], ['Action', 'Science Fiction']);
+      expect(m10['keywords_fetched'], true);
+
+      final t11 = (await db.doc(path('tv:11')).get()).data()!;
+      expect(t11['genres'], ['Drama', 'Animation']);
+      expect(t11['keywords_fetched'], true);
+
+      // Unchanged — flag was already present.
+      final m12 = (await db.doc(path('movie:12')).get()).data()!;
+      expect(m12['genres'], ['Comedy']);
+    });
+
+    test(
+        'backfillMissingAugmentedGenres stamps flag even when no genres grew',
+        () async {
+      // TMDB returns a keyword not in kKeywordToExtraGenres → augmenter
+      // produces no delta. Flag must still be written so we don't re-query
+      // on every session.
+      final mockClient = MockClient((_) async {
+        return http.Response(
+          jsonEncode({
+            'keywords': [
+              {'id': 999999, 'name': 'random-not-mapped'},
+            ]
+          }),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      });
+      final tmdb = TmdbService(client: mockClient);
+      final localSvc = RecommendationsService(db: db, tmdb: tmdb);
+
+      await db.doc(path('movie:30')).set({
+        'media_type': 'movie', 'tmdb_id': 30, 'title': 'A',
+        'genres': ['Drama'],
+      });
+
+      await localSvc.backfillMissingAugmentedGenres(hh);
+
+      final doc = (await db.doc(path('movie:30')).get()).data()!;
+      expect(doc['genres'], ['Drama'], reason: 'no mapped keywords → no-op');
+      expect(doc['keywords_fetched'], true,
+          reason: 'flag must be set so we do not retry forever');
+    });
+
+    test('backfillMissingAugmentedGenres silently swallows a TMDB error',
+        () async {
+      final errorClient = MockClient((_) async => http.Response('boom', 500));
+      final tmdb = TmdbService(client: errorClient);
+      final localSvc = RecommendationsService(db: db, tmdb: tmdb);
+
+      await db.doc(path('movie:40')).set({
+        'media_type': 'movie', 'tmdb_id': 40, 'title': 'A',
+        'genres': ['Drama'],
+      });
+
+      await localSvc.backfillMissingAugmentedGenres(hh);
+      final doc = (await db.doc(path('movie:40')).get()).data()!;
+      expect(doc['genres'], ['Drama']);
+      expect(doc['keywords_fetched'], isNot(true),
+          reason: 'flag should not be written when TMDB errored');
+    });
   });
 
   group('buildCandidates — oscar discover tagging', () {

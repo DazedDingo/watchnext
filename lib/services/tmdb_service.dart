@@ -99,6 +99,14 @@ class TmdbService {
   Future<Map<String, dynamic>> externalIds(String mediaType, int tmdbId) =>
       _get(_uri('/$mediaType/$tmdbId/external_ids'));
 
+  /// Lean `/{mt}/{id}/keywords` call — returns just the keyword list without
+  /// the full details payload. Used by the background genre-augmenter to
+  /// widen a rec doc's `genres` via `kKeywordToExtraGenres`. Response shape
+  /// differs by media type: movies carry `{keywords: [...]}`, tv carries
+  /// `{results: [...]}`. Callers handle both.
+  Future<Map<String, dynamic>> keywords(String mediaType, int tmdbId) =>
+      _get(_uri('/$mediaType/$tmdbId/keywords'));
+
   Future<Map<String, dynamic>> discoverMovies(Map<String, String> params) =>
       _get(_uri('/discover/movie', params));
 

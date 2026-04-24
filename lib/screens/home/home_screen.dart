@@ -78,6 +78,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // app and opened Home. Fire once per session.
   bool _imdbBackfillStarted = false;
 
+  // Session guard for the keyword→genre augmenter. Widens `genres` on
+  // existing rec docs so AND-intersection filters (e.g. Sci-Fi + War)
+  // pick up cross-genre titles TMDB tags narrowly.
+  bool _keywordsBackfillStarted = false;
+
   @override
   void dispose() {
     _autoRefreshDebounce?.cancel();
@@ -165,6 +170,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         unawaited(ref
             .read(recommendationsServiceProvider)
             .backfillMissingImdbIds(hh));
+      }
+    }
+
+    // First-open keyword→genre augmentation — fires once per session to
+    // widen `genres` on rec docs via TMDB keywords, so AND-intersection
+    // filters (Sci-Fi + War, etc.) pick up cross-genre titles TMDB tags
+    // narrowly. `keywords_fetched=true` is sticky, so this only does real
+    // work on new/unprocessed docs after the first pass.
+    if (!_keywordsBackfillStarted) {
+      final hh = ref.watch(householdIdProvider).value;
+      if (hh != null) {
+        _keywordsBackfillStarted = true;
+        unawaited(ref
+            .read(recommendationsServiceProvider)
+            .backfillMissingAugmentedGenres(hh));
       }
     }
 

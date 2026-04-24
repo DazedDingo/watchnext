@@ -339,6 +339,13 @@ class RecommendationsService {
     if (missingImdb.isNotEmpty) {
       unawaited(_backgroundResolveImdbIds(householdId, missingImdb));
     }
+
+    // Phase B'' — fetch TMDB keywords for every rec doc missing the
+    // `keywords_fetched` flag and augment `genres` via the keyword→genre
+    // map. Fixes cold-start AND filter misses (e.g. Sci-Fi + War shows
+    // Starship Troopers even though its canonical tags are Action+Sci-Fi).
+    // Also fire-and-forget; swallows errors.
+    unawaited(backfillMissingAugmentedGenres(householdId));
   }
 
   /// Writes each candidate to `/households/{hh}/recommendations/{key}`. For
@@ -570,6 +577,96 @@ class RecommendationsService {
     } catch (_) {
       // Same rationale as stampImdbId — a missing doc or transient
       // Firestore error shouldn't bubble into the detail screen UI.
+    }
+  }
+
+  /// Fetches TMDB keywords for rec docs missing the `keywords_fetched`
+  /// flag, augments `genres` via `kKeywordToExtraGenres`, and stamps the
+  /// flag so a future refresh doesn't re-hit TMDB for the same rows.
+  /// Mirror of `_backgroundResolveImdbIds` — concurrency-limited
+  /// fire-and-forget.
+  ///
+  /// Writes the `keywords_fetched: true` flag on every successful fetch,
+  /// even when the map produces no extra genres (so we don't retry
+  /// forever on rows with no interesting keywords). Genre write only
+  /// happens when the set actually grew.
+  ///
+  /// Caveat: the flag is sticky, so existing rec docs won't be
+  /// re-augmented when new entries land in `kKeywordToExtraGenres`. Bump
+  /// the map + clear the flag manually (or via a versioned field) if the
+  /// map expands meaningfully.
+  Future<void> _backgroundAugmentGenres(
+    String householdId,
+    List<({String mediaType, int tmdbId})> pairs,
+  ) async {
+    const concurrency = 8;
+    final col = _col(householdId);
+
+    for (var i = 0; i < pairs.length; i += concurrency) {
+      final slice = pairs.skip(i).take(concurrency).toList();
+      await Future.wait(slice.map((p) async {
+        try {
+          final payload = await _tmdb.keywords(p.mediaType, p.tmdbId);
+          // Movies carry `keywords: [...]`; TV carries `results: [...]`.
+          final rawList =
+              (payload['keywords'] ?? payload['results']) as List?;
+          final keywordIds = (rawList ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map((k) => (k['id'] as num?)?.toInt())
+              .whereType<int>()
+              .toList();
+
+          final docRef = col.doc('${p.mediaType}:${p.tmdbId}');
+          final snap = await docRef.get();
+          if (!snap.exists) return;
+          final data = snap.data() ?? const <String, dynamic>{};
+          final currentGenres = (data['genres'] as List? ?? const [])
+              .whereType<String>()
+              .toList();
+          final augmented =
+              augmentGenresWithKeywords(currentGenres, keywordIds);
+
+          final update = <String, dynamic>{'keywords_fetched': true};
+          if (augmented.length > currentGenres.length) {
+            update['genres'] = augmented;
+          }
+          await docRef.update(update);
+        } catch (_) {
+          // Best-effort.
+        }
+      }));
+    }
+  }
+
+  /// Reads the top of the rec collection and fires the background
+  /// keyword-augmenter for every doc missing `keywords_fetched`. Invoked
+  /// from Home's initState (alongside the IMDb backfill) + from refresh
+  /// post-Phase-A, so cold pools enrich without the user having to pull
+  /// the spinner.
+  ///
+  /// Bounds reads to [limit] to avoid a thundering TMDB burst on fresh
+  /// installs; the background augmenter is already concurrency-limited
+  /// but we don't need to re-check the entire rec history every session.
+  Future<void> backfillMissingAugmentedGenres(
+    String householdId, {
+    int limit = 300,
+  }) async {
+    try {
+      final snap = await _col(householdId).limit(limit).get();
+      final missing = <({String mediaType, int tmdbId})>[];
+      for (final d in snap.docs) {
+        final data = d.data();
+        if (data['keywords_fetched'] == true) continue;
+        final mt = data['media_type'] as String?;
+        final id = (data['tmdb_id'] as num?)?.toInt();
+        if (mt == null || id == null) continue;
+        missing.add((mediaType: mt, tmdbId: id));
+      }
+      if (missing.isNotEmpty) {
+        await _backgroundAugmentGenres(householdId, missing);
+      }
+    } catch (_) {
+      // Best-effort — next refresh will retry.
     }
   }
 
