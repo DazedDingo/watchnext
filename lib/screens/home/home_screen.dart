@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -68,11 +67,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchCtrl = TextEditingController();
   String _search = '';
 
-  // Debounces filter-change → auto-refresh so tapping through chip
-  // combinations only fires one request. 700ms is tight enough to feel
-  // immediate and loose enough to coalesce bursts.
-  Timer? _autoRefreshDebounce;
-
   // One-shot: kick off a backfill of `imdb_id` on existing rec docs as soon
   // as Home loads. Without this, the row-level IMDb chip only populates
   // after a pull-to-refresh, which feels broken if you just installed the
@@ -84,11 +78,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // pick up cross-genre titles TMDB tags narrowly.
   bool _keywordsBackfillStarted = false;
 
-  // Inline refresh indicator state. True while any refresh (filter-change
-  // auto-refresh or explicit CTA) is in-flight; drives the 2px progress bar
-  // at the top of the rec list. Replaces the old SnackBar + RefreshIndicator
-  // spinner combo — pull-to-refresh was retired; the "Show recommendations"
-  // CTA inside the filter panel is the explicit-commit path.
+  // Inline refresh indicator state. True while any refresh (CTA or
+  // pull-to-refresh) is in-flight; drives the 2px progress bar at the top of
+  // the rec list. Filter changes NEVER auto-refresh — user commits via the
+  // "Show recommendations" CTA inside the filter panel or a pull-to-refresh
+  // gesture. Each refresh costs Claude API tokens + a TMDB fan-out, so the
+  // trigger is always explicit.
   bool _refreshing = false;
 
   // Flashes briefly when a refresh was short-circuited by the state-hash
@@ -99,43 +94,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
-    _autoRefreshDebounce?.cancel();
     _alreadyFreshTimer?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  /// Kicks off a non-forcing refresh after the debounce window elapses.
-  /// Non-forcing = don't regenerate the taste profile; just rebuild the pool
-  /// with the currently selected filters.
-  void _scheduleAutoRefresh() {
-    _autoRefreshDebounce?.cancel();
-    _autoRefreshDebounce = Timer(const Duration(milliseconds: 700), () {
-      if (!mounted) return;
-      _fireRefresh();
-    });
-  }
-
   /// Fires a non-forcing refresh and drives the inline progress indicator.
-  /// Centralises refresh invocation so both the auto-refresh debounce and
-  /// the "Show recommendations" CTA share progress-bar wiring.
+  /// Shared by the "Show recommendations" CTA and pull-to-refresh.
   ///
   /// When the service short-circuits (state-hash matched the last refresh),
   /// `refreshRecommendationsProvider` returns `false` — we never flip the
   /// progress bar on and instead flash the "Already up to date" pulse on
   /// the filter header so the user knows the tap was registered.
-  void _fireRefresh() {
+  Future<void> _fireRefresh() async {
     ref.invalidate(refreshRecommendationsProvider);
     if (mounted) setState(() => _refreshing = true);
-    unawaited(
-      ref.read(refreshRecommendationsProvider(false).future).then((didWork) {
-        if (!mounted) return;
-        setState(() => _refreshing = false);
-        if (!didWork) _flashAlreadyFresh();
-      }).catchError((_) {
-        if (mounted) setState(() => _refreshing = false);
-      }),
-    );
+    try {
+      final didWork =
+          await ref.read(refreshRecommendationsProvider(false).future);
+      if (!mounted) return;
+      setState(() => _refreshing = false);
+      if (!didWork) _flashAlreadyFresh();
+    } catch (_) {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   void _flashAlreadyFresh() {
@@ -224,32 +206,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     }
 
-    // Any filter change schedules a debounced auto-refresh so the pool is
-    // rebuilt against the current filter state. Without this, narrowing to a
-    // combination the current pool doesn't cover would show an empty list
-    // until the user manually pulled to refresh. `ref.listen` only fires on
-    // actual change, so the initial build (prev = null) is a no-op.
-    ref.listen<Set<String>>(selectedGenresProvider, (prev, curr) {
-      if (prev != null && !setEquals(prev, curr)) _scheduleAutoRefresh();
-    });
-    ref.listen<RuntimeBucket?>(runtimeFilterProvider, (prev, curr) {
-      if (prev != curr) _scheduleAutoRefresh();
-    });
-    ref.listen<YearRange>(yearRangeProvider, (prev, curr) {
-      if (prev != null && prev != curr) _scheduleAutoRefresh();
-    });
-    ref.listen<MediaTypeFilter?>(mediaTypeFilterProvider, (prev, curr) {
-      if (prev != curr) _scheduleAutoRefresh();
-    });
-    ref.listen<AwardCategory?>(awardsFilterProvider, (prev, curr) {
-      if (prev != curr) _scheduleAutoRefresh();
-    });
-    ref.listen<SortMode>(sortModeProvider, (prev, curr) {
-      if (prev != curr) _scheduleAutoRefresh();
-    });
-    ref.listen<CuratedSource>(curatedSourceProvider, (prev, curr) {
-      if (prev != curr) _scheduleAutoRefresh();
-    });
+    // Filter changes do NOT auto-refresh. The user commits a filter batch
+    // via the "Show recommendations" CTA inside the filter panel or by
+    // pulling to refresh; live-editing just updates the in-memory filters.
+    // Rationale: each refresh costs Claude API tokens + a TMDB fan-out, so
+    // the trigger should be an explicit action the user chose — toggling
+    // three chips shouldn't burn three rounds of scoring.
 
     final recsAsync = ref.watch(recommendationsProvider);
     final recs = recsAsync.value ?? const [];
@@ -412,7 +374,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView(
+                  child: RefreshIndicator(
+                    onRefresh: _fireRefresh,
+                    child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             Padding(
@@ -488,9 +453,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onIncludeWatchedChanged: (v) =>
                   ref.read(includeWatchedProvider.notifier).set(v),
               onApplyAndClose: () {
-                // Skip the 700ms filter-change debounce — user explicitly
-                // committed. `_fireRefresh` drives the inline progress bar.
-                _autoRefreshDebounce?.cancel();
+                // User explicitly committed the filter batch. Fire a refresh
+                // and drive the inline progress bar.
                 _fireRefresh();
               },
             ),
@@ -558,6 +522,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
           ],
         ),
+                  ),
                 ),
               ],
             ),
