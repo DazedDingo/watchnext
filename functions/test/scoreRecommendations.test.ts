@@ -2,6 +2,8 @@ import {
   isCandidate,
   trimProfileForPrompt,
   buildPrompt,
+  buildSystemPrompt,
+  buildBatchPrompt,
   parseScores,
 } from "../src/scoreRecommendations";
 
@@ -263,6 +265,62 @@ describe("buildPrompt", () => {
     const xRun = prompt.match(/x+/);
     expect(xRun).toBeTruthy();
     expect(xRun![0].length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("buildSystemPrompt / buildBatchPrompt split (prompt caching)", () => {
+  const profile = {
+    member_uids: ["u1", "u2"],
+    combined_top_genres: ["Drama", "Comedy"],
+    per_user_summary: { u1: "avg 4.0", u2: "avg 4.2" },
+    per_user_solo_summary: { u1: "likes: Horror", u2: "likes: Action" },
+    per_user_together_summary: { u1: "likes: Comedy", u2: "likes: Drama" },
+  };
+
+  test("system prompt carries the static stuff (instructions + household)", () => {
+    const sys = buildSystemPrompt(profile);
+    expect(sys).toContain("You score movie/TV candidates");
+    expect(sys).toContain("Top shared genres: Drama, Comedy");
+    expect(sys).toContain("together-context taste:");
+    expect(sys).toContain("solo-context taste:");
+    expect(sys).toContain("Return ONLY a JSON array");
+  });
+
+  test("system prompt does NOT contain any batch-specific lines", () => {
+    const sys = buildSystemPrompt(profile);
+    // Instructions may reference the "[key=...]" format but never a resolved
+    // candidate key like "[key=movie:123]" — those belong to the user turn.
+    expect(sys).not.toMatch(/\[key=(movie|tv):\d+\]/);
+    expect(sys).not.toMatch(/CANDIDATES:/);
+  });
+
+  test("batch prompt carries only the candidate block", () => {
+    const batch = buildBatchPrompt([
+      { media_type: "movie", tmdb_id: 1, title: "A" },
+      { media_type: "tv", tmdb_id: 7, title: "B" },
+    ]);
+    expect(batch).toContain("CANDIDATES:");
+    expect(batch).toContain("[key=movie:1]");
+    expect(batch).toContain("[key=tv:7]");
+    expect(batch).not.toContain("Top shared genres");
+    expect(batch).not.toContain("Return ONLY");
+  });
+
+  test("system prompt is identical across different batches (cacheable)", () => {
+    // Prompt caching only hits when the cached prefix byte-matches across
+    // requests. If anything batch-specific bled into the system prompt, we'd
+    // miss the cache on every batch — which would silently wipe the
+    // ~90%-off discount we're chasing. Lock the invariant.
+    expect(buildSystemPrompt(profile)).toBe(buildSystemPrompt(profile));
+  });
+
+  test("buildPrompt still returns the concatenated back-compat string", () => {
+    const combined = buildPrompt(
+      [{ media_type: "movie", tmdb_id: 1, title: "A" }],
+      profile,
+    );
+    expect(combined).toContain("Top shared genres");
+    expect(combined).toContain("[key=movie:1]");
   });
 });
 

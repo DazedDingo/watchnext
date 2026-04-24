@@ -133,8 +133,15 @@ export function trimProfileForPrompt(
   };
 }
 
-export function buildPrompt(
-  batch: Candidate[],
+/**
+ * The "static" half of the batch prompt — instructions + household taste.
+ * Identical across every batch in a single refresh run, so it's eligible
+ * for Anthropic's prompt cache (≈90% input-token discount on hits). Call
+ * sites must send this via `system:` with `cache_control: ephemeral` so
+ * subsequent batches hit the cache; the batch-specific candidate list
+ * goes in the user message (see `buildBatchPrompt`).
+ */
+export function buildSystemPrompt(
   profile: ReturnType<typeof trimProfileForPrompt>,
 ): string {
   const memberLines = profile.member_uids
@@ -154,17 +161,6 @@ export function buildPrompt(
       );
     })
     .join("\n");
-  const candidateLines = batch
-    .map((c, i) => {
-      const parts = [
-        `#${i + 1} ${c.title}`,
-        c.year ? `(${c.year})` : "",
-        c.genres?.length ? `— ${c.genres.slice(0, 3).join(", ")}` : "",
-      ].filter(Boolean).join(" ");
-      const overview = c.overview?.slice(0, 200) ?? "";
-      return `${parts} [key=${c.media_type}:${c.tmdb_id}]\n${overview}`;
-    })
-    .join("\n\n");
 
   return `You score movie/TV candidates for a two-person household.
 
@@ -178,10 +174,7 @@ Top shared genres: ${profile.combined_top_genres.join(", ") || "unknown"}
 Members:
 ${memberLines}
 
-CANDIDATES:
-${candidateLines}
-
-For each candidate, return a JSON object with:
+For each candidate in the user's message, return a JSON object with:
 - key: the [key=...] value from the candidate line
 - together: 0-100 score for how well this fits the household watching together (use each member's together-context taste)
 - solo: { "<uid>": 0-100 } one score per member uid listed above (use that member's solo-context taste)
@@ -189,6 +182,31 @@ For each candidate, return a JSON object with:
 - blurb_solo: { "<uid>": "≤20 words, addressed to that member" }
 
 Return ONLY a JSON array of these objects, no prose, no markdown fences. Output must parse as valid JSON.`;
+}
+
+/** The "variable" half — just the candidate batch, sent as the user turn. */
+export function buildBatchPrompt(batch: Candidate[]): string {
+  const candidateLines = batch
+    .map((c, i) => {
+      const parts = [
+        `#${i + 1} ${c.title}`,
+        c.year ? `(${c.year})` : "",
+        c.genres?.length ? `— ${c.genres.slice(0, 3).join(", ")}` : "",
+      ].filter(Boolean).join(" ");
+      const overview = c.overview?.slice(0, 200) ?? "";
+      return `${parts} [key=${c.media_type}:${c.tmdb_id}]\n${overview}`;
+    })
+    .join("\n\n");
+  return `CANDIDATES:
+${candidateLines}`;
+}
+
+/** Back-compat: concatenated single-string prompt. */
+export function buildPrompt(
+  batch: Candidate[],
+  profile: ReturnType<typeof trimProfileForPrompt>,
+): string {
+  return buildSystemPrompt(profile) + "\n\n" + buildBatchPrompt(batch);
 }
 
 export function parseScores(text: string): Score[] {
@@ -219,15 +237,28 @@ export async function scoreAndWriteCandidates(params: {
 }): Promise<{ written: number; scored: number }> {
   const { db, anthropic, householdId, candidates, profile, model } = params;
   const allScores = new Map<string, Score>();
+  const systemPrompt = buildSystemPrompt(profile);
   for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
     const batch = candidates.slice(i, i + BATCH_SIZE);
-    const prompt = buildPrompt(batch, profile);
     let scores: Score[] = [];
     try {
-      const res = await anthropic.messages.create({
+      // Prompt caching: the system block holds the instructions + household
+      // taste profile (identical across every batch in this run). Marking it
+      // `cache_control: ephemeral` means batch #1 writes the cache and
+      // batches #2-#10 hit it for a ~90% input-token discount. SDK 0.30.1
+      // only exposes cache_control on the beta namespace (see CLAUDE.md
+      // gotcha 16); upgrade the SDK if we want to ride stable.
+      const res = await anthropic.beta.promptCaching.messages.create({
         model,
         max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
+        system: [
+          {
+            type: "text",
+            text: systemPrompt,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages: [{ role: "user", content: buildBatchPrompt(batch) }],
       });
       const block = res.content.find((b) => b.type === "text");
       if (block && "text" in block) {
