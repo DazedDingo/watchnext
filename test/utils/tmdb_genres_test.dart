@@ -153,4 +153,125 @@ void main() {
       );
     });
   });
+
+  group('genreIdsFromNames — cross-taxonomy synonym expansion', () {
+    test('movie pick of TV-only "Kids" resolves to 10751/Family', () {
+      // Kids (10762) is TV-only; Family (10751) is its movie equivalent.
+      // Without synonym expansion this would return []; the client filter
+      // then demands rec.genres.contains("Kids") which no movie satisfies.
+      expect(
+        genreIdsFromNames(const ['Kids'], mediaType: 'movie'),
+        [10751],
+      );
+    });
+
+    test('tv pick of movie-only "Science Fiction" resolves to 10765', () {
+      expect(
+        genreIdsFromNames(const ['Science Fiction'], mediaType: 'tv'),
+        [10765],
+      );
+    });
+
+    test('Sci-Fi + War picks return both movie ids (multi-genre AND pool)', () {
+      // The user-reported failure mode: picking ["Science Fiction", "War"]
+      // with the TV variant of one of them dropped one id on each media
+      // type's side, so multiGenre was false and the AND rung never fired.
+      expect(
+        genreIdsFromNames(const ['Science Fiction', 'War'], mediaType: 'movie')
+          ..sort(),
+        [878, 10752],
+      );
+      // On TV: both are movie-only names, so both expand to their TV
+      // synonyms.
+      expect(
+        genreIdsFromNames(const ['Science Fiction', 'War'], mediaType: 'tv')
+          ..sort(),
+        [10765, 10768],
+      );
+    });
+
+    test('Sci-Fi + Kids (cross-taxonomy pick) fills both pools', () {
+      // Family (10751) is in BOTH the movie and TV maps — so a "Kids" pick
+      // expands to Family on both sides, giving TV a three-id pool
+      // (Family + Kids + Sci-Fi & Fantasy). The AND rung will return 0 on
+      // that narrow intersection but the OR fallback rung will populate a
+      // legitimate sci-fi + family/kids TV pool.
+      expect(
+        genreIdsFromNames(const ['Science Fiction', 'Kids'], mediaType: 'movie')
+          ..sort(),
+        [878, 10751],
+      );
+      expect(
+        genreIdsFromNames(const ['Science Fiction', 'Kids'], mediaType: 'tv')
+          ..sort(),
+        [10751, 10762, 10765],
+      );
+    });
+
+    test('dedupes when canonical + synonym land on the same id', () {
+      // Family (10751) is a shared id in both maps; Kids expands to Family
+      // via synonym. Picking both names on the movie side collapses to the
+      // single id 10751 (the Set dedupe in genreIdsFromNames kicks in).
+      expect(
+        genreIdsFromNames(const ['Family', 'Kids'], mediaType: 'movie'),
+        [10751],
+      );
+    });
+  });
+
+  group('genreMatches — client-side intersection', () {
+    test('direct name match passes', () {
+      expect(genreMatches(const ['Drama', 'War'], 'War'), isTrue);
+    });
+
+    test('synonym match passes (War ≡ War & Politics)', () {
+      expect(
+        genreMatches(const ['Drama', 'War & Politics'], 'War'),
+        isTrue,
+      );
+    });
+
+    test('Kids pick matches a Family-tagged movie', () {
+      expect(
+        genreMatches(const ['Animation', 'Family'], 'Kids'),
+        isTrue,
+      );
+    });
+
+    test('Science Fiction pick matches a Sci-Fi & Fantasy-tagged TV show', () {
+      expect(
+        genreMatches(const ['Sci-Fi & Fantasy', 'Drama'], 'Science Fiction'),
+        isTrue,
+      );
+    });
+
+    test('no match when neither canonical nor synonym is present', () {
+      expect(
+        genreMatches(const ['Comedy', 'Romance'], 'Horror'),
+        isFalse,
+      );
+    });
+
+    test('unmapped pick falls back to strict contains', () {
+      // "Horror" has no synonym entry — equivalent to the pre-fix behavior.
+      expect(genreMatches(const ['Horror'], 'Horror'), isTrue);
+      expect(genreMatches(const ['Comedy'], 'Horror'), isFalse);
+    });
+
+    test('Sci-Fi + War AND intersection passes on a TV rec tagged both', () {
+      // The cross-taxonomy regression case: user picks ["Science Fiction",
+      // "War"] (movie labels from a picker that unions both taxonomies);
+      // a rec doc tagged ["Sci-Fi & Fantasy", "War & Politics"] (TV taxonomy)
+      // must satisfy the AND intersection via synonyms on both names.
+      const rec = ['Sci-Fi & Fantasy', 'War & Politics', 'Drama'];
+      const picks = ['Science Fiction', 'War'];
+      expect(picks.every((g) => genreMatches(rec, g)), isTrue);
+    });
+
+    test('Sci-Fi + Kids AND intersection passes on a Family-tagged sci-fi movie', () {
+      const rec = ['Adventure', 'Science Fiction', 'Family'];
+      const picks = ['Science Fiction', 'Kids'];
+      expect(picks.every((g) => genreMatches(rec, g)), isTrue);
+    });
+  });
 }

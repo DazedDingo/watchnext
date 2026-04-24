@@ -150,7 +150,10 @@ class DecideFilters {
       if (maxYear != null && c.year! > maxYear!) return false;
     }
     if (runtime != null && !runtime!.matches(c.runtime)) return false;
-    if (genres.isNotEmpty && !genres.every(c.genres.contains)) return false;
+    if (genres.isNotEmpty &&
+        !genres.every((g) => genreMatches(c.genres, g))) {
+      return false;
+    }
     return true;
   }
 }

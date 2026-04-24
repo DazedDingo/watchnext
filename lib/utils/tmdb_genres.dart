@@ -64,18 +64,67 @@ List<String> genreNamesFromIds(Iterable<int> ids, {required String mediaType}) {
   return out;
 }
 
+/// Cross-taxonomy genre synonyms. TMDB splits genres into separate movie + TV
+/// vocabularies that don't line up: movies have `Science Fiction` (878) and
+/// `War` (10752); TV lumps these as `Sci-Fi & Fantasy` (10765) and
+/// `War & Politics` (10768). TV has `Kids` (10762), movies call the same
+/// concept `Family` (10751). `allGenresProvider` shows both labels in one
+/// picker, so picking `Science Fiction` + `Kids` used to resolve to
+/// `[878]` on the movie side (Kids dropped) and `[10762]` on the TV side
+/// (Science Fiction dropped), leaving the client-side AND intersection
+/// (`selected.every(rec.genres.contains)`) with zero matches — no movie is
+/// tagged "Kids" and no TV show is tagged "Science Fiction".
+///
+/// This map declares concept-level equivalence; [genreIdsFromNames] expands
+/// each picked name to its synonyms before id lookup, and [genreMatches]
+/// expands at the client-side intersection. Applying at both layers is what
+/// makes cross-taxonomy picks actually work end-to-end.
+const Map<String, Set<String>> kGenreSynonyms = {
+  'Science Fiction': {'Sci-Fi & Fantasy'},
+  'Sci-Fi & Fantasy': {'Science Fiction', 'Fantasy'},
+  'Fantasy': {'Sci-Fi & Fantasy'},
+  'War': {'War & Politics'},
+  'War & Politics': {'War'},
+  'Family': {'Kids'},
+  'Kids': {'Family'},
+  'Action': {'Action & Adventure'},
+  'Adventure': {'Action & Adventure'},
+  'Action & Adventure': {'Action', 'Adventure'},
+};
+
+/// True when [recGenres] satisfies a user pick of [selected] — either a direct
+/// string match, OR the rec carries any of [selected]'s cross-taxonomy
+/// synonyms. Use at any site that intersects user genre picks against the
+/// resolved `Recommendation.genres` (or equivalent) list.
+bool genreMatches(Iterable<String> recGenres, String selected) {
+  if (recGenres.contains(selected)) return true;
+  final synonyms = kGenreSynonyms[selected];
+  if (synonyms == null) return false;
+  for (final syn in synonyms) {
+    if (recGenres.contains(syn)) return true;
+  }
+  return false;
+}
+
 /// Resolves genre *names* to TMDB ids for a given media type. Used by
-/// `/discover` calls which want ids, not names. Unknown names are skipped
-/// — e.g. a movie-only genre name will not resolve under mediaType='tv'.
+/// `/discover` calls which want ids, not names. Each input name is expanded
+/// with its [kGenreSynonyms] before lookup so a TV-only pick like "Kids"
+/// resolves to [10751/Family] on the movie side (and vice versa). Unknown
+/// names (and synonyms that aren't in the target media type's map) are
+/// skipped silently.
 List<int> genreIdsFromNames(Iterable<String> names, {required String mediaType}) {
   final lookup = mediaType == 'tv' ? tmdbTvGenres : tmdbMovieGenres;
   final inverted = <String, int>{for (final e in lookup.entries) e.value: e.key};
-  final out = <int>[];
+  final out = <int>{};
   for (final n in names) {
     final id = inverted[n];
     if (id != null) out.add(id);
+    for (final syn in kGenreSynonyms[n] ?? const <String>{}) {
+      final synId = inverted[syn];
+      if (synId != null) out.add(synId);
+    }
   }
-  return out;
+  return out.toList();
 }
 
 /// Coerces whatever shape a caller has (`List<int>`, `List<num>`,

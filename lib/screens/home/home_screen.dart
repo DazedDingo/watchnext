@@ -30,6 +30,7 @@ import '../../screens/concierge/concierge_sheet.dart';
 import '../../screens/like_these/like_these_sheet.dart';
 import '../../services/tmdb_service.dart';
 import '../../utils/animation_cap.dart';
+import '../../utils/tmdb_genres.dart';
 import '../../utils/oscar_winners.dart';
 import '../../utils/rec_explainer.dart';
 import '../../utils/surprise_picker.dart';
@@ -256,11 +257,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Genre filter — intersection, not union: selecting Western + Sci-Fi
     // must surface only titles tagged as BOTH. Empty-genre recs drop out
     // under an active filter because "classed as all of these" can't be
-    // verified on an unclassified title.
+    // verified on an unclassified title. `genreMatches` accepts
+    // cross-taxonomy synonyms (Kids≡Family, War≡War & Politics, etc.) so
+    // picks that cross the movie/TV divide still match equivalent recs.
     final genreFiltered = selectedGenres.isEmpty
         ? recs
         : recs
-            .where((r) => selectedGenres.every(r.genres.contains))
+            .where((r) =>
+                selectedGenres.every((g) => genreMatches(r.genres, g)))
             .toList();
 
     // Runtime filter — null bucket = show everything. An active bucket is
