@@ -474,6 +474,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.read(modeCuratedSourceProvider.notifier).set(mode, v),
               onIncludeWatchedChanged: (v) =>
                   ref.read(includeWatchedProvider.notifier).set(v),
+              onApplyAndClose: () {
+                // Skip the 700ms filter-change debounce — user explicitly
+                // committed. Non-forcing so we don't regenerate the taste
+                // profile (filters reshape the pool, not the preferences).
+                _autoRefreshDebounce?.cancel();
+                final messenger = ScaffoldMessenger.of(context);
+                ref.invalidate(refreshRecommendationsProvider);
+                unawaited(
+                  ref.read(refreshRecommendationsProvider(false).future).catchError((e) {
+                    if (mounted) {
+                      messenger.showSnackBar(
+                        SnackBar(content: Text('Refresh failed: $e')),
+                      );
+                    }
+                  }),
+                );
+              },
             ),
             _SearchField(
               controller: _searchCtrl,
@@ -626,6 +643,7 @@ class _FiltersPanel extends StatefulWidget {
   final ValueChanged<SortMode> onSortModeSelect;
   final ValueChanged<CuratedSource> onCuratedSourceSelect;
   final ValueChanged<bool> onIncludeWatchedChanged;
+  final VoidCallback onApplyAndClose;
 
   const _FiltersPanel({
     required this.selectedGenres,
@@ -645,6 +663,7 @@ class _FiltersPanel extends StatefulWidget {
     required this.onSortModeSelect,
     required this.onCuratedSourceSelect,
     required this.onIncludeWatchedChanged,
+    required this.onApplyAndClose,
   });
 
   @override
@@ -831,11 +850,100 @@ class _FiltersPanelState extends State<_FiltersPanel> {
                   value: widget.includeWatched,
                   onChanged: widget.onIncludeWatchedChanged,
                 ),
+                const SizedBox(height: 12),
+                // Primary "apply" affordance — filter changes auto-refresh via
+                // the 700ms debounce (gotcha 15), but the explicit CTA commits
+                // immediately AND collapses the panel so the rec list isn't
+                // buried. Styled to match the Liquid UI family (gotcha 42):
+                // accent gradient + glow ring visually mirrors the segmented
+                // button blob so it reads as "the primary action in this
+                // panel" without the user having to hunt for it.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: _ApplyFiltersCta(
+                    onPressed: () {
+                      widget.onApplyAndClose();
+                      setState(() => _isExpanded = false);
+                    },
+                  ),
+                ),
                 const SizedBox(height: 4),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Apply filters CTA ───────────────────────────────────────────────────────
+
+/// Liquid-UI-flavoured primary CTA at the bottom of the expanded filters
+/// panel. Uses the same accent gradient + glow as `LiquidSegmentedButton`'s
+/// selection blob so the button reads as "the next thing to press" in a way
+/// that clearly belongs to the rest of the panel instead of dropping in
+/// Material's default filled chrome.
+class _ApplyFiltersCta extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _ApplyFiltersCta({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onPressed();
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          height: 50,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                primary.withValues(alpha: 0.95),
+                primary.withValues(alpha: 0.72),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: primary.withValues(alpha: 0.38),
+                blurRadius: 14,
+                offset: const Offset(0, 3),
+              ),
+              BoxShadow(
+                color: primary.withValues(alpha: 0.18),
+                blurRadius: 28,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.auto_awesome,
+                    size: 18, color: Theme.of(context).colorScheme.onPrimary),
+                const SizedBox(width: 8),
+                Text(
+                  'Show recommendations',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
