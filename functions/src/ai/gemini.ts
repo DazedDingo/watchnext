@@ -40,10 +40,15 @@ export function makeGeminiClient(apiKey: string, model: string): GeminiClient {
         role: m.role,
         parts: [{ text: m.text }],
       }));
+      // Gemini 2.5 Flash does chain-of-thought "thinking" by default, and
+      // thinking tokens count against `maxOutputTokens` — so a too-tight
+      // budget truncates the *actual* JSON output mid-string with no error.
+      // Default is deliberately high (8192) to leave headroom after thinking
+      // on a 10-candidate scoring batch. Override per call-site if needed.
       const res = await gen.generateContent({
         contents,
         generationConfig: {
-          maxOutputTokens: maxOutputTokens ?? 2048,
+          maxOutputTokens: maxOutputTokens ?? 8192,
           temperature: 0.6,
         },
       });

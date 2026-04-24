@@ -264,7 +264,6 @@ export const concierge = onCall(
       rawText = await gemini.generate({
         systemInstruction: `${SYSTEM_PROMPT}\n\nHOUSEHOLD CONTEXT:\n${contextBlock}`,
         messages: turns,
-        maxOutputTokens: 1024,
       });
     } catch (err) {
       console.error("concierge: Gemini call failed", { err, model: MODEL });

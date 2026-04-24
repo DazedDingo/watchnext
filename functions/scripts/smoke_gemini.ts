@@ -91,7 +91,6 @@ async function smokeScorer() {
   const raw = await gemini.generate({
     systemInstruction: buildSystemPrompt(profile),
     messages: [{ role: "user", text: buildBatchPrompt(batch) }],
-    maxOutputTokens: 2048,
   });
   const elapsed = Date.now() - started;
 
@@ -142,7 +141,7 @@ async function smokeConcierge() {
     ["The Bear (2022)"],
     ["The Brutalist (2024)"],
     "together",
-    null,
+    undefined,
   );
   const SYSTEM_PROMPT = `You are a film and TV recommendation assistant for a two-person household.
 Be direct and helpful. Always respond with a JSON object: {"text": string, "titles": [{"tmdb_id": int, "media_type": "movie"|"tv", "title": string, "year": int|null, "reason": string}]}.
@@ -154,7 +153,6 @@ Return 3-5 titles unless the user explicitly asks otherwise.`;
     messages: [
       { role: "user", text: "Recommend something we'd both like for tonight — around 2 hours, cerebral." },
     ],
-    maxOutputTokens: 1024,
   });
   const elapsed = Date.now() - started;
 

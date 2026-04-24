@@ -253,7 +253,6 @@ export async function scoreAndWriteCandidates(params: {
       const text = await gemini.generate({
         systemInstruction,
         messages: [{ role: "user", text: buildBatchPrompt(batch) }],
-        maxOutputTokens: 2048,
       });
       scores = parseScores(text);
     } catch (err) {
