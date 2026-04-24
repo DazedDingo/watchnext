@@ -11,6 +11,7 @@ import '../providers/media_type_filter_provider.dart';
 import '../providers/runtime_filter_provider.dart';
 import '../providers/sort_mode_provider.dart';
 import '../providers/year_filter_provider.dart';
+import '../utils/keyword_genre_augment.dart';
 import '../utils/oscar_winners.dart';
 import '../utils/tmdb_genres.dart';
 import 'tmdb_service.dart';
@@ -533,6 +534,42 @@ class RecommendationsService {
     } catch (_) {
       // Rec doc may not exist (not every title the user opens is in the
       // rec pool). `.update()` throws on missing docs — silent ignore.
+    }
+  }
+
+  /// Opportunistic genre widening from TMDB keyword ids. See
+  /// `utils/keyword_genre_augment.dart` — a keyword like "space marines"
+  /// implies `{Science Fiction, War}` even when the title's canonical
+  /// genre tags are only `{Action, Science Fiction}`, so an AND filter for
+  /// Sci-Fi + War would otherwise drop Starship Troopers.
+  ///
+  /// Called from TitleDetail after the details payload (which already
+  /// appends keywords) resolves — zero extra TMDB round-trip. Reads the
+  /// current rec doc's genres, augments, writes back only when the set
+  /// actually grew. Missing rec docs + Firestore errors are silently
+  /// swallowed — augmentation is a nice-to-have, not UI-critical.
+  Future<void> stampAugmentedGenres({
+    required String householdId,
+    required String mediaType,
+    required int tmdbId,
+    required List<int> keywordIds,
+  }) async {
+    if (keywordIds.isEmpty) return;
+    try {
+      final docRef = _col(householdId).doc('$mediaType:$tmdbId');
+      final snap = await docRef.get();
+      if (!snap.exists) return;
+      final data = snap.data() ?? const <String, dynamic>{};
+      final currentGenres = (data['genres'] as List? ?? const [])
+          .whereType<String>()
+          .toList();
+      final augmented =
+          augmentGenresWithKeywords(currentGenres, keywordIds);
+      if (augmented.length == currentGenres.length) return;
+      await docRef.update({'genres': augmented});
+    } catch (_) {
+      // Same rationale as stampImdbId — a missing doc or transient
+      // Firestore error shouldn't bubble into the detail screen UI.
     }
   }
 

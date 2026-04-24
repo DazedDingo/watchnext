@@ -1064,6 +1064,74 @@ void main() {
       expect(doc.exists, isFalse);
     });
 
+    test('stampAugmentedGenres widens the genre set when a keyword matches',
+        () async {
+      await db.doc(path('movie:20')).set({
+        'media_type': 'movie',
+        'tmdb_id': 20,
+        'title': 'Starship-ish',
+        'genres': ['Action', 'Science Fiction'],
+      });
+      // 9951 (alien) → seeded in kKeywordToExtraGenres as Science Fiction,
+      // which already exists. 4458 (post-apocalyptic) also → Science Fiction.
+      // Nothing should change — this test covers the no-op branch.
+      await svc.stampAugmentedGenres(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 20,
+        keywordIds: const [9951, 4458],
+      );
+      final doc = (await db.doc(path('movie:20')).get()).data()!;
+      expect(doc['genres'], ['Action', 'Science Fiction'],
+          reason: 'no-op: every implied genre already present');
+    });
+
+    test('stampAugmentedGenres adds a new genre when keyword widens',
+        () async {
+      await db.doc(path('movie:21')).set({
+        'media_type': 'movie',
+        'tmdb_id': 21,
+        'title': 'Kung Fu Dystopia',
+        'genres': ['Action'],
+      });
+      // 4565 (dystopia) → {Science Fiction}. Action stays; Sci-Fi is added.
+      await svc.stampAugmentedGenres(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 21,
+        keywordIds: const [4565],
+      );
+      final doc = (await db.doc(path('movie:21')).get()).data()!;
+      expect(doc['genres'], ['Action', 'Science Fiction']);
+    });
+
+    test('stampAugmentedGenres is a no-op when keywordIds empty', () async {
+      await db.doc(path('movie:22')).set({
+        'media_type': 'movie',
+        'tmdb_id': 22,
+        'title': 'T',
+        'genres': ['Drama'],
+      });
+      await svc.stampAugmentedGenres(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 22,
+        keywordIds: const [],
+      );
+      final doc = (await db.doc(path('movie:22')).get()).data()!;
+      expect(doc['genres'], ['Drama']);
+    });
+
+    test('stampAugmentedGenres silently ignores missing rec doc', () async {
+      await svc.stampAugmentedGenres(
+        householdId: hh,
+        mediaType: 'movie',
+        tmdbId: 9001,
+        keywordIds: const [9951],
+      );
+      expect((await db.doc(path('movie:9001')).get()).exists, isFalse);
+    });
+
     test('backfillMissingImdbIds stamps every unstamped rec doc', () async {
       // Install a mock TMDB client that returns imdb_id based on tmdb_id.
       final mockClient = MockClient((req) async {

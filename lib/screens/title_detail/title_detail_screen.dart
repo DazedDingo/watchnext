@@ -66,21 +66,35 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
       if (!mounted) return;
       setState(() => _title = (d['title'] ?? d['name']) as String);
 
+      final hh = await ref.read(householdIdProvider.future);
+      if (hh == null || !mounted) return;
+      final recs = ref.read(recommendationsServiceProvider);
+
       // Opportunistic imdb_id stamp on the rec doc — we already have it
       // from the details payload, so the chip on Home can render without
       // waiting for the background TMDB resolver next refresh.
       final imdb = _imdbIdFor(d);
-      if (imdb == null) return;
-      final hh = await ref.read(householdIdProvider.future);
-      if (hh == null || !mounted) return;
-      unawaited(ref
-          .read(recommendationsServiceProvider)
-          .stampImdbId(
-            householdId: hh,
-            mediaType: widget.mediaType,
-            tmdbId: widget.tmdbId,
-            imdbId: imdb,
-          ));
+      if (imdb != null) {
+        unawaited(recs.stampImdbId(
+          householdId: hh,
+          mediaType: widget.mediaType,
+          tmdbId: widget.tmdbId,
+          imdbId: imdb,
+        ));
+      }
+
+      // Opportunistic genre augmentation via keyword→genre map. Same
+      // rationale as the imdb stamp — the details payload already appends
+      // keywords, so we can widen the rec doc's genre set for free.
+      final keywordIds = _keywordIdsFrom(d);
+      if (keywordIds.isNotEmpty) {
+        unawaited(recs.stampAugmentedGenres(
+          householdId: hh,
+          mediaType: widget.mediaType,
+          tmdbId: widget.tmdbId,
+          keywordIds: keywordIds,
+        ));
+      }
     });
   }
 
@@ -110,6 +124,21 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     final ext = d['external_ids'] as Map<String, dynamic>?;
     final tvImdb = ext?['imdb_id'] as String?;
     return (tvImdb != null && tvImdb.isNotEmpty) ? tvImdb : null;
+  }
+
+  /// TMDB details payload embeds keywords at different paths per media type:
+  /// movies at `d['keywords']['keywords']`, TV at `d['keywords']['results']`.
+  /// Both are lists of `{id, name}` maps — we only need the ids.
+  List<int> _keywordIdsFrom(Map<String, dynamic> d) {
+    final keywords = d['keywords'] as Map<String, dynamic>?;
+    if (keywords == null) return const [];
+    final rawList = (keywords['keywords'] ?? keywords['results']) as List?;
+    if (rawList == null) return const [];
+    return rawList
+        .whereType<Map<String, dynamic>>()
+        .map((k) => (k['id'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
   }
 
   Future<void> _openInStremio(Map<String, dynamic> d) async {
