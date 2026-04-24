@@ -29,6 +29,7 @@ import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
 import '../../screens/like_these/like_these_sheet.dart';
 import '../../services/tmdb_service.dart';
+import '../../utils/animation_cap.dart';
 import '../../utils/oscar_winners.dart';
 import '../../utils/rec_explainer.dart';
 import '../../utils/surprise_picker.dart';
@@ -275,8 +276,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ? searchFiltered
         : searchFiltered.where((r) => !watchedKeys.contains(r.id)).toList();
 
+    // Animation soft cap — trending TV + top-rated TV are heavily anime-
+    // weighted on TMDB and there's no server-side exclude, so the list
+    // reads as "mostly anime" for households that aren't anime-first.
+    // Cap to `kAnimationSoftCap` rows unless the user opted into
+    // Animation via the genre filter (in which case they asked for it).
+    final capped = capAnimation(
+      filtered,
+      userSelectedAnimation: selectedGenres.contains('Animation'),
+    );
+
     final available =
-        filtered.where((r) => !_dismissed.contains(r.id)).toList();
+        capped.where((r) => !_dismissed.contains(r.id)).toList();
 
     final tonightsPick = available.isNotEmpty ? available.first : null;
     final listRecs =
