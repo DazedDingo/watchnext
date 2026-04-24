@@ -47,6 +47,15 @@ class RecommendationsService {
   /// refresh's TMDB fetches still run but are discarded silently.
   int _refreshEpoch = 0;
 
+  /// Hash of the last refresh's meaningful input state (filters + ratings +
+  /// watch entries + mode). When a new `refresh(...)` call arrives with an
+  /// identical hash, we short-circuit BEFORE any TMDB call, Firestore write,
+  /// or background Claude scoring — nothing about the pool would change, so
+  /// spending the budget is pure waste. The hash is supplied by the caller
+  /// (the provider reads the live values and computes it) so the service
+  /// stays thin. Null until the first successful refresh.
+  String? _lastRefreshHash;
+
   RecommendationsService({
     FirebaseFirestore? db,
     FirebaseFunctions? fns,
@@ -127,7 +136,7 @@ class RecommendationsService {
   /// Best Picture list). Kept for test back-compat.
   static const int kOscarKeywordId = 210024;
 
-  Future<void> refresh(
+  Future<bool> refresh(
     String householdId, {
     required List<WatchlistItem> watchlist,
     int tmdbCap = 10,
@@ -139,7 +148,22 @@ class RecommendationsService {
     SortMode sortMode = SortMode.topRated,
     CuratedSource curatedSource = CuratedSource.none,
     bool forceTasteProfile = false,
+    String? stateHash,
   }) async {
+    // State-hash dedupe: when the caller's inputs hash identically to the
+    // last successful refresh (filter state + ratings + watch entries +
+    // mode), skip all work. Phase A (~18 TMDB calls) + Phase B (Claude CF,
+    // ~$0.10-$0.20 in API tokens) would produce an identical pool, so firing
+    // is pure waste. `forceTasteProfile=true` bypasses dedupe — callers
+    // explicitly asked for a taste-profile regen, which is the only output
+    // the hash doesn't fully capture. Returns false when deduped, true
+    // otherwise — lets the UI distinguish "already fresh" from "refreshing"
+    // and render different feedback.
+    if (!forceTasteProfile &&
+        stateHash != null &&
+        stateHash == _lastRefreshHash) {
+      return false;
+    }
     final oscarOnly = awardsFilter != null;
     // Claim this refresh's epoch up-front. If a newer refresh starts before
     // our TMDB fetches return, `_refreshEpoch` will advance past `myEpoch`
@@ -305,12 +329,12 @@ class RecommendationsService {
       includeAwardsList: awardsFilter,
     );
 
-    if (candidates.isEmpty) return;
+    if (candidates.isEmpty) return false;
 
     // Epoch guard: if another refresh started after us, its Firestore write
     // is the authoritative one — bail before we stomp it. See `_refreshEpoch`
     // doc above for the race this prevents.
-    if (myEpoch != _refreshEpoch) return;
+    if (myEpoch != _refreshEpoch) return false;
 
     // Phase A — sync: write the pool to Firestore with default scores so
     // the Home stream lights up immediately. This is the bit the user waits
@@ -320,7 +344,7 @@ class RecommendationsService {
     // Re-check after the Firestore write: an even-newer refresh could have
     // landed while we were writing. Don't fire a stale Claude pass — its
     // candidate list is now out-of-date vs. the pool in Firestore.
-    if (myEpoch != _refreshEpoch) return;
+    if (myEpoch != _refreshEpoch) return false;
 
     // Phase B — async: taste-profile refresh (if forced) + Claude scoring.
     // Fire-and-forget: any failure leaves the pool intact at default scores,
@@ -346,6 +370,12 @@ class RecommendationsService {
     // Starship Troopers even though its canonical tags are Action+Sci-Fi).
     // Also fire-and-forget; swallows errors.
     unawaited(backfillMissingAugmentedGenres(householdId));
+
+    // Commit the new hash only after the Phase A write has succeeded.
+    // If Phase A threw (epoch race, Firestore error), we leave the old
+    // hash in place so the next attempt actually runs.
+    if (stateHash != null) _lastRefreshHash = stateHash;
+    return true;
   }
 
   /// Writes each candidate to `/households/{hh}/recommendations/{key}`. For
@@ -911,4 +941,43 @@ bool isNarrowFilterCombo({
   if (curatedSource != CuratedSource.none) n++;
   if (sortMode == SortMode.underseen) n++;
   return n >= 2;
+}
+
+/// Pure hash over the full set of inputs that could change what a refresh
+/// would produce. Any change to filters, ratings, watch entries, or mode
+/// busts the hash; anything else means firing a new refresh would produce an
+/// identical pool and should be short-circuited by `RecommendationsService`.
+/// The genres Set is sorted into a deterministic list so element order
+/// doesn't flip the hash spuriously.
+String computeRefreshStateHash({
+  required String householdId,
+  required Set<String> genres,
+  required int? yearMin,
+  required int? yearMax,
+  required String? runtime,
+  required String? mediaType,
+  required String? awards,
+  required String sortMode,
+  required String curatedSource,
+  required bool includeWatched,
+  required String mode,
+  required String ratingSignature,
+  required String watchSignature,
+}) {
+  final sortedGenres = (genres.toList()..sort()).join(',');
+  return [
+    householdId,
+    sortedGenres,
+    yearMin,
+    yearMax,
+    runtime,
+    mediaType,
+    awards,
+    sortMode,
+    curatedSource,
+    includeWatched,
+    mode,
+    ratingSignature,
+    watchSignature,
+  ].join('|');
 }

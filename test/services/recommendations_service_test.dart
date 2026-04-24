@@ -2004,4 +2004,195 @@ void main() {
       expect(call(sortMode: SortMode.recent), isFalse);
     });
   });
+
+  // ─── RecommendationsService.refresh — state-hash dedupe ──────────────────
+  //
+  // Guards that identical-input refreshes short-circuit before hitting TMDB +
+  // Claude. The scorer's output is a pure function of the hashed inputs, so
+  // firing a second refresh with the same hash would burn ~$0.10-$0.20 of
+  // Claude tokens to produce the same pool. `forceTasteProfile=true` bypasses
+  // the hash because taste-profile regen is the only output the hash can't
+  // capture.
+  group('RecommendationsService.refresh — state-hash dedupe', () {
+    Map<String, dynamic> payload(int id) => {
+          'results': [
+            {
+              'id': id,
+              'media_type': 'movie',
+              'title': 'Title $id',
+              'genre_ids': [18],
+              'release_date': '2024-01-01',
+            },
+          ],
+        };
+
+    test('same hash → second refresh short-circuits before TMDB', () async {
+      var calls = 0;
+      final client = MockClient((req) async {
+        calls++;
+        return http.Response(json.encode(payload(501)), 200,
+            headers: const {'content-type': 'application/json'});
+      });
+      final svc = RecommendationsService(
+        db: FakeFirebaseFirestore(),
+        tmdb: TmdbService(client: client),
+      );
+
+      final didFirst =
+          await svc.refresh('hh-dedupe', watchlist: const [], stateHash: 'H1');
+      final firstCallCount = calls;
+
+      final didSecond =
+          await svc.refresh('hh-dedupe', watchlist: const [], stateHash: 'H1');
+
+      expect(didFirst, isTrue,
+          reason: 'first refresh with a hash must actually run');
+      expect(didSecond, isFalse,
+          reason: 'second refresh with identical hash must short-circuit');
+      expect(calls, firstCallCount,
+          reason:
+              'short-circuit must skip TMDB entirely — no new HTTP calls allowed');
+    });
+
+    test('different hash → refresh runs normally', () async {
+      var calls = 0;
+      final client = MockClient((req) async {
+        calls++;
+        return http.Response(json.encode(payload(502)), 200,
+            headers: const {'content-type': 'application/json'});
+      });
+      final svc = RecommendationsService(
+        db: FakeFirebaseFirestore(),
+        tmdb: TmdbService(client: client),
+      );
+
+      await svc.refresh('hh-dedupe', watchlist: const [], stateHash: 'H1');
+      final firstCallCount = calls;
+
+      final didSecond =
+          await svc.refresh('hh-dedupe', watchlist: const [], stateHash: 'H2');
+
+      expect(didSecond, isTrue,
+          reason: 'different hash means the inputs changed — must refetch');
+      expect(calls, greaterThan(firstCallCount),
+          reason: 'second refresh with different hash must hit TMDB again');
+    });
+
+    test('forceTasteProfile=true bypasses hash dedupe', () async {
+      var calls = 0;
+      final client = MockClient((req) async {
+        calls++;
+        return http.Response(json.encode(payload(503)), 200,
+            headers: const {'content-type': 'application/json'});
+      });
+      final svc = RecommendationsService(
+        db: FakeFirebaseFirestore(),
+        tmdb: TmdbService(client: client),
+      );
+
+      await svc.refresh('hh-dedupe', watchlist: const [], stateHash: 'H1');
+      final firstCallCount = calls;
+
+      final didForced = await svc.refresh(
+        'hh-dedupe',
+        watchlist: const [],
+        stateHash: 'H1',
+        forceTasteProfile: true,
+      );
+
+      expect(didForced, isTrue,
+          reason: 'forceTasteProfile must run even when the hash matches');
+      expect(calls, greaterThan(firstCallCount),
+          reason: 'forced refresh must hit TMDB regardless of hash');
+    });
+
+    test('null stateHash never dedupes (legacy callers)', () async {
+      var calls = 0;
+      final client = MockClient((req) async {
+        calls++;
+        return http.Response(json.encode(payload(504)), 200,
+            headers: const {'content-type': 'application/json'});
+      });
+      final svc = RecommendationsService(
+        db: FakeFirebaseFirestore(),
+        tmdb: TmdbService(client: client),
+      );
+
+      final didFirst = await svc.refresh('hh-dedupe', watchlist: const []);
+      final firstCallCount = calls;
+      final didSecond = await svc.refresh('hh-dedupe', watchlist: const []);
+
+      expect(didFirst, isTrue);
+      expect(didSecond, isTrue,
+          reason: 'no hash supplied → dedupe disabled; refresh always runs');
+      expect(calls, greaterThan(firstCallCount));
+    });
+  });
+
+  // ─── computeRefreshStateHash — pure hash semantics ───────────────────────
+  group('computeRefreshStateHash', () {
+    String call({
+      String householdId = 'hh',
+      Set<String> genres = const {},
+      int? yearMin,
+      int? yearMax,
+      String? runtime,
+      String? mediaType,
+      String? awards,
+      String sortMode = 'topRated',
+      String curatedSource = 'none',
+      bool includeWatched = false,
+      String mode = 'together',
+      String ratingSignature = '',
+      String watchSignature = '',
+    }) =>
+        computeRefreshStateHash(
+          householdId: householdId,
+          genres: genres,
+          yearMin: yearMin,
+          yearMax: yearMax,
+          runtime: runtime,
+          mediaType: mediaType,
+          awards: awards,
+          sortMode: sortMode,
+          curatedSource: curatedSource,
+          includeWatched: includeWatched,
+          mode: mode,
+          ratingSignature: ratingSignature,
+          watchSignature: watchSignature,
+        );
+
+    test('genre set order does not affect hash', () {
+      expect(
+        call(genres: {'Drama', 'War'}),
+        call(genres: {'War', 'Drama'}),
+      );
+    });
+
+    test('any filter change busts the hash', () {
+      final base = call();
+      expect(call(genres: {'Drama'}), isNot(base));
+      expect(call(yearMin: 1970), isNot(base));
+      expect(call(runtime: 'medium'), isNot(base));
+      expect(call(mediaType: 'movie'), isNot(base));
+      expect(call(awards: 'bestPicture'), isNot(base));
+      expect(call(sortMode: 'underseen'), isNot(base));
+      expect(call(curatedSource: 'a24'), isNot(base));
+      expect(call(includeWatched: true), isNot(base));
+      expect(call(mode: 'solo'), isNot(base));
+    });
+
+    test('rating or watch signature change busts the hash', () {
+      final base = call();
+      expect(call(ratingSignature: '1:tt1@5'), isNot(base));
+      expect(call(watchSignature: 'movie:1@@1'), isNot(base));
+    });
+
+    test('identical inputs produce identical hashes', () {
+      expect(
+        call(genres: {'Drama'}, yearMin: 1970, mode: 'solo'),
+        call(genres: {'Drama'}, yearMin: 1970, mode: 'solo'),
+      );
+    });
+  });
 }

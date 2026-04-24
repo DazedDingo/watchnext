@@ -90,9 +90,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // CTA inside the filter panel is the explicit-commit path.
   bool _refreshing = false;
 
+  // Flashes briefly when a refresh was short-circuited by the state-hash
+  // dedupe (nothing actually rebuilt, no Claude API call fired). Lets the
+  // user know the tap was registered without pretending work happened.
+  bool _alreadyFreshPulse = false;
+  Timer? _alreadyFreshTimer;
+
   @override
   void dispose() {
     _autoRefreshDebounce?.cancel();
+    _alreadyFreshTimer?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -111,17 +118,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// Fires a non-forcing refresh and drives the inline progress indicator.
   /// Centralises refresh invocation so both the auto-refresh debounce and
   /// the "Show recommendations" CTA share progress-bar wiring.
+  ///
+  /// When the service short-circuits (state-hash matched the last refresh),
+  /// `refreshRecommendationsProvider` returns `false` — we never flip the
+  /// progress bar on and instead flash the "Already up to date" pulse on
+  /// the filter header so the user knows the tap was registered.
   void _fireRefresh() {
     ref.invalidate(refreshRecommendationsProvider);
     if (mounted) setState(() => _refreshing = true);
     unawaited(
-      ref.read(refreshRecommendationsProvider(false).future).whenComplete(() {
-        if (mounted) setState(() => _refreshing = false);
+      ref.read(refreshRecommendationsProvider(false).future).then((didWork) {
+        if (!mounted) return;
+        setState(() => _refreshing = false);
+        if (!didWork) _flashAlreadyFresh();
       }).catchError((_) {
-        // Silent: inline progress bar already communicated "done"; we
-        // don't want a modal snackbar on a background pool rebuild.
+        if (mounted) setState(() => _refreshing = false);
       }),
     );
+  }
+
+  void _flashAlreadyFresh() {
+    _alreadyFreshTimer?.cancel();
+    setState(() => _alreadyFreshPulse = true);
+    _alreadyFreshTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _alreadyFreshPulse = false);
+    });
   }
 
   Future<void> _openGenreSheet(
@@ -444,6 +465,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               sortMode: sortMode,
               curatedSource: curatedSource,
               includeWatched: includeWatched,
+              alreadyFreshPulse: _alreadyFreshPulse,
               onEditGenres: () => _openGenreSheet(context, ref, mode),
               onClearGenres: () =>
                   ref.read(modeGenreProvider.notifier).clear(mode),
@@ -622,6 +644,7 @@ class _FiltersPanel extends StatefulWidget {
   final ValueChanged<CuratedSource> onCuratedSourceSelect;
   final ValueChanged<bool> onIncludeWatchedChanged;
   final VoidCallback onApplyAndClose;
+  final bool alreadyFreshPulse;
 
   const _FiltersPanel({
     required this.selectedGenres,
@@ -642,6 +665,7 @@ class _FiltersPanel extends StatefulWidget {
     required this.onCuratedSourceSelect,
     required this.onIncludeWatchedChanged,
     required this.onApplyAndClose,
+    this.alreadyFreshPulse = false,
   });
 
   @override
@@ -752,14 +776,35 @@ class _FiltersPanelState extends State<_FiltersPanel> {
                     ],
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        _summary(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.white54,
-                        ),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: widget.alreadyFreshPulse
+                            ? Row(
+                                key: const ValueKey('already-fresh'),
+                                children: [
+                                  Icon(Icons.check_circle,
+                                      size: 14, color: primary),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Already up to date',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: primary,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                _summary(),
+                                key: const ValueKey('summary'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white54,
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(width: 4),
