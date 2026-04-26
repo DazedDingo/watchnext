@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -7,7 +8,10 @@ import '../../models/episode.dart';
 import '../../models/watch_entry.dart';
 import '../../models/watchlist_item.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/genre_filter_provider.dart';
 import '../../providers/household_provider.dart';
+import '../../providers/library_filter_provider.dart';
+import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/watch_entries_provider.dart';
@@ -16,6 +20,7 @@ import '../../services/tmdb_service.dart';
 import '../../widgets/async_error.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/help_button.dart';
+import '../../widgets/liquid_segmented_button.dart';
 import '../../widgets/mode_toggle.dart';
 import '../rating/rating_sheet.dart';
 
@@ -83,6 +88,11 @@ class _SavedTab extends ConsumerWidget {
     final mode = ref.watch(viewModeProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
 
+    final mediaType = ref.watch(libraryMediaTypeProvider);
+    final sort = ref.watch(librarySortProvider);
+    final genres = ref.watch(libraryGenresProvider);
+    final query = ref.watch(librarySearchProvider).trim().toLowerCase();
+
     bool isWatched(WatchlistItem w) {
       final entryId = WatchEntry.buildId(w.mediaType, w.tmdbId);
       final entry = entries.cast<WatchEntry?>().firstWhere(
@@ -112,65 +122,532 @@ class _SavedTab extends ConsumerWidget {
                 'Add titles from their detail screen — tap "Add to watchlist" to save them here for both of you.',
           );
         }
-        return ListView.separated(
-          itemCount: unwatched.length,
-          separatorBuilder: (_, _) => const Divider(height: 0),
-          itemBuilder: (_, i) {
-            final w = unwatched[i];
-            final poster = TmdbService.imageUrl(w.posterPath, size: 'w185');
-            return Dismissible(
-              key: ValueKey(w.id),
-              background: Container(
-                color: Colors.redAccent,
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: 24),
-                child: const Icon(Icons.delete),
+
+        final filtered = applyLibraryFilters(
+          items: unwatched,
+          mediaType: mediaType,
+          genres: genres,
+          query: query,
+          sort: sort,
+        );
+        final hasActiveFilters =
+            mediaType != null || genres.isNotEmpty || query.isNotEmpty;
+
+        return Column(
+          children: [
+            const _SavedFilterBar(),
+            if (filtered.isEmpty)
+              Expanded(
+                child: hasActiveFilters
+                    ? _NoMatchesEmpty(onClear: () => _clearAllFilters(ref))
+                    : const EmptyState(
+                        icon: Icons.bookmark_border,
+                        title: 'Nothing saved yet',
+                        subtitle: 'Add titles from their detail screen.',
+                      ),
+              )
+            else
+              Expanded(
+                child: ListView.separated(
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, _) => const Divider(height: 0),
+                  itemBuilder: (_, i) => _SavedTile(item: filtered[i]),
+                ),
               ),
-              direction: DismissDirection.endToStart,
-              onDismissed: (_) async {
-                final householdId = await ref.read(householdIdProvider.future);
-                if (householdId == null) return;
-                await ref
-                    .read(watchlistServiceProvider)
-                    .remove(householdId: householdId, id: w.id);
-              },
-              child: ListTile(
-                leading: poster != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Image.network(
-                          poster,
-                          width: 48,
-                          height: 72,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const SizedBox(
-                            width: 48,
-                            height: 72,
-                            child: Icon(Icons.movie),
-                          ),
-                        ),
-                      )
-                    : const SizedBox(
-                        width: 48, height: 72, child: Icon(Icons.movie)),
-                title: Text(w.title,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text([
-                  if (w.year != null) '${w.year}',
-                  if (w.genres.isNotEmpty) w.genres.first,
-                ].join(' · ')),
-                trailing: w.scope == 'solo'
-                    ? const Tooltip(
-                        message: 'Only on your Solo watchlist',
-                        child: Icon(Icons.person_outline, size: 18),
-                      )
-                    : null,
-                onTap: () =>
-                    context.push('/title/${w.mediaType}/${w.tmdbId}'),
-              ),
-            );
-          },
+          ],
         );
       },
+    );
+  }
+}
+
+void _clearAllFilters(WidgetRef ref) {
+  ref.read(libraryMediaTypeProvider.notifier).state = null;
+  ref.read(libraryGenresProvider.notifier).state = const {};
+  ref.read(librarySearchProvider.notifier).state = '';
+}
+
+// ─── Saved tab — filter bar ───────────────────────────────────────────────────
+//
+// Three rows: search field, media-type segment, then a genre + sort dropdown
+// pair. Mirrors Home's filter-panel rhythm (LiquidSegmentedButton +
+// dropdown shells) so the visual language stays consistent across the app.
+
+class _SavedFilterBar extends ConsumerWidget {
+  const _SavedFilterBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mediaType = ref.watch(libraryMediaTypeProvider);
+    final sort = ref.watch(librarySortProvider);
+    final genres = ref.watch(libraryGenresProvider);
+    final cs = Theme.of(context).colorScheme;
+
+    final genreLabel = genres.isEmpty
+        ? null
+        : (genres.length == 1 ? genres.first : 'Genres (${genres.length})');
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: cs.outlineVariant.withValues(alpha: 0.4),
+            width: 0.5,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: _SavedSearchField(),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: LiquidSegmentedButton<MediaTypeFilter?>(
+              density: LiquidSegmentDensity.compact,
+              selected: mediaType,
+              segments: const [
+                LiquidSegment(value: null, label: 'All'),
+                LiquidSegment(
+                  value: MediaTypeFilter.movie,
+                  label: 'Movies',
+                  icon: Icons.movie_outlined,
+                ),
+                LiquidSegment(
+                  value: MediaTypeFilter.tv,
+                  label: 'TV',
+                  icon: Icons.tv,
+                ),
+              ],
+              onChanged: (v) =>
+                  ref.read(libraryMediaTypeProvider.notifier).state = v,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _SavedDropdownTrigger(
+                    icon: Icons.theater_comedy_outlined,
+                    activeLabel: genreLabel,
+                    placeholder: 'Genres',
+                    onTap: () => _openGenreSheet(context),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _SavedSortPopup(
+                    selected: sort,
+                    onSelected: (v) =>
+                        ref.read(librarySortProvider.notifier).state = v,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openGenreSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _LibraryGenreSheet(),
+    );
+  }
+}
+
+class _SavedSearchField extends ConsumerStatefulWidget {
+  const _SavedSearchField();
+
+  @override
+  ConsumerState<_SavedSearchField> createState() => _SavedSearchFieldState();
+}
+
+class _SavedSearchFieldState extends ConsumerState<_SavedSearchField> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: ref.read(librarySearchProvider));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // Sync the controller when the provider is reset externally (e.g.,
+    // "Clear filters" from the no-matches empty state). The TextField doesn't
+    // re-read provider state on rebuild, so without this an external clear
+    // would update the filter but leave stale text in the field.
+    ref.listen<String>(librarySearchProvider, (_, next) {
+      if (next != _ctrl.text) {
+        _ctrl.value = TextEditingValue(
+          text: next,
+          selection: TextSelection.collapsed(offset: next.length),
+        );
+      }
+    });
+    return TextField(
+      controller: _ctrl,
+      onChanged: (v) => ref.read(librarySearchProvider.notifier).state = v,
+      textInputAction: TextInputAction.search,
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'Search saved titles',
+        hintStyle: TextStyle(
+          fontSize: 14,
+          color: cs.onSurface.withValues(alpha: 0.5),
+        ),
+        prefixIcon: const Icon(Icons.search, size: 20),
+        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _ctrl,
+          builder: (_, value, _) {
+            if (value.text.isEmpty) return const SizedBox.shrink();
+            return IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              tooltip: 'Clear search',
+              onPressed: () {
+                _ctrl.clear();
+                ref.read(librarySearchProvider.notifier).state = '';
+              },
+            );
+          },
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        filled: true,
+        fillColor: cs.surfaceContainerLow,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: cs.outlineVariant.withValues(alpha: 0.35),
+            width: 0.5,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: cs.outlineVariant.withValues(alpha: 0.35),
+            width: 0.5,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: cs.primary, width: 1.2),
+        ),
+      ),
+    );
+  }
+}
+
+/// Visual sibling of Home's `_FilterDropdownShell`. Stays in this file so
+/// Library can give it Saved-tab-specific behaviours (icon prefix, custom
+/// onTap) without parameterising the Home shell. Active state borrows the
+/// same primary-tinted styling as Home's dropdowns.
+class _SavedDropdownTrigger extends StatelessWidget {
+  final IconData icon;
+  final String? activeLabel;
+  final String placeholder;
+  final VoidCallback onTap;
+
+  const _SavedDropdownTrigger({
+    required this.icon,
+    required this.activeLabel,
+    required this.placeholder,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final active = activeLabel != null;
+    final borderColor = active ? cs.primary : cs.outline;
+    final textColor = active ? cs.primary : cs.onSurfaceVariant;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: borderColor, width: active ? 1.5 : 1),
+          borderRadius: BorderRadius.circular(8),
+          color: active ? cs.primary.withValues(alpha: 0.08) : null,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: textColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                activeLabel ?? placeholder,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: textColor,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: textColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedSortPopup extends StatelessWidget {
+  final LibrarySort selected;
+  final ValueChanged<LibrarySort> onSelected;
+
+  const _SavedSortPopup({required this.selected, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDefault = selected == LibrarySort.dateAddedDesc;
+    final borderColor = isDefault ? cs.outline : cs.primary;
+    final textColor = isDefault ? cs.onSurfaceVariant : cs.primary;
+    return PopupMenuButton<LibrarySort>(
+      tooltip: 'Sort',
+      position: PopupMenuPosition.under,
+      onSelected: (v) {
+        HapticFeedback.selectionClick();
+        onSelected(v);
+      },
+      itemBuilder: (_) => [
+        for (final mode in LibrarySort.values)
+          PopupMenuItem<LibrarySort>(
+            value: mode,
+            child: Row(
+              children: [
+                if (mode == selected)
+                  const Icon(Icons.check, size: 16)
+                else
+                  const SizedBox(width: 16),
+                const SizedBox(width: 8),
+                Text(mode.label),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: borderColor, width: isDefault ? 1 : 1.5),
+          borderRadius: BorderRadius.circular(8),
+          color: isDefault ? null : cs.primary.withValues(alpha: 0.08),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.sort, size: 16, color: textColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                selected.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: textColor,
+                  fontWeight: isDefault ? FontWeight.normal : FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: textColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Library-local genre picker. Mirrors `GenreSheet` but binds to
+/// `libraryGenresProvider` so toggling here doesn't bleed into Home's
+/// `modeGenreProvider` (which would silently change the recommendation pool).
+class _LibraryGenreSheet extends ConsumerWidget {
+  const _LibraryGenreSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final all = ref.watch(allGenresProvider);
+    final selected = ref.watch(libraryGenresProvider);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Filter by genre',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton(
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () => ref
+                          .read(libraryGenresProvider.notifier)
+                          .state = const {},
+                  child: const Text('Clear all'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final g in all)
+                      FilterChip(
+                        label: Text(g),
+                        selected: selected.contains(g),
+                        onSelected: (v) {
+                          final next = Set<String>.from(selected);
+                          if (v) {
+                            next.add(g);
+                          } else {
+                            next.remove(g);
+                          }
+                          ref.read(libraryGenresProvider.notifier).state =
+                              next;
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedTile extends ConsumerWidget {
+  final WatchlistItem item;
+  const _SavedTile({required this.item});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final w = item;
+    final poster = TmdbService.imageUrl(w.posterPath, size: 'w185');
+    return Dismissible(
+      key: ValueKey(w.id),
+      background: Container(
+        color: Colors.redAccent,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        child: const Icon(Icons.delete),
+      ),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) async {
+        final householdId = await ref.read(householdIdProvider.future);
+        if (householdId == null) return;
+        await ref
+            .read(watchlistServiceProvider)
+            .remove(householdId: householdId, id: w.id);
+      },
+      child: ListTile(
+        leading: poster != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.network(
+                  poster,
+                  width: 48,
+                  height: 72,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                    width: 48,
+                    height: 72,
+                    child: Icon(Icons.movie),
+                  ),
+                ),
+              )
+            : const SizedBox(
+                width: 48, height: 72, child: Icon(Icons.movie)),
+        title: Text(w.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text([
+          if (w.year != null) '${w.year}',
+          if (w.genres.isNotEmpty) w.genres.first,
+        ].join(' · ')),
+        trailing: w.scope == 'solo'
+            ? const Tooltip(
+                message: 'Only on your Solo watchlist',
+                child: Icon(Icons.person_outline, size: 18),
+              )
+            : null,
+        onTap: () => context.push('/title/${w.mediaType}/${w.tmdbId}'),
+      ),
+    );
+  }
+}
+
+class _NoMatchesEmpty extends StatelessWidget {
+  final VoidCallback onClear;
+  const _NoMatchesEmpty({required this.onClear});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.filter_alt_off_outlined,
+                size: 48, color: Colors.white38),
+            const SizedBox(height: 12),
+            Text(
+              'No saved titles match',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Try clearing a filter or your search.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.white60,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Clear filters'),
+              onPressed: onClear,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
