@@ -1,15 +1,16 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../utils/tmdb_genres.dart';
+import 'auth_provider.dart';
+import 'media_type_filter_provider.dart';
 import 'mode_provider.dart';
 import 'stats_provider.dart';
 import 'tmdb_provider.dart';
 import 'watch_entries_provider.dart';
 
 /// A single "Upcoming for you" row. Rendered as a horizontal poster carousel
-/// on Home, sourced from TMDB's /movie/upcoming and /tv/on_the_air feeds and
-/// re-ranked against the household's taste profile.
+/// on Home, sourced from TMDB and re-ranked against the household's taste
+/// profile.
 class UpcomingTitle {
   final String mediaType; // 'movie' | 'tv'
   final int tmdbId;
@@ -32,70 +33,94 @@ class UpcomingTitle {
   String get key => '$mediaType:$tmdbId';
 }
 
-/// Pulls TMDB's upcoming-movies + on-the-air-TV feeds, filters out anything
-/// the household has already touched (watched or watching), and ranks by
-/// overlap with the taste profile's top genres.
+/// Forward-looking window in days for both movie and TV discover queries.
+/// Captures a full quarter of upcoming releases — wider than TMDB's curated
+/// `/movie/upcoming` endpoint (~28 days) and `/tv/on_the_air` (~7 days),
+/// which we previously used. Stretches the carousel from "what releases
+/// next month" to "what to plan for this season".
+const int kUpcomingWindowDays = 90;
+
+/// Pulls upcoming candidates from TMDB and ranks by overlap with the
+/// household's taste profile.
 ///
-/// This is client-side only — intentionally *not* round-tripped through the
-/// Phase 7 scoring CF. Upcoming titles rotate frequently and Claude scores
-/// are expensive; a cheap genre-weight match is more than enough signal for
-/// a Home carousel that exists to highlight what's *coming*, not to predict
-/// 5-star hits.
+/// The carousel honours the active media-type filter so it matches what
+/// the rest of Home is showing. Both branches use `/discover/{mt}` with a
+/// today→today+90d release-date window so the pool is wide enough to make
+/// a "for you" re-rank meaningful, regardless of TMDB's curated upcoming
+/// endpoints (which are intentionally short-horizon).
+///
+/// - **Movies** (filter `movie` or `null`): `/discover/movie` with
+///   `primary_release_date.gte=today` + `.lte=today+90d`.
+/// - **TV** (filter `tv` or `null`): `/discover/tv` with `air_date.gte` +
+///   `.lte` over the same window. The `air_date` filter naturally returns
+///   both new series premiering in the window AND returning shows with
+///   new episodes airing in the window. We deliberately don't filter
+///   returning TV against `watchedKeys` — a new season is the whole point
+///   of the surface.
+///
+/// All branches re-rank by genre-overlap against the per-mode taste
+/// profile (`per_user_solo` / `per_user_together` with `combined`
+/// fallback). This is client-side only and intentionally not round-
+/// tripped through the Phase 7 scoring CF — Upcoming rotates frequently
+/// and Claude scores are expensive; cheap genre-weight match is enough
+/// signal for a "what's coming?" surface.
 final upcomingForYouProvider =
     FutureProvider.autoDispose<List<UpcomingTitle>>((ref) async {
   final tmdb = ref.watch(tmdbServiceProvider);
   final profile = ref.watch(tasteProfileProvider).value;
   final watchedKeys = ref.watch(watchedKeysProvider);
   final mode = ref.watch(viewModeProvider);
-  final uid = FirebaseAuth.instance.currentUser?.uid;
+  final mediaType = ref.watch(mediaTypeFilterProvider);
+  final uid = ref.watch(currentUidProvider);
 
-  // Pick which profile slot to match against — per-mode when available,
-  // combined as fallback for legacy households before signal-separation.
   final genreWeights = _resolveGenreWeights(profile, uid: uid, mode: mode);
 
-  final results = await Future.wait([
-    tmdb.upcomingMovies().catchError((_) => <String, dynamic>{}),
-    tmdb.onTheAirTv().catchError((_) => <String, dynamic>{}),
-  ]);
-  final movieRows = (results[0]['results'] as List?) ?? const [];
-  final tvRows = (results[1]['results'] as List?) ?? const [];
-
-  // "Upcoming" means strictly unreleased. Earlier passes leaked content:
-  //   - /movie/upcoming occasionally returns rows whose `release_date`
-  //     is the ORIGINAL primary release (theatrical re-releases,
-  //     community-edited TMDB data) — we saw a 1986 title surface.
-  //   - /tv/on_the_air returns long-running series (The Simpsons,
-  //     Family Guy, etc.) — the show is still producing new episodes
-  //     but the `first_air_date` is decades ago, which reads as "old"
-  //     in an Upcoming carousel that's meant to highlight new content.
-  // Strict gates: movies must release today or later, TV series must
-  // have debuted within the last 2 years (captures recent premieres
-  // while dropping long-runners). For "new seasons of older shows",
-  // the regular Recommended list is the right surface — this carousel
-  // exists specifically to spotlight NEW titles.
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
-  final tvDebutFloor = DateTime(now.year - 2, now.month, now.day);
+  final windowEnd = today.add(const Duration(days: kUpcomingWindowDays));
+  final from = _fmt(today);
+  final to = _fmt(windowEnd);
 
   final out = <UpcomingTitle>[];
-  for (final row in movieRows) {
-    final t = _rowToTitle(row, 'movie', genreWeights);
-    if (t == null) continue;
-    if (watchedKeys.contains(t.key)) continue;
-    if (t.releaseDate == null || t.releaseDate!.isBefore(today)) continue;
-    out.add(t);
-  }
-  for (final row in tvRows) {
-    final t = _rowToTitle(row, 'tv', genreWeights);
-    if (t == null) continue;
-    if (watchedKeys.contains(t.key)) continue;
-    if (t.releaseDate == null || t.releaseDate!.isBefore(tvDebutFloor)) {
-      continue;
+
+  if (mediaType == null || mediaType == MediaTypeFilter.movie) {
+    final movies = await tmdb.discoverMovies({
+      'primary_release_date.gte': from,
+      'primary_release_date.lte': to,
+      'sort_by': 'popularity.desc',
+      'vote_count.gte': '0',
+    }).catchError((_) => <String, dynamic>{});
+    final movieRows = (movies['results'] as List?) ?? const [];
+    for (final row in movieRows) {
+      final t = _rowToTitle(row, 'movie', genreWeights);
+      if (t == null) continue;
+      if (watchedKeys.contains(t.key)) continue;
+      // Defence against TMDB returning rows whose `release_date` somehow
+      // sneaks past the server-side filter (community-edited primary
+      // dates, theatrical re-releases). Strict floor: today or later.
+      if (t.releaseDate == null || t.releaseDate!.isBefore(today)) continue;
+      out.add(t);
     }
-    out.add(t);
   }
 
-  // Rank by genre-overlap score; ties break on soonest release.
+  if (mediaType == null || mediaType == MediaTypeFilter.tv) {
+    final tv = await tmdb.discoverTv({
+      'air_date.gte': from,
+      'air_date.lte': to,
+      'sort_by': 'popularity.desc',
+      'vote_count.gte': '10',
+    }).catchError((_) => <String, dynamic>{});
+    final tvRows = (tv['results'] as List?) ?? const [];
+    for (final row in tvRows) {
+      final t = _rowToTitle(row, 'tv', genreWeights);
+      if (t == null) continue;
+      // No watchedKeys filter — returning shows the household already
+      // follows are what makes "new seasons" valuable here.
+      out.add(t);
+    }
+  }
+
+  // Rank by genre-overlap; ties break on soonest release.
   out.sort((a, b) {
     final s = b.matchScore.compareTo(a.matchScore);
     if (s != 0) return s;
@@ -109,6 +134,9 @@ final upcomingForYouProvider =
 
   return out.take(20).toList();
 });
+
+String _fmt(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 Map<String, double> _resolveGenreWeights(
   Map<String, dynamic>? profile, {
