@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../providers/ask_ai_placement_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
@@ -20,6 +21,7 @@ const _profileHelp =
     '• Invite partner — share the code so they can join your household.\n'
     '• Default mode — Solo ranks recommendations for you alone; Together ranks for both.\n'
     '• Reveal notifications — optional push when a prediction reveal is ready.\n'
+    '• Ask AI placement — show the concierge entry as an app-bar icon (default), a floating action button, or hide it completely.\n'
     '• Trakt — link to auto-import history and push ratings.\n'
     '• Stremio addon — mints a private URL you paste into Stremio; your shared watchlist then appears as a catalog inside the Stremio app.\n'
     '• Sign out — clears your session on this device. Your data stays in the household.';
@@ -116,6 +118,7 @@ class ProfileScreen extends ConsumerWidget {
           ),
           const _NotificationToggle(),
           const _AccentPicker(),
+          const _AskAiPlacementTile(),
           const Divider(),
 
           // ── Stats ──────────────────────────────────────────────────────
@@ -466,6 +469,35 @@ class _SectionHeader extends StatelessWidget {
               ?.copyWith(letterSpacing: 1.2),
         ),
       );
+}
+
+// ---------------------------------------------------------------------------
+// Ask AI placement — controls where the concierge entry point renders on Home
+// ---------------------------------------------------------------------------
+
+class _AskAiPlacementTile extends ConsumerWidget {
+  const _AskAiPlacementTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(askAiPlacementProvider);
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.auto_awesome_outlined),
+      title: const Text('Ask AI placement'),
+      subtitle: Text(current.label),
+      trailing: PopupMenuButton<AskAiPlacement>(
+        initialValue: current,
+        onSelected: (v) =>
+            ref.read(askAiPlacementProvider.notifier).set(v),
+        itemBuilder: (_) => [
+          for (final p in AskAiPlacement.values)
+            PopupMenuItem(value: p, child: Text(p.label)),
+        ],
+        icon: const Icon(Icons.arrow_drop_down),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/recommendation.dart';
+import '../../providers/ask_ai_placement_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/awards_filter_provider.dart';
 import '../../providers/curated_source_provider.dart';
@@ -49,7 +50,7 @@ const _homeHelp =
     '• Search — type to narrow to titles containing your query.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
-    '• Ask AI (bottom-right) — chat with the concierge for a bespoke recommendation.\n'
+    '• Ask AI — chat with the concierge for a bespoke recommendation. Default placement is the sparkle icon in the app bar; switch to a floating button or hide it entirely from Profile → Preferences → Ask AI placement.\n'
     '• Decide Together — quick tap-through to break a tie with your partner.';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -173,6 +174,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final sortMode = ref.watch(sortModeProvider);
     final curatedSource = ref.watch(curatedSourceProvider);
     final includeWatched = ref.watch(includeWatchedProvider);
+    final askAiPlacement = ref.watch(askAiPlacementProvider);
     final watchedKeys = ref.watch(watchedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
@@ -335,19 +337,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const WatchNextLogo(),
-        actions: const [
-          Padding(
+        actions: [
+          if (askAiPlacement == AskAiPlacement.icon)
+            IconButton(
+              tooltip: 'Ask AI',
+              icon: const Icon(Icons.auto_awesome),
+              onPressed: () => ConciergeSheet.show(context),
+            ),
+          const Padding(
             padding: EdgeInsets.only(right: 4),
             child: Center(child: ModeToggle()),
           ),
-          HelpButton(title: 'Home', body: _homeHelp),
+          const HelpButton(title: 'Home', body: _homeHelp),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => ConciergeSheet.show(context),
-        icon: const Icon(Icons.auto_awesome),
-        label: const Text('Ask AI'),
-      ),
+      floatingActionButton: askAiPlacement == AskAiPlacement.fab
+          ? FloatingActionButton.extended(
+              onPressed: () => ConciergeSheet.show(context),
+              icon: const Icon(Icons.auto_awesome),
+              label: const Text('Ask AI'),
+            )
+          : null,
       body: recsAsync.hasError
           ? AsyncErrorView(
               error: recsAsync.error!,
