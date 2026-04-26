@@ -116,8 +116,11 @@ void main() {
   });
 
   group('upcomingForYouProvider — Movies branch', () {
-    test('hits /discover/movie with a today→today+90d release window',
+    test('hits /discover/movie with a (today-7d)→(today+90d) release window',
         () async {
+      // The lookback grace lets just-released titles linger for a week
+      // — they read as "new" to anyone not tracking the calendar and
+      // dropping them the day after release felt abrupt.
       Uri? captured;
       final client = MockClient((req) async {
         if (req.url.path.endsWith('/discover/movie')) {
@@ -134,7 +137,7 @@ void main() {
       await container.read(upcomingForYouProvider.future);
       expect(captured, isNotNull);
       final q = captured!.queryParameters;
-      expect(q['primary_release_date.gte'], _futureDateStr(0));
+      expect(q['primary_release_date.gte'], _futureDateStr(-kUpcomingLookbackDays));
       expect(q['primary_release_date.lte'], _futureDateStr(kUpcomingWindowDays));
       expect(q['sort_by'], 'popularity.desc');
     });
@@ -156,10 +159,13 @@ void main() {
       expect(paths.any((p) => p.endsWith('/discover/movie')), isTrue);
     });
 
-    test('drops movies whose release_date is in the past', () async {
-      // Defensive — TMDB's server-side date filter is normally tight, but
-      // community-edited primary dates and theatrical re-releases have
-      // leaked past it before. Strict client-side floor.
+    test('drops ancient re-releases but keeps titles within the lookback window',
+        () async {
+      // Defensive — TMDB's server-side date filter is normally tight,
+      // but community-edited primary dates and theatrical re-releases
+      // have leaked past it before. Client-side floor matches the
+      // lookback constant so just-released titles (today-3d) survive
+      // while genuine ancient fakes (1986) are dropped.
       final client = MockClient((req) async {
         if (req.url.path.endsWith('/discover/movie')) {
           return _json({
@@ -172,6 +178,12 @@ void main() {
               },
               {
                 'id': 2,
+                'title': 'Just released',
+                'release_date': _futureDateStr(-3),
+                'genre_ids': const <int>[],
+              },
+              {
+                'id': 3,
                 'title': 'Genuinely upcoming',
                 'release_date': _futureDateStr(10),
                 'genre_ids': const <int>[],
@@ -187,12 +199,13 @@ void main() {
       );
       addTearDown(container.dispose);
       final out = await container.read(upcomingForYouProvider.future);
-      expect(out.map((e) => e.tmdbId).toList(), [2]);
+      expect(out.map((e) => e.tmdbId).toSet(), {2, 3});
     });
   });
 
   group('upcomingForYouProvider — TV branch', () {
-    test('hits /discover/tv with a today→today+90d air_date window', () async {
+    test('hits /discover/tv with a (today-7d)→(today+90d) air_date window',
+        () async {
       Uri? captured;
       final client = MockClient((req) async {
         if (req.url.path.endsWith('/discover/tv')) {
@@ -209,7 +222,7 @@ void main() {
       await container.read(upcomingForYouProvider.future);
       expect(captured, isNotNull);
       final q = captured!.queryParameters;
-      expect(q['air_date.gte'], _futureDateStr(0));
+      expect(q['air_date.gte'], _futureDateStr(-kUpcomingLookbackDays));
       expect(q['air_date.lte'], _futureDateStr(kUpcomingWindowDays));
       expect(q['sort_by'], 'popularity.desc');
     });

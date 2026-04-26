@@ -40,6 +40,13 @@ class UpcomingTitle {
 /// next month" to "what to plan for this season".
 const int kUpcomingWindowDays = 90;
 
+/// Backward-looking grace window. The carousel includes anything released
+/// in the last 7 days too — a movie that just came out reads as "new" to
+/// anyone who hasn't been watching the calendar, and dropping it the
+/// moment its release_date passes felt abrupt. Bounded tight enough that
+/// the row doesn't turn into a "recently out" feed.
+const int kUpcomingLookbackDays = 7;
+
 /// Pulls upcoming candidates from TMDB and ranks by overlap with the
 /// household's taste profile.
 ///
@@ -77,8 +84,10 @@ final upcomingForYouProvider =
 
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
+  final windowStart =
+      today.subtract(const Duration(days: kUpcomingLookbackDays));
   final windowEnd = today.add(const Duration(days: kUpcomingWindowDays));
-  final from = _fmt(today);
+  final from = _fmt(windowStart);
   final to = _fmt(windowEnd);
 
   final out = <UpcomingTitle>[];
@@ -97,8 +106,11 @@ final upcomingForYouProvider =
       if (watchedKeys.contains(t.key)) continue;
       // Defence against TMDB returning rows whose `release_date` somehow
       // sneaks past the server-side filter (community-edited primary
-      // dates, theatrical re-releases). Strict floor: today or later.
-      if (t.releaseDate == null || t.releaseDate!.isBefore(today)) continue;
+      // dates, theatrical re-releases). Strict floor: within the
+      // lookback window (today minus `kUpcomingLookbackDays`) or later.
+      if (t.releaseDate == null || t.releaseDate!.isBefore(windowStart)) {
+        continue;
+      }
       out.add(t);
     }
   }
