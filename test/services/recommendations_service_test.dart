@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1391,6 +1392,232 @@ void main() {
       expect(doc['genres'], ['Drama']);
       expect(doc['keywords_fetched'], isNot(true),
           reason: 'flag should not be written when TMDB errored');
+    });
+  });
+
+  // ─── writeCandidateDocs — prune ────────────────────────────────────────
+  //
+  // Without a cap, the rec collection grows unboundedly across months of
+  // refreshes and eventually crowds the home stream's `.limit(600)`
+  // window. Freshly-written narrow-filter rows (default match_score=50)
+  // fall outside the visible top, leading to "Sci-Fi + Western on TV
+  // brings back nothing" even though the discover fetch succeeded.
+  //
+  // The prune walks oldest-by-`generated_at`, deleting until
+  // `kRecCollectionCap` is satisfied — but with a protection contract
+  // that mirrors the sticky-merge tags (gotcha 25): watchlist rows,
+  // award/curator-tagged rows, just-written keys, and high-confidence
+  // (≥80, or scored && ≥70) recs never get pruned.
+  group('writeCandidateDocs — prune', () {
+    late FakeFirebaseFirestore db;
+    late RecommendationsService svc;
+    const hh = 'hh-prune';
+
+    String path(String key) => 'households/$hh/recommendations/$key';
+
+    setUp(() {
+      db = FakeFirebaseFirestore();
+      svc = RecommendationsService(db: db);
+    });
+
+    Future<void> seed(
+      int count, {
+      String prefix = 'movie:seed',
+      Map<String, dynamic> Function(int)? extra,
+      DateTime Function(int)? at,
+    }) async {
+      for (var i = 0; i < count; i++) {
+        final key = '$prefix-$i';
+        final base = <String, dynamic>{
+          'media_type': 'movie',
+          'tmdb_id': 1000 + i,
+          'title': 'seed $i',
+          'source': 'trending',
+          'match_score': 50,
+          'scored': false,
+          // FakeFirebaseFirestore doesn't honour FieldValue.serverTimestamp
+          // ordering in the way a live Firestore does, so we stamp explicit
+          // Timestamps that the orderBy('generated_at') walk can sort.
+          'generated_at': Timestamp.fromDate(
+              at?.call(i) ?? DateTime.utc(2024, 1, 1).add(Duration(days: i))),
+        };
+        if (extra != null) base.addAll(extra(i));
+        await db.doc(path(key)).set(base);
+      }
+    }
+
+    Future<int> collectionSize() async {
+      final snap = await db.collection('households/$hh/recommendations').get();
+      return snap.size;
+    }
+
+    test('cap not exceeded → no deletes', () async {
+      await seed(50);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      expect(await collectionSize(), 51);
+    });
+
+    test('cap exceeded → trims to kRecCollectionCap', () async {
+      // Seed kRecCollectionCap + 50 docs, then write a single new candidate.
+      // Pruner should bring total back to kRecCollectionCap.
+      await seed(kRecCollectionCap + 50);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      // After: 850 seeded - 51 pruned + 1 new = 800. The new candidate is
+      // protected (just-written), so it survives even though it has the
+      // newest timestamp.
+      expect(await collectionSize(), kRecCollectionCap);
+      final fresh = await db.doc(path('movie:9001')).get();
+      expect(fresh.exists, isTrue);
+    });
+
+    test('watchlist rows survive even when oldest', () async {
+      await db.doc(path('movie:wl')).set({
+        'media_type': 'movie',
+        'tmdb_id': 7,
+        'title': 'saved',
+        'source': 'watchlist',
+        'match_score': 50,
+        'generated_at':
+            Timestamp.fromDate(DateTime.utc(2000, 1, 1)), // ancient
+      });
+      await seed(kRecCollectionCap + 5);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      final wl = await db.doc(path('movie:wl')).get();
+      expect(wl.exists, isTrue,
+          reason: 'watchlist rows must never be pruned');
+    });
+
+    test('award + curator-tagged rows survive even when oldest', () async {
+      await db.doc(path('movie:bp')).set({
+        'media_type': 'movie',
+        'tmdb_id': 1,
+        'source': 'oscar',
+        'is_oscar_winner': true,
+        'match_score': 50,
+        'generated_at': Timestamp.fromDate(DateTime.utc(2000, 1, 1)),
+      });
+      await db.doc(path('movie:a24')).set({
+        'media_type': 'movie',
+        'tmdb_id': 2,
+        'source': 'discover',
+        'curator': 'a24',
+        'match_score': 50,
+        'generated_at': Timestamp.fromDate(DateTime.utc(2000, 1, 2)),
+      });
+      await seed(kRecCollectionCap + 5);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      expect((await db.doc(path('movie:bp')).get()).exists, isTrue);
+      expect((await db.doc(path('movie:a24')).get()).exists, isTrue);
+    });
+
+    test('high-confidence rows (score >= 80) survive even when oldest',
+        () async {
+      await db.doc(path('movie:gold')).set({
+        'media_type': 'movie',
+        'tmdb_id': 5,
+        'source': 'trending',
+        'match_score': 88,
+        'scored': true,
+        'generated_at': Timestamp.fromDate(DateTime.utc(2000, 1, 1)),
+      });
+      await db.doc(path('movie:silver')).set({
+        'media_type': 'movie',
+        'tmdb_id': 6,
+        'source': 'trending',
+        'match_score': 72,
+        'scored': true, // scored && >=70 → protected
+        'generated_at': Timestamp.fromDate(DateTime.utc(2000, 1, 2)),
+      });
+      await seed(kRecCollectionCap + 5);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      expect((await db.doc(path('movie:gold')).get()).exists, isTrue);
+      expect((await db.doc(path('movie:silver')).get()).exists, isTrue);
+    });
+
+    test('unscored rows at default 50 are eligible regardless of age',
+        () async {
+      // Default-scored rows ARE the prune target — they're the cruft
+      // accumulating from broad refreshes that Claude never confirmed.
+      // The oldest unscored 50-row should be the first to go when
+      // overage > 0.
+      await db.doc(path('movie:oldcruft')).set({
+        'media_type': 'movie',
+        'tmdb_id': 100,
+        'source': 'trending',
+        'match_score': 50,
+        'scored': false,
+        'generated_at': Timestamp.fromDate(DateTime.utc(2000, 1, 1)),
+      });
+      await seed(kRecCollectionCap); // brings total to cap+1
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      // The single ancient unscored row should be deleted. New candidate
+      // protected by just-written contract, so net collection size = cap.
+      final cruft = await db.doc(path('movie:oldcruft')).get();
+      expect(cruft.exists, isFalse);
+      expect(await collectionSize(), kRecCollectionCap);
+    });
+
+    test('1500-doc seed: one refresh trims back to kRecCollectionCap',
+        () async {
+      await seed(1500);
+      await svc.writeCandidateDocs(hh, [
+        {
+          'media_type': 'movie',
+          'tmdb_id': 9001,
+          'title': 'fresh',
+          'genres': const ['Drama'],
+          'source': 'discover',
+        },
+      ]);
+      expect(await collectionSize(), kRecCollectionCap);
     });
   });
 

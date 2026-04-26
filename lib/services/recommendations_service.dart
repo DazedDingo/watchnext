@@ -31,6 +31,17 @@ import 'tmdb_service.dart';
 /// The scheduled `processRescoreQueue` CF mops up any batches that fail.
 ///
 /// Streams + ad-hoc reads are kept here so providers stay thin.
+///
+/// Soft cap on the rec collection size, enforced by `_pruneRecsBeyondCap`
+/// after every successful `writeCandidateDocs`. Sized as
+/// `streamLimit (600) + headroom (~200)` so freshly-written narrow-filter
+/// rows (default `match_score=50`) reliably land inside the visible
+/// stream window. Months of refreshes used to push the collection past
+/// the stream cap; pruning the oldest-by-`generated_at` (with watchlist /
+/// award / curator / high-score / just-written protections) keeps the
+/// pool bounded.
+const int kRecCollectionCap = 800;
+
 class RecommendationsService {
   final FirebaseFirestore _db;
   final FirebaseFunctions? _fnsOverride;
@@ -415,6 +426,7 @@ class RecommendationsService {
     }
 
     final needsImdb = <({String mediaType, int tmdbId})>[];
+    final justWrittenKeys = <String>{};
 
     const chunkSize = 450; // stay below Firestore's 500-op batch limit
     for (var start = 0; start < candidates.length; start += chunkSize) {
@@ -472,6 +484,7 @@ class RecommendationsService {
           data['scored'] = false;
         }
         batch.set(col.doc(key), data, SetOptions(merge: true));
+        justWrittenKeys.add(key);
 
         // Only enqueue for background resolution if neither the existing
         // Firestore doc nor this candidate row already carries imdb_id.
@@ -483,7 +496,76 @@ class RecommendationsService {
       await batch.commit();
     }
 
+    // Hygiene pass: keep the rec collection bounded so accumulated cruft
+    // can't crowd the home stream window. See `kRecCollectionCap` for the
+    // protection contract. Awaited so concurrent writes can't race the
+    // delete walk; failure is swallowed so a busted prune doesn't break
+    // the user-facing refresh.
+    await _pruneRecsBeyondCap(col, justWrittenKeys);
+
     return needsImdb;
+  }
+
+  /// Prunes the rec collection back to [kRecCollectionCap] when accumulated
+  /// docs exceed the cap. Without this, months of refreshes grow the pool
+  /// past the home stream's `.limit(600)` window — fresh narrow-filter rows
+  /// (default `match_score=50`) fall outside the visible top window and
+  /// the user sees an empty list under tight filters even though the
+  /// discover fetch returned hits. The cap leaves headroom (`cap - stream
+  /// limit ≈ 200`) for narrow-filter spikes that haven't been Claude-scored
+  /// yet.
+  ///
+  /// Eligibility: oldest by `generated_at`, EXCEPT —
+  ///   - watchlist rows (`source='watchlist'`) — saved titles, never delete
+  ///   - sticky-tagged (`is_oscar_winner=true` OR non-empty `curator`) —
+  ///     award/curator opt-ins (gotcha 25)
+  ///   - just-written keys — Claude is about to score them in Phase B
+  ///   - high-confidence (`match_score >= 80`, OR `scored=true && >= 70`)
+  ///
+  /// Best-effort: errors are swallowed; pruning is hygiene, not part of
+  /// the user-facing refresh contract.
+  Future<void> _pruneRecsBeyondCap(
+    CollectionReference<Map<String, dynamic>> col,
+    Set<String> justWrittenKeys,
+  ) async {
+    try {
+      // Read full collection sorted oldest-first so the prune-eligible
+      // tail is at the top of the iteration.
+      final snap = await col.orderBy('generated_at').get();
+      if (snap.docs.length <= kRecCollectionCap) return;
+
+      final overage = snap.docs.length - kRecCollectionCap;
+      final toDelete = <DocumentReference<Map<String, dynamic>>>[];
+
+      for (final d in snap.docs) {
+        if (toDelete.length >= overage) break;
+        if (justWrittenKeys.contains(d.id)) continue;
+        final data = d.data();
+        if (data['source'] == 'watchlist') continue;
+        if (data['is_oscar_winner'] == true) continue;
+        final curator = data['curator'];
+        if (curator is String && curator.isNotEmpty) continue;
+        final score = (data['match_score'] as num?)?.toInt() ?? 0;
+        if (score >= 80) continue;
+        final scored = data['scored'] == true;
+        if (scored && score >= 70) continue;
+        toDelete.add(d.reference);
+      }
+
+      if (toDelete.isEmpty) return;
+
+      const chunkSize = 450; // stay below Firestore's 500-op batch limit
+      for (var start = 0; start < toDelete.length; start += chunkSize) {
+        final end = (start + chunkSize).clamp(0, toDelete.length);
+        final batch = _db.batch();
+        for (var i = start; i < end; i++) {
+          batch.delete(toDelete[i]);
+        }
+        await batch.commit();
+      }
+    } catch (_) {
+      // Pruning is best-effort; failure must not break the refresh.
+    }
   }
 
   /// Resolves `imdb_id` for each `(mediaType, tmdbId)` pair via TMDB's lean
