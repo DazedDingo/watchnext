@@ -24,6 +24,7 @@ import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
 import '../../providers/sort_mode_provider.dart';
 import '../../providers/upcoming_provider.dart';
+import '../../providers/upnext_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/year_filter_provider.dart';
 import '../../screens/concierge/concierge_sheet.dart';
@@ -44,6 +45,7 @@ import '../../widgets/year_range_slider.dart';
 
 const _homeHelp =
     'WatchNext picks something to watch that works for both of you.\n\n'
+    '• Up next — appears above Tonight\'s Pick when an in-progress show has a new episode airing in the next week. Hidden whenever there\'s nothing scheduled.\n'
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
     '• Filters — tap to expand. Genres (multi-select), runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), and awards (Best Picture, Palme d\'Or, BAFTA Best Film) live here. The header summarises what\'s active.\n'
@@ -475,6 +477,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               controller: _searchCtrl,
               onChanged: (v) => setState(() => _search = v),
             ),
+            const _UpNextRow(),
             if (tonightsPick != null) ...[
               const _SectionLabel("TONIGHT'S PICK"),
               _TonightsPick(
@@ -1431,7 +1434,7 @@ class _TonightsPick extends ConsumerWidget {
                 alignment: Alignment.bottomLeft,
                 children: [
                   SizedBox(
-                    height: 240,
+                    height: 200,
                     child: poster != null
                         ? Image.network(poster,
                             width: double.infinity, fit: BoxFit.cover,
@@ -1491,7 +1494,7 @@ class _TonightsPick extends ConsumerWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -1504,7 +1507,7 @@ class _TonightsPick extends ConsumerWidget {
                   if (imdbRating != null ||
                       rtRating != null ||
                       metascore != null) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
@@ -1516,20 +1519,22 @@ class _TonightsPick extends ConsumerWidget {
                     ),
                   ],
                   if (explainer != null) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     _ExplainerChip(explainer!),
                   ],
                   if (blurb.isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
                       blurb,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
                           ?.copyWith(color: Colors.white70),
                     ),
                   ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
@@ -1903,6 +1908,149 @@ class _SectionLabel extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Up Next ─────────────────────────────────────────────────────────────────
+
+/// Compact "next episode airing soon" surface above Tonight's Pick.
+/// Renders nothing while loading, on error, or when no in-progress show
+/// has an episode in the visibility window — most days for most
+/// households the row collapses to a SizedBox.shrink() and Home looks
+/// identical to its no-feature shape. Only earns chrome when a tile
+/// actually has something to say.
+class _UpNextRow extends ConsumerWidget {
+  const _UpNextRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(upNextProvider);
+    return async.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _SectionLabel('UP NEXT'),
+            ...items.map(
+              (e) => _UpNextTile(
+                episode: e,
+                onTap: () => context.push('/title/tv/${e.tmdbId}'),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _UpNextTile extends StatelessWidget {
+  final UpNextEpisode episode;
+  final VoidCallback onTap;
+
+  const _UpNextTile({required this.episode, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final poster = TmdbService.imageUrl(episode.showPosterPath, size: 'w185');
+    final epLabel =
+        'S${episode.season.toString().padLeft(2, '0')}E${episode.number.toString().padLeft(2, '0')}';
+    final relative = _relativeAirLabel(episode.daysUntilAir);
+    final nameSuffix =
+        (episode.episodeName == null || episode.episodeName!.isEmpty)
+            ? ''
+            : ' — ${episode.episodeName}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: poster != null
+                      ? Image.network(
+                          poster,
+                          width: 44,
+                          height: 66,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => _posterPlaceholder(),
+                        )
+                      : _posterPlaceholder(),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        episode.showTitle,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$epLabel$nameSuffix',
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.white70),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    relative,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: colors.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _posterPlaceholder() => Container(
+        width: 44,
+        height: 66,
+        color: const Color(0xFF1A1A1A),
+        child: const Icon(Icons.tv_outlined,
+            color: Colors.white24, size: 18),
+      );
+}
+
+String _relativeAirLabel(int daysUntilAir) {
+  if (daysUntilAir == 0) return 'Out today';
+  if (daysUntilAir == 1) return 'Tomorrow';
+  if (daysUntilAir == -1) return 'Aired yesterday';
+  if (daysUntilAir < 0) return 'Just aired';
+  return 'In ${daysUntilAir}d';
 }
 
 // ─── Upcoming for you carousel ──────────────────────────────────────────────

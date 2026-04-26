@@ -47,6 +47,14 @@ class TmdbService {
       _get(_uri('/tv/$tmdbId',
           {'append_to_response': 'credits,keywords,similar,external_ids,videos'}));
 
+  /// Lean `/tv/{id}` call — no `append_to_response`. Used by the Up Next
+  /// Home row, which only needs `next_episode_to_air` from the base
+  /// payload. `tvDetails` would work too but transfers the entire
+  /// title-detail companion bundle; this method keeps the per-show fan-
+  /// out cheap when a household has many in-progress shows.
+  Future<Map<String, dynamic>> tvShow(int tmdbId) =>
+      _get(_uri('/tv/$tmdbId'));
+
   Future<Map<String, dynamic>> tvSeason(int tmdbId, int seasonNumber) =>
       _get(_uri('/tv/$tmdbId/season/$seasonNumber'));
 

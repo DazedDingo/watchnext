@@ -14,6 +14,7 @@ import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/trakt_provider.dart';
+import '../../providers/upnext_provider.dart';
 import '../../widgets/help_button.dart';
 
 const _profileHelp =
@@ -131,6 +132,7 @@ class ProfileScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/profile/stats'),
           ),
+          const _UpNextHealthTile(),
           const Divider(),
 
           // ── Trakt ──────────────────────────────────────────────────────
@@ -469,6 +471,62 @@ class _SectionHeader extends StatelessWidget {
               ?.copyWith(letterSpacing: 1.2),
         ),
       );
+}
+
+// ---------------------------------------------------------------------------
+// Up Next health line — verifies the conditional Home row is working even
+// when it's silent. Lives under Insights so the user has a once-glance way
+// to confirm "tracking N shows, next ep in M days" without opening Home.
+// ---------------------------------------------------------------------------
+
+class _UpNextHealthTile extends ConsumerWidget {
+  const _UpNextHealthTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(upNextSummaryProvider);
+    return async.when(
+      loading: () => const ListTile(
+        dense: true,
+        leading: Icon(Icons.schedule_outlined),
+        title: Text('Up next'),
+        subtitle: Text('Loading…'),
+      ),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (s) {
+        final tracking = s.trackedShowCount;
+        final next = s.next;
+        final String subtitle;
+        if (tracking == 0) {
+          subtitle = 'No shows in progress';
+        } else if (next == null) {
+          subtitle = tracking == 1
+              ? 'Tracking 1 show — nothing scheduled this week'
+              : 'Tracking $tracking shows — nothing scheduled this week';
+        } else {
+          final epLabel =
+              'S${next.season.toString().padLeft(2, '0')}E${next.number.toString().padLeft(2, '0')}';
+          final relative = _profileRelative(next.daysUntilAir);
+          subtitle = tracking == 1
+              ? 'Tracking 1 show; next: ${next.showTitle} $epLabel $relative'
+              : 'Tracking $tracking shows; next: ${next.showTitle} $epLabel $relative';
+        }
+        return ListTile(
+          dense: true,
+          leading: const Icon(Icons.schedule_outlined),
+          title: const Text('Up next'),
+          subtitle: Text(subtitle),
+        );
+      },
+    );
+  }
+}
+
+String _profileRelative(int daysUntilAir) {
+  if (daysUntilAir == 0) return 'today';
+  if (daysUntilAir == 1) return 'tomorrow';
+  if (daysUntilAir < 0) return 'just aired';
+  return 'in ${daysUntilAir}d';
 }
 
 // ---------------------------------------------------------------------------
