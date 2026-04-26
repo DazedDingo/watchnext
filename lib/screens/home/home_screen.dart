@@ -379,6 +379,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   child: RefreshIndicator(
                     onRefresh: _fireRefresh,
                     child: ListView(
+          key: const PageStorageKey<String>('home_list'),
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 32),
           children: [
