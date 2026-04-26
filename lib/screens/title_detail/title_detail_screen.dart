@@ -36,8 +36,8 @@ const _titleDetailHelp =
     '• Add to watchlist — saves it so both members can see.\n'
     '• Rate — rate 1–5 stars once you\'ve watched. Trakt-linked? Ratings push automatically.\n'
     '• Prediction game (more-menu, "⋯") — optional. Predict stars before watching; a dot appears on the menu when a Reveal is ready.\n'
-    '• Stremio — opens the title in the Stremio app so you can play it (falls back to the web player if the app isn\'t installed).\n'
-    '• IMDb — opens the title in the IMDb app or website.\n'
+    '• Stremio — opens the title in the Stremio app so you can play it (falls back to the web player if the app isn\'t installed). On TV, each episode row also has its own Stremio link.\n'
+    '• IMDb — opens the title in the IMDb app or website. On TV, each episode row links straight to that episode\'s IMDb page.\n'
     '• AI blurb — a one-liner from the recommender explaining why this one landed on your list.\n'
     '• Household ratings — what each member gave it.';
 
@@ -1942,6 +1942,13 @@ class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
   bool _busy = false;
   bool _expanded = false;
 
+  static final ButtonStyle _episodeLinkStyle = TextButton.styleFrom(
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    minimumSize: const Size(0, 28),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    visualDensity: VisualDensity.compact,
+  );
+
   @override
   Widget build(BuildContext context) {
     final ep = widget.episode;
@@ -1979,6 +1986,13 @@ class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
     ];
     final colors = Theme.of(context).colorScheme;
     final hasOverview = overview != null && overview.isNotEmpty;
+
+    final epImdbAsync = ref
+        .watch(episodeExternalIdsProvider((widget.tmdbId, season, number)));
+    final epImdbId = epImdbAsync.whenOrNull(data: (d) {
+      final id = d['imdb_id'] as String?;
+      return (id != null && id.isNotEmpty) ? id : null;
+    });
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -2063,24 +2077,31 @@ class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
               ),
             ),
           ],
-          if (widget.showImdbId != null) ...[
+          if (widget.showImdbId != null || epImdbId != null) ...[
             const SizedBox(height: 4),
             Padding(
               padding: const EdgeInsets.only(left: 86),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => _openInStremio(season: season, number: number),
-                  icon: const Icon(Icons.play_circle_outline, size: 16),
-                  label: const Text('Stremio',
-                      style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 28),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.showImdbId != null)
+                    TextButton.icon(
+                      onPressed: () =>
+                          _openInStremio(season: season, number: number),
+                      icon: const Icon(Icons.play_circle_outline, size: 16),
+                      label: const Text('Stremio',
+                          style: TextStyle(fontSize: 12)),
+                      style: _episodeLinkStyle,
+                    ),
+                  if (epImdbId != null)
+                    TextButton.icon(
+                      onPressed: () => _openOnImdb(epImdbId),
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text('IMDb',
+                          style: TextStyle(fontSize: 12)),
+                      style: _episodeLinkStyle,
+                    ),
+                ],
               ),
             ),
           ],
@@ -2152,6 +2173,28 @@ class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
       season: season,
       episode: number,
     );
+  }
+
+  /// Opens the episode's IMDb page using the episode-level `tt…` resolved
+  /// via TMDB `/external_ids`. Strict deep-link to the episode, not the
+  /// show — Trakt's `episode.ids.imdb` is often null so TMDB is the
+  /// reliable source. Same app→web fallback shape as the show button.
+  Future<void> _openOnImdb(String epImdbId) async {
+    final appUri = Uri.parse('imdb:///title/$epImdbId/');
+    final webUri = Uri.parse('https://www.imdb.com/title/$epImdbId/');
+    try {
+      if (await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Open in IMDb failed: $e')),
+        );
+      }
+    }
   }
 
   /// Opens the episode directly in Stremio. URL shape uses Stremio's video id

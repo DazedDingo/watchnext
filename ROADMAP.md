@@ -221,6 +221,7 @@ Extra mileage from Stremio integration.
 - [x] **Upcoming for you** — Home carousel of soon-releasing titles ranked by your taste.
 - [x] **External ratings + reviews on title detail** — IMDb / Rotten Tomatoes / Metascore shown inline via OMDb (7-day Firestore cache), plus an expandable TMDB Reviews section.
 - [x] **IMDb-★ chip on list rows** — `Recommendation.imdbId` stamped onto rec docs by a background resolver after Phase A; Home rows render an inline IMDb rating chip next to the match score once it resolves.
+- [x] **Per-episode IMDb deep-link** — TV title detail's episode rows resolve each episode's own `tt…` via TMDB `/external_ids` and link straight to that episode's IMDb page (alongside the existing per-episode Stremio link).
 - [x] **Narrow-filter auto-widen** — stacked filter combos (e.g. "War + 1970-1989") trigger a deeper `discoverPaged` pass (2.5× pool target, 2× pages, lower vote floor) so narrow queries stop coming back near-empty. Broad queries stay on the default budget.
 - [ ] **Extra Stremio catalogs** — Recommendations and Next-Up, on top of Watchlist.
 - [ ] **Pretty Stremio URL** via Firebase Hosting rewrite.

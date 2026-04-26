@@ -127,6 +127,23 @@ void main() {
       expect(rec.calls.single.url.path, endsWith('/tv/1/season/2/episode/3'));
     });
 
+    test('tvEpisodeExternalIds hits /external_ids and returns imdb_id', () async {
+      // Per-episode IMDb deep-link enabler — Trakt's episode.imdb is often
+      // null, so TMDB's episode-level external_ids is the reliable source.
+      final rec = _Recorder();
+      final tmdb = TmdbService(client: rec.client(routes: {
+        '/tv/1399/season/1/episode/1/external_ids': {
+          'imdb_id': 'tt1480055',
+          'freebase_mid': null,
+          'tvdb_id': 3254641,
+        },
+      }));
+      final res = await tmdb.tvEpisodeExternalIds(1399, 1, 1);
+      expect(res['imdb_id'], 'tt1480055');
+      expect(rec.calls.single.url.path,
+          endsWith('/tv/1399/season/1/episode/1/external_ids'));
+    });
+
     test('similarMovies and similarTv route to TMDB similar endpoints',
         () async {
       final rec = _Recorder();

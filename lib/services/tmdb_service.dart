@@ -53,6 +53,15 @@ class TmdbService {
   Future<Map<String, dynamic>> tvEpisode(int tmdbId, int season, int episode) =>
       _get(_uri('/tv/$tmdbId/season/$season/episode/$episode'));
 
+  /// Per-episode IMDb id resolution. Trakt's `episode.ids.imdb` is often
+  /// null; TMDB's episode-level `/external_ids` is the reliable path. Used
+  /// by `_EpisodeRow` on title detail to deep-link directly to IMDb's
+  /// episode page (`https://www.imdb.com/title/{episodeImdbId}/`) rather
+  /// than the show's season page.
+  Future<Map<String, dynamic>> tvEpisodeExternalIds(
+          int tmdbId, int season, int episode) =>
+      _get(_uri('/tv/$tmdbId/season/$season/episode/$episode/external_ids'));
+
   Future<Map<String, dynamic>> similarMovies(int tmdbId, {int page = 1}) =>
       _get(_uri('/movie/$tmdbId/similar', {'page': '$page'}));
 

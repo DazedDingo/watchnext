@@ -14,3 +14,16 @@ final tvSeasonProvider = FutureProvider.autoDispose
   final (tmdbId, seasonNumber) = key;
   return ref.read(tmdbServiceProvider).tvSeason(tmdbId, seasonNumber);
 });
+
+/// TMDB `/tv/{id}/season/{s}/episode/{e}/external_ids` payload, keyed by
+/// (showTmdbId, season, episode). Lazy per-row fetch on the title-detail
+/// episodes section — without this, IMDb deep-links would have to fall
+/// back to the show's season page. autoDispose so navigating away from
+/// the detail screen releases the cache.
+final episodeExternalIdsProvider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>, (int, int, int)>((ref, key) {
+  final (tmdbId, season, episode) = key;
+  return ref
+      .read(tmdbServiceProvider)
+      .tvEpisodeExternalIds(tmdbId, season, episode);
+});
