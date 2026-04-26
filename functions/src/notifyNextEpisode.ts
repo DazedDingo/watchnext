@@ -107,8 +107,11 @@ async function fetchNextEpisode(
   apiKey: string,
 ): Promise<NextEpisodeInfo | null> {
   // Lean /tv/{id} call — same endpoint the client `upNextProvider` uses,
-  // returns `next_episode_to_air` in the base payload.
-  const url = `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}&language=en-US`;
+  // returns `next_episode_to_air` in the base payload. Trim defends
+  // against trailing newlines in Secret Manager values (same class of
+  // bug that bit OMDb in gotcha 35b — `\n` URL-encodes to `%0A` and the
+  // upstream rejects the request as "Invalid API key").
+  const url = `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey.trim()}&language=en-US`;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
