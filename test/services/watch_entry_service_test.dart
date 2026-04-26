@@ -142,4 +142,111 @@ void main() {
       expect(d.containsKey('in_progress_status'), isFalse);
     });
   });
+
+  group('markEpisodeWatched', () {
+    final tvDetails = {
+      'name': 'A Show',
+      'first_air_date': '2010-01-01',
+      'episode_run_time': [50],
+      'genres': [
+        {'id': 18, 'name': 'Drama'},
+      ],
+      'poster_path': '/show.jpg',
+      'overview': 'About a show.',
+    };
+    final episodeMeta = {
+      'id': 99001,
+      'name': 'Pilot',
+      'overview': 'Walter takes a class.',
+      'still_path': '/still.jpg',
+      'runtime': 58,
+      'air_date': '2010-01-20',
+    };
+    const showId = 'households/hh1/watchEntries/tv:42';
+    const epDocPath = 'households/hh1/watchEntries/tv:42/episodes/1_1';
+
+    test('creates parent watchEntry on first mark + writes episode metadata',
+        () async {
+      await svc.markEpisodeWatched(
+        householdId: hh, uid: uid, tmdbId: tmdbId,
+        season: 1, number: 1,
+        parentDetails: tvDetails,
+        episodeMeta: episodeMeta,
+      );
+      final entry = (await db.doc(showId).get()).data()!;
+      expect(entry['title'], 'A Show');
+      expect(entry['in_progress_status'], 'watching');
+      expect(entry['last_season'], 1);
+      expect(entry['last_episode'], 1);
+
+      final ep = (await db.doc(epDocPath).get()).data()!;
+      expect(ep['season'], 1);
+      expect(ep['number'], 1);
+      expect(ep['title'], 'Pilot');
+      expect(ep['overview'], 'Walter takes a class.');
+      expect(ep['still_path'], '/still.jpg');
+      expect(ep['tmdb_id'], 99001);
+      expect(ep['runtime'], 58);
+      expect(ep['aired_at'], isNotNull);
+      // watched_by_at must be a NESTED MAP, not a flat dotted key (gotcha 27).
+      final watched = (ep['watched_by_at'] as Map).cast<String, dynamic>();
+      expect(watched.containsKey(uid), isTrue);
+      expect(ep.containsKey('watched_by_at.$uid'), isFalse);
+    });
+
+    test("partner's existing timestamp survives a fresh mark", () async {
+      await svc.markEpisodeWatched(
+        householdId: hh, uid: uid, tmdbId: tmdbId,
+        season: 1, number: 1,
+        parentDetails: tvDetails, episodeMeta: episodeMeta,
+      );
+      await svc.markEpisodeWatched(
+        householdId: hh, uid: partner, tmdbId: tmdbId,
+        season: 1, number: 1,
+        parentDetails: tvDetails, episodeMeta: episodeMeta,
+      );
+      final ep = (await db.doc(epDocPath).get()).data()!;
+      final watched = (ep['watched_by_at'] as Map).cast<String, dynamic>();
+      expect(watched.keys.toSet(), {uid, partner});
+      expect(ep.containsKey('watched_by_at.$partner'), isFalse);
+    });
+  });
+
+  group('unmarkEpisodeWatched', () {
+    test("clears the user's timestamp without touching the partner's",
+        () async {
+      const tvDetails = <String, dynamic>{'name': 'X', 'genres': []};
+      await svc.markEpisodeWatched(
+        householdId: hh, uid: uid, tmdbId: tmdbId,
+        season: 1, number: 1,
+        parentDetails: tvDetails,
+      );
+      await svc.markEpisodeWatched(
+        householdId: hh, uid: partner, tmdbId: tmdbId,
+        season: 1, number: 1,
+        parentDetails: tvDetails,
+      );
+      await svc.unmarkEpisodeWatched(
+        householdId: hh, uid: uid, tmdbId: tmdbId,
+        season: 1, number: 1,
+      );
+      final ep = (await db
+              .doc('households/hh1/watchEntries/tv:42/episodes/1_1')
+              .get())
+          .data()!;
+      final watched = (ep['watched_by_at'] as Map).cast<String, dynamic>();
+      expect(watched.keys.toList(), [partner]);
+    });
+
+    test('no-op when episode doc does not exist', () async {
+      await svc.unmarkEpisodeWatched(
+        householdId: hh, uid: uid, tmdbId: tmdbId,
+        season: 1, number: 1,
+      );
+      final snap = await db
+          .doc('households/hh1/watchEntries/tv:42/episodes/1_1')
+          .get();
+      expect(snap.exists, isFalse);
+    });
+  });
 }

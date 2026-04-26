@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../models/episode.dart';
 import '../models/watch_entry.dart';
 
 /// Manual "mark as watched" writes to /households/{hh}/watchEntries/{id}.
@@ -167,5 +168,96 @@ class WatchEntryService {
     final snap = await ref.get();
     if (!snap.exists) return;
     await ref.update({'in_progress_status': FieldValue.delete()});
+  }
+
+  /// Marks a single TV episode watched for `uid`. Ensures the parent
+  /// watchEntry exists (creates it as `inProgressStatus='watching'` on first
+  /// write so the show shows up under Library → Watching), then deep-merges
+  /// the episode metadata + `watched_by_at[uid]=now` onto the episode
+  /// sub-doc. Bumps the parent's `last_watched_at` / `last_season` /
+  /// `last_episode` when the new mark is newer than what's stored.
+  ///
+  /// `set(merge: true)` with a NESTED MAP value (`watched_by_at: {uid: t}`)
+  /// deep-merges per-key — the partner's existing entry is preserved. This
+  /// is different from FLAT dot-notation keys (`'watched_by_at.<uid>'`),
+  /// which `set(merge:true)` would store as a literal field name. See
+  /// gotcha 27.
+  Future<void> markEpisodeWatched({
+    required String householdId,
+    required String uid,
+    required int tmdbId,
+    required int season,
+    required int number,
+    Map<String, dynamic> parentDetails = const {},
+    Map<String, dynamic> episodeMeta = const {},
+  }) async {
+    final entryId = WatchEntry.buildId('tv', tmdbId);
+    final entryRef = _ref(householdId, entryId);
+    final now = DateTime.now();
+
+    final existingEntry = await entryRef.get();
+    if (!existingEntry.exists) {
+      await markWatching(
+        householdId: householdId,
+        uid: uid,
+        mediaType: 'tv',
+        tmdbId: tmdbId,
+        details: parentDetails,
+      );
+    }
+
+    final existingLast =
+        (existingEntry.data()?['last_watched_at'] as Timestamp?)?.toDate();
+    if (existingLast == null || now.isAfter(existingLast)) {
+      await entryRef.update({
+        'last_watched_at': Timestamp.fromDate(now),
+        'last_season': season,
+        'last_episode': number,
+      });
+    }
+
+    final epRef = entryRef.collection('episodes').doc(Episode.buildId(season, number));
+    final epDoc = <String, dynamic>{
+      'season': season,
+      'number': number,
+      'watched_by_at': {uid: Timestamp.fromDate(now)},
+    };
+    final title = episodeMeta['name'] as String?;
+    if (title != null && title.isNotEmpty) epDoc['title'] = title;
+    final overview = episodeMeta['overview'] as String?;
+    if (overview != null && overview.isNotEmpty) epDoc['overview'] = overview;
+    final still = episodeMeta['still_path'] as String?;
+    if (still != null && still.isNotEmpty) epDoc['still_path'] = still;
+    final epTmdbId = (episodeMeta['id'] as num?)?.toInt();
+    if (epTmdbId != null) epDoc['tmdb_id'] = epTmdbId;
+    final runtime = (episodeMeta['runtime'] as num?)?.toInt();
+    if (runtime != null) epDoc['runtime'] = runtime;
+    final airDateStr = episodeMeta['air_date'] as String?;
+    final airedAt = (airDateStr == null || airDateStr.isEmpty)
+        ? null
+        : DateTime.tryParse(airDateStr);
+    if (airedAt != null) epDoc['aired_at'] = Timestamp.fromDate(airedAt);
+
+    await epRef.set(epDoc, SetOptions(merge: true));
+  }
+
+  /// Clears `watched_by_at[uid]` on the episode sub-doc. Leaves the rest of
+  /// the episode metadata + the partner's timestamp intact. No-op if the
+  /// episode doc doesn't exist (typical after Trakt-only households mark
+  /// episodes manually).
+  Future<void> unmarkEpisodeWatched({
+    required String householdId,
+    required String uid,
+    required int tmdbId,
+    required int season,
+    required int number,
+  }) async {
+    final entryId = WatchEntry.buildId('tv', tmdbId);
+    final epRef = _ref(householdId, entryId)
+        .collection('episodes')
+        .doc(Episode.buildId(season, number));
+    final snap = await epRef.get();
+    if (!snap.exists) return;
+    await epRef.update({'watched_by_at.$uid': FieldValue.delete()});
   }
 }

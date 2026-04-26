@@ -10,7 +10,6 @@ import 'package:watchnext/models/watch_entry.dart';
 import 'package:watchnext/models/watchlist_item.dart';
 import 'package:watchnext/providers/auth_provider.dart';
 import 'package:watchnext/providers/household_provider.dart';
-import 'package:watchnext/providers/library_filter_provider.dart';
 import 'package:watchnext/providers/mode_provider.dart';
 import 'package:watchnext/providers/ratings_provider.dart';
 import 'package:watchnext/providers/watch_entries_provider.dart';

@@ -74,21 +74,22 @@ final unratedQueueProvider = StreamProvider<List<WatchEntry>>((ref) async* {
   }
 });
 
-/// Episodes sub-collection for a single TV watch entry, newest first.
-/// Lazy-loaded per-entry so the Unrated tab doesn't open N listeners at once.
+/// Episodes sub-collection for a single TV watch entry, sorted by
+/// (season, number). StreamProvider so per-episode mark-watched/rate writes
+/// reflect live in the title detail screen without a manual refresh.
 /// Key: (householdId, entryId).
 final episodesProvider =
-    FutureProvider.autoDispose.family<List<Episode>, (String, String)>(
-        (ref, args) async {
+    StreamProvider.autoDispose.family<List<Episode>, (String, String)>(
+        (ref, args) {
   final (householdId, entryId) = args;
-  final snap = await FirebaseFirestore.instance
+  return FirebaseFirestore.instance
       .collection('households/$householdId/watchEntries/$entryId/episodes')
-      .get();
-  return snap.docs.map(Episode.fromDoc).toList()
-    ..sort((a, b) {
-      final sc = a.season.compareTo(b.season);
-      return sc != 0 ? sc : a.number.compareTo(b.number);
-    });
+      .snapshots()
+      .map((s) => s.docs.map(Episode.fromDoc).toList()
+        ..sort((a, b) {
+          final sc = a.season.compareTo(b.season);
+          return sc != 0 ? sc : a.number.compareTo(b.number);
+        }));
 });
 
 /// Unrated episodes for the current user across all TV entries.

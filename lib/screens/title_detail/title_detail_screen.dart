@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
+import '../../models/episode.dart';
 import '../../models/external_ratings.dart';
 import '../../models/rating.dart';
 import '../../models/review.dart';
@@ -627,6 +628,16 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                 mediaType: widget.mediaType,
                 tmdbId: widget.tmdbId,
               )),
+              if (widget.mediaType == 'tv')
+                _dimmable(_SeasonsSection(
+                  tmdbId: widget.tmdbId,
+                  entryId: _entryId,
+                  seasons: ((d['seasons'] as List?) ?? const [])
+                      .whereType<Map<String, dynamic>>()
+                      .toList(),
+                  initialSeason: watchEntry?.lastSeason,
+                  details: d,
+                )),
               // AI blurb from Phase 7 scoring — shown when available.
               if (rec != null) ...() {
                 final blurb = mode == ViewMode.solo
@@ -1677,6 +1688,499 @@ class _ReviewCardState extends State<_ReviewCard> {
         ],
       ),
     );
+  }
+}
+
+// ─── Seasons + Episodes section ───────────────────────────────────────────────
+
+/// Expandable per-season list of episodes (TV-only). Each season is an
+/// `ExpansionTile`; the season matching `last_season` from the watchEntry
+/// auto-expands so a returning viewer picks up where they left off. Season
+/// payloads are fetched on demand via `tvSeasonProvider` only when the tile
+/// is expanded — collapsed seasons cost nothing.
+class _SeasonsSection extends ConsumerWidget {
+  final int tmdbId;
+  final String entryId;
+  final List<Map<String, dynamic>> seasons;
+  final int? initialSeason;
+  final Map<String, dynamic> details;
+
+  const _SeasonsSection({
+    required this.tmdbId,
+    required this.entryId,
+    required this.seasons,
+    required this.details,
+    this.initialSeason,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (seasons.isEmpty) return const SizedBox.shrink();
+    final visible = seasons
+        .where((s) => ((s['episode_count'] as num?)?.toInt() ?? 0) > 0)
+        .toList()
+      ..sort((a, b) =>
+          ((a['season_number'] as num?)?.toInt() ?? 0)
+              .compareTo((b['season_number'] as num?)?.toInt() ?? 0));
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final autoExpand = initialSeason ??
+        visible.firstWhere(
+          (s) => ((s['season_number'] as num?)?.toInt() ?? 0) > 0,
+          orElse: () => visible.first,
+        )['season_number'] as int? ??
+        1;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 4, bottom: 4),
+            child: Text(
+              'Episodes',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+          ),
+          for (final s in visible)
+            _SeasonTile(
+              tmdbId: tmdbId,
+              entryId: entryId,
+              season: s,
+              parentDetails: details,
+              initiallyExpanded:
+                  ((s['season_number'] as num?)?.toInt() ?? 0) == autoExpand,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SeasonTile extends ConsumerStatefulWidget {
+  final int tmdbId;
+  final String entryId;
+  final Map<String, dynamic> season;
+  final Map<String, dynamic> parentDetails;
+  final bool initiallyExpanded;
+
+  const _SeasonTile({
+    required this.tmdbId,
+    required this.entryId,
+    required this.season,
+    required this.parentDetails,
+    required this.initiallyExpanded,
+  });
+
+  @override
+  ConsumerState<_SeasonTile> createState() => _SeasonTileState();
+}
+
+class _SeasonTileState extends ConsumerState<_SeasonTile> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.season;
+    final number = (s['season_number'] as num?)?.toInt() ?? 0;
+    final epCount = (s['episode_count'] as num?)?.toInt() ?? 0;
+    final airDate = s['air_date'] as String?;
+    final year = (airDate == null || airDate.isEmpty)
+        ? null
+        : int.tryParse(airDate.split('-').first);
+    final name = s['name'] as String? ?? 'Season $number';
+    final subtitle = [
+      '$epCount episode${epCount == 1 ? '' : 's'}',
+      if (year != null) '$year',
+    ].join(' · ');
+
+    return Theme(
+      // Strip the default ExpansionTile divider so adjacent seasons stack
+      // cleanly. The tile below already paints its own subtle divider.
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        key: PageStorageKey('season_$number'),
+        initiallyExpanded: widget.initiallyExpanded,
+        onExpansionChanged: (e) => setState(() => _expanded = e),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        title: Text(
+          name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(fontSize: 12, color: Colors.white54),
+        ),
+        children: _expanded ? [_SeasonBody(
+          tmdbId: widget.tmdbId,
+          entryId: widget.entryId,
+          seasonNumber: number,
+          parentDetails: widget.parentDetails,
+        )] : const [],
+      ),
+    );
+  }
+}
+
+class _SeasonBody extends ConsumerWidget {
+  final int tmdbId;
+  final String entryId;
+  final int seasonNumber;
+  final Map<String, dynamic> parentDetails;
+
+  const _SeasonBody({
+    required this.tmdbId,
+    required this.entryId,
+    required this.seasonNumber,
+    required this.parentDetails,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final seasonAsync = ref.watch(tvSeasonProvider((tmdbId, seasonNumber)));
+    final householdId = ref.watch(householdIdProvider).value;
+    final storedAsync = householdId == null
+        ? const AsyncValue<List<Episode>>.data([])
+        : ref.watch(episodesProvider((householdId, entryId)));
+    final ratings = ref.watch(ratingsProvider).value ?? const <Rating>[];
+    final uid = ref.watch(authStateProvider).value?.uid;
+
+    return seasonAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Text(
+          'Couldn\'t load season: $e',
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ),
+      data: (payload) {
+        final episodes = ((payload['episodes'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+        if (episodes.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+            child: Text(
+              'No episodes for this season yet.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          );
+        }
+        final stored = storedAsync.value ?? const <Episode>[];
+        final byKey = <String, Episode>{for (final e in stored) e.id: e};
+        return Column(
+          children: [
+            for (final ep in episodes)
+              _EpisodeRow(
+                episode: ep,
+                stored: byKey[Episode.buildId(
+                  (ep['season_number'] as num?)?.toInt() ?? seasonNumber,
+                  (ep['episode_number'] as num?)?.toInt() ?? 0,
+                )],
+                ratings: ratings,
+                entryId: entryId,
+                tmdbId: tmdbId,
+                uid: uid,
+                householdId: householdId,
+                parentDetails: parentDetails,
+                showImdbId: _imdbIdForShow(parentDetails),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Movies carry `imdb_id` at the top level; TV carries it under
+  /// `external_ids.imdb_id`. Same logic as `_TitleDetailScreenState._imdbIdFor`
+  /// — duplicated here so this widget tree doesn't depend on the parent
+  /// state class. Returns null if neither path resolves; the row falls back
+  /// to hiding the Stremio button rather than launching a broken URL.
+  String? _imdbIdForShow(Map<String, dynamic> d) {
+    final top = d['imdb_id'] as String?;
+    if (top != null && top.isNotEmpty) return top;
+    final ext = d['external_ids'] as Map<String, dynamic>?;
+    final tv = ext?['imdb_id'] as String?;
+    return (tv != null && tv.isNotEmpty) ? tv : null;
+  }
+}
+
+class _EpisodeRow extends ConsumerStatefulWidget {
+  final Map<String, dynamic> episode;
+  final Episode? stored;
+  final List<Rating> ratings;
+  final String entryId;
+  final int tmdbId;
+  final String? uid;
+  final String? householdId;
+  final Map<String, dynamic> parentDetails;
+  final String? showImdbId;
+
+  const _EpisodeRow({
+    required this.episode,
+    required this.stored,
+    required this.ratings,
+    required this.entryId,
+    required this.tmdbId,
+    required this.uid,
+    required this.householdId,
+    required this.parentDetails,
+    required this.showImdbId,
+  });
+
+  @override
+  ConsumerState<_EpisodeRow> createState() => _EpisodeRowState();
+}
+
+class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
+  bool _busy = false;
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ep = widget.episode;
+    final season = (ep['season_number'] as num?)?.toInt() ?? 0;
+    final number = (ep['episode_number'] as num?)?.toInt() ?? 0;
+    final name = (ep['name'] as String?) ?? '';
+    final overview = ep['overview'] as String?;
+    final stillPath = ep['still_path'] as String?;
+    final still = TmdbService.imageUrl(stillPath, size: 'w185');
+    final airDate = ep['air_date'] as String?;
+    final runtime = (ep['runtime'] as num?)?.toInt();
+    final voteAvg = (ep['vote_average'] as num?)?.toDouble();
+
+    final watchedByMe = widget.uid != null &&
+        (widget.stored?.watchedByAt.containsKey(widget.uid) ?? false);
+    final ratingTargetId =
+        '${widget.entryId}:${Episode.buildId(season, number)}';
+    Rating? myRating;
+    for (final r in widget.ratings) {
+      if (r.uid == widget.uid &&
+          r.level == 'episode' &&
+          r.targetId == ratingTargetId) {
+        myRating = r;
+        break;
+      }
+    }
+    final rated = myRating != null;
+
+    final label =
+        'S${season.toString().padLeft(2, '0')}E${number.toString().padLeft(2, '0')}';
+    final subtitleParts = <String>[
+      if (airDate != null && airDate.isNotEmpty) airDate,
+      if (runtime != null) '${runtime}m',
+      if (voteAvg != null && voteAvg > 0) '★ ${voteAvg.toStringAsFixed(1)}',
+    ];
+    final colors = Theme.of(context).colorScheme;
+    final hasOverview = overview != null && overview.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: still != null
+                    ? Image.network(
+                        still,
+                        width: 80,
+                        height: 45,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => _stillPlaceholder(),
+                      )
+                    : _stillPlaceholder(),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$label · ${name.isEmpty ? "Episode $number" : name}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (subtitleParts.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitleParts.join(' · '),
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.white54),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              IconButton(
+                iconSize: 22,
+                visualDensity: VisualDensity.compact,
+                tooltip: watchedByMe ? 'Mark unwatched' : 'Mark watched',
+                icon: Icon(
+                  watchedByMe ? Icons.check_circle : Icons.check_circle_outline,
+                  color: watchedByMe ? colors.primary : Colors.white54,
+                ),
+                onPressed: _busy ? null : _toggleWatched,
+              ),
+              IconButton(
+                iconSize: 22,
+                visualDensity: VisualDensity.compact,
+                tooltip: rated ? 'Edit rating' : 'Rate',
+                icon: Icon(
+                  rated ? Icons.star : Icons.star_outline,
+                  color: rated ? Colors.amber : Colors.white54,
+                ),
+                onPressed: _openRating,
+              ),
+            ],
+          ),
+          if (hasOverview) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 90, right: 4),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Text(
+                  overview,
+                  maxLines: _expanded ? null : 2,
+                  overflow:
+                      _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 12, color: Colors.white70, height: 1.35),
+                ),
+              ),
+            ),
+          ],
+          if (widget.showImdbId != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 86),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _openInStremio(season: season, number: number),
+                  icon: const Icon(Icons.play_circle_outline, size: 16),
+                  label: const Text('Stremio',
+                      style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _stillPlaceholder() => Container(
+        width: 80,
+        height: 45,
+        color: const Color(0xFF1A1A1A),
+        child: const Icon(Icons.tv_outlined, color: Colors.white24, size: 18),
+      );
+
+  Future<void> _toggleWatched() async {
+    final uid = widget.uid;
+    final hh = widget.householdId;
+    if (uid == null || hh == null) return;
+    setState(() => _busy = true);
+    try {
+      final svc = ref.read(watchEntryServiceProvider);
+      final ep = widget.episode;
+      final season = (ep['season_number'] as num?)?.toInt() ?? 0;
+      final number = (ep['episode_number'] as num?)?.toInt() ?? 0;
+      final wasWatched = widget.stored?.watchedByAt.containsKey(uid) ?? false;
+      if (wasWatched) {
+        await svc.unmarkEpisodeWatched(
+          householdId: hh,
+          uid: uid,
+          tmdbId: widget.tmdbId,
+          season: season,
+          number: number,
+        );
+      } else {
+        await svc.markEpisodeWatched(
+          householdId: hh,
+          uid: uid,
+          tmdbId: widget.tmdbId,
+          season: season,
+          number: number,
+          parentDetails: widget.parentDetails,
+          episodeMeta: ep,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Mark failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openRating() async {
+    final ep = widget.episode;
+    final season = (ep['season_number'] as num?)?.toInt() ?? 0;
+    final number = (ep['episode_number'] as num?)?.toInt() ?? 0;
+    final name = (ep['name'] as String?) ?? '';
+    final label =
+        'S${season.toString().padLeft(2, '0')}E${number.toString().padLeft(2, '0')}';
+    await RatingSheet.show(
+      context,
+      level: 'episode',
+      targetId: '${widget.entryId}:${Episode.buildId(season, number)}',
+      title: '$label${name.isEmpty ? '' : ' — $name'}',
+      posterPath: ep['still_path'] as String?,
+      season: season,
+      episode: number,
+    );
+  }
+
+  /// Opens the episode directly in Stremio. URL shape uses Stremio's video id
+  /// format `{imdbId}:{season}:{episode}` so the app lands on the playable
+  /// episode, not the show landing page. Falls back to the web player when
+  /// the stremio:// scheme isn't installed.
+  Future<void> _openInStremio({
+    required int season,
+    required int number,
+  }) async {
+    final imdb = widget.showImdbId;
+    if (imdb == null) return;
+    final video = '$imdb:$season:$number';
+    final appUri = Uri.parse('stremio:///detail/series/$imdb/$video');
+    final webUri =
+        Uri.parse('https://web.stremio.com/#/detail/series/$imdb/$video');
+    try {
+      if (await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Open in Stremio failed: $e')),
+        );
+      }
+    }
   }
 }
 
