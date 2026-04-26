@@ -73,16 +73,20 @@ class RecommendationsService {
   CollectionReference<Map<String, dynamic>> _col(String hh) =>
       _db.collection('households/$hh/recommendations');
 
-  /// Stream window is deliberately wide (300) because Phase A writes
+  /// Stream window is deliberately wide (600) because Phase A writes
   /// newly-discovered rows at `match_score=50` — if legacy Claude-scored
   /// recs fill the first 120 slots, a narrow filter (e.g. "Comedy + 1975-
-  /// 2000 + 90-120min") would see nothing until Claude finishes scoring the
-  /// new batch and bumps some above 50. Wider window keeps the new rows
-  /// visible to the client-side filter from the moment Phase A lands.
+  /// 2000 + 90-120min" or "Sci-Fi + Western on TV") would see nothing until
+  /// Claude finishes scoring the new batch and bumps some above 50. The
+  /// rec collection grows over months of refreshes, so 300 wasn't enough
+  /// once accumulated Claude-scored docs (60–90) crowded the top — bumped
+  /// to 600 so freshly-written narrow-filter rows reliably land in-window.
+  /// Wider window keeps the new rows visible to the client-side filter
+  /// from the moment Phase A lands.
   Stream<List<Recommendation>> stream(String householdId) {
     return _col(householdId)
         .orderBy('match_score', descending: true)
-        .limit(300)
+        .limit(600)
         .snapshots()
         .map((s) => s.docs.map(Recommendation.fromDoc).toList());
   }

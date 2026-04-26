@@ -14,6 +14,7 @@ import 'package:watchnext/services/recommendations_service.dart';
 import 'package:watchnext/services/tmdb_service.dart';
 import 'package:watchnext/utils/keyword_genre_augment.dart';
 import 'package:watchnext/utils/oscar_winners.dart';
+import 'package:watchnext/utils/tmdb_genres.dart';
 
 WatchlistItem _w({
   required String mediaType,
@@ -793,6 +794,71 @@ void main() {
               (c['year'] as int) >= 1970 &&
               (c['year'] as int) <= 1989),
           isTrue);
+    });
+
+    test(
+        'Sci-Fi + Western TV: Westworld discover row survives the AND-genre '
+        'intersection (regression for "sci-fi western tv brings back nothing")',
+        () {
+      // End-to-end of the user-reported bug. The discover TV payload mirrors
+      // the live TMDB response for `with_genres=10765,37` (Sci-Fi & Fantasy
+      // AND Western). Westworld's `genre_ids` come straight from the TMDB
+      // detail payload. The home-screen filter then runs the same
+      // genreMatches AND-intersection that prod uses — Westworld must
+      // survive both whether the user picked the TV-vocabulary label
+      // ("Sci-Fi & Fantasy") or the movie-vocabulary one ("Science
+      // Fiction"), because allGenresProvider unions both sets into one
+      // picker.
+      final discoverTv = {
+        'results': [
+          {
+            'id': 63247,
+            'name': 'Westworld',
+            'genre_ids': [10765, 37],
+            'first_air_date': '2016-10-02',
+            'vote_count': 6103,
+          },
+          {
+            'id': 6034,
+            'name': 'The Wild Wild West',
+            'genre_ids': [10759, 10765, 37],
+            'first_air_date': '1965-09-17',
+            'vote_count': 78,
+          },
+        ],
+      };
+      final out = buildCandidates(
+        watchlist: const [],
+        discoverTvPayload: discoverTv,
+      );
+      final westworld = out.firstWhere((c) => c['tmdb_id'] == 63247);
+      expect(westworld['media_type'], 'tv');
+      expect(westworld['genres'], contains('Sci-Fi & Fantasy'));
+      expect(westworld['genres'], contains('Western'));
+
+      // Path A — user picked the TV-vocab labels.
+      const tvLabels = {'Sci-Fi & Fantasy', 'Western'};
+      final tvSurvivors = out.where((c) {
+        final genres = (c['genres'] as List).cast<String>();
+        return tvLabels.every((g) =>
+            genres.contains(g) ||
+            (kGenreSynonyms[g] ?? const <String>{})
+                .any(genres.contains));
+      }).toList();
+      expect(tvSurvivors.map((c) => c['tmdb_id']), contains(63247));
+
+      // Path B — user picked the movie-vocab labels. Synonym fallback
+      // should still let TV rows through ("Science Fiction" ≡
+      // "Sci-Fi & Fantasy").
+      const movieLabels = {'Science Fiction', 'Western'};
+      final movieSurvivors = out.where((c) {
+        final genres = (c['genres'] as List).cast<String>();
+        return movieLabels.every((g) =>
+            genres.contains(g) ||
+            (kGenreSynonyms[g] ?? const <String>{})
+                .any(genres.contains));
+      }).toList();
+      expect(movieSurvivors.map((c) => c['tmdb_id']), contains(63247));
     });
   });
 
