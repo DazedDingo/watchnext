@@ -36,6 +36,7 @@ export {
 } from "./stremio";
 export { fetchExternalRatings } from "./externalRatings";
 export { updateTonightsPickDaily } from "./tonightsPick";
+export { notifyNextEpisodeDaily } from "./notifyNextEpisode";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

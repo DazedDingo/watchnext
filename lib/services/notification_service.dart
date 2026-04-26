@@ -45,15 +45,18 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen((msg) {
       if (!context.mounted) return;
       final data = msg.data;
-      if (data['type'] == 'reveal_ready') {
-        _showRevealSnack(context, data);
+      switch (data['type']) {
+        case 'reveal_ready':
+          _showRevealSnack(context, data);
+        case 'next_episode_today':
+          _showNextEpisodeSnack(context, data);
       }
     });
 
     // 4b. Background/terminated tap: app opened via notification.
     FirebaseMessaging.onMessageOpenedApp.listen((msg) {
       if (!context.mounted) return;
-      _routeReveal(context, msg.data);
+      _routeFromData(context, msg.data);
     });
 
     // 4c. App launched from terminated state by notification tap.
@@ -61,8 +64,21 @@ class NotificationService {
     if (initial != null && context.mounted) {
       // Defer until after the first frame so the router is ready.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) _routeReveal(context, initial.data);
+        if (context.mounted) _routeFromData(context, initial.data);
       });
+    }
+  }
+
+  static void _routeFromData(
+      BuildContext context, Map<String, dynamic> data) {
+    switch (data['type']) {
+      case 'next_episode_today':
+        final tmdbId = data['tmdb_id'] as String?;
+        if (tmdbId != null) {
+          context.push('/title/tv/$tmdbId');
+        }
+      default:
+        _routeReveal(context, data);
     }
   }
 
@@ -99,6 +115,25 @@ class NotificationService {
                 label: 'View',
                 onPressed: () =>
                     context.push('/reveal/$mediaType/$tmdbId'),
+              )
+            : null,
+        duration: const Duration(seconds: 6),
+      ),
+    );
+  }
+
+  static void _showNextEpisodeSnack(
+      BuildContext context, Map<String, dynamic> data) {
+    final title = data['title'] as String? ?? 'a show';
+    final tmdbId = data['tmdb_id'] as String?;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('New episode of $title is out today'),
+        action: tmdbId != null
+            ? SnackBarAction(
+                label: 'View',
+                onPressed: () => context.push('/title/tv/$tmdbId'),
               )
             : null,
         duration: const Duration(seconds: 6),

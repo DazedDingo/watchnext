@@ -51,7 +51,7 @@ Per-user watch tracking and rating sync.
 - **Push ratings to Trakt** — rate a title here, it appears on your Trakt profile.
 - **Unrated Queue** — catch-up for titles you've watched but never scored.
 
-*Deferred:* per-episode Unrated Queue (currently show-level only).
+*Deferred:* (none — per-episode Unrated Queue + bulk Rate-all shipped via `unratedEpisodesProvider` and the `_UnratedTab` Episodes section).
 
 ---
 
@@ -67,7 +67,6 @@ The screens you actually use.
 
 *Deferred:*
 - Search + filters on Watched tab
-- Per-episode Unrated Queue with batch rate-all
 - "Resume" nudge after 2 weeks of inactivity (waits on Phase 10 notifications)
 - Prediction-accuracy badge on Watched rows (waits on Phase 9 badge infra)
 
@@ -225,6 +224,7 @@ Extra mileage from Stremio integration.
 - [x] **Toggleable Ask AI placement** — Profile → Preferences lets you render the concierge entry as a discreet app-bar icon (default), the original floating button, or hide it completely.
 - [x] **Media-type-aware Upcoming for you** — the Home carousel follows the Movies/TV filter. On Movies it pulls a 90-day window from `/discover/movie`; on TV it pulls the same window via `/discover/tv` so the row mixes new series premieres and returning shows with new seasons. Taste-profile genre-overlap re-rank decides what surfaces.
 - [x] **Up Next conditional row** — Home shows a compact "next episode airing soon" section above Tonight's Pick when an in-progress TV show has an episode in the next ~7 days. Hidden whenever there's nothing scheduled, so the carousel stack stays light most days. Profile → Insights surfaces a once-glance health line ("tracking N shows; next: …") for parity.
+- [x] **Daily "next episode today" push** — Cloud Function cron at 09:00 UTC scans in-progress TV per household, fetches TMDB `next_episode_to_air`, and pushes a single FCM notification per member when an episode airs today. Idempotent (stamps `last_episode_notified_for` on the watch entry); deep-links to the show on tap. Reuses the existing FCM token plumbing — no new opt-in flow.
 - [x] **Narrow-filter auto-widen** — stacked filter combos (e.g. "War + 1970-1989") trigger a deeper `discoverPaged` pass (2.5× pool target, 2× pages, lower vote floor) so narrow queries stop coming back near-empty. Broad queries stay on the default budget.
 - [ ] **Extra Stremio catalogs** — Recommendations and Next-Up, on top of Watchlist.
 - [ ] **Pretty Stremio URL** via Firebase Hosting rewrite.
