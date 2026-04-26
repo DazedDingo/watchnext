@@ -1902,13 +1902,14 @@ void main() {
         includeAwardsList: AwardCategory.palmeDor,
       );
       expect(out, isNotEmpty);
-      expect(out.length, lessThan(10),
-          reason:
-              'Palme list is the small Best-Picture intersection, not the full canon');
+      // Full Palme d'Or list (1955–present, ties included) is in the
+      // ~70-90 range — bigger than Best Picture's intersection but smaller
+      // than the entire awards union.
+      expect(out.length, greaterThan(50));
       final titles = out.map((c) => c['title']).toSet();
       expect(titles, contains('Parasite'));
       expect(titles, contains('Marty'));
-      expect(titles, contains('The Lost Weekend'));
+      expect(titles, contains('M*A*S*H'));
       // Godfather isn't a Palme winner — must not leak across categories.
       expect(titles, isNot(contains('The Godfather')));
     });
@@ -1926,34 +1927,105 @@ void main() {
       expect(titles, isNot(contains('Parasite')));
     });
 
-    test('awards rows carry the genre/runtime/year metadata needed for '
-        'client-side filter composition', () {
+    test('every award category ships rows with full genre/runtime/year '
+        'metadata so the Home filter stack composes', () {
       // Regression guard for the Home filter stack: if an award row ships
       // without genres/runtime/year it'll silently drop out under a
       // narrowing filter (genre / runtime bucket / year range), and the
       // user will see an empty list instead of the winners they asked
-      // for. Check every Palme row is fully populated.
-      final out = buildCandidates(
-        watchlist: const [],
-        includeAwardsList: AwardCategory.palmeDor,
-      );
-      for (final c in out) {
-        expect(c['genres'], isA<List>());
-        expect((c['genres'] as List), isNotEmpty,
-            reason: '${c['title']} has no genres — breaks genre filter');
-        expect(c['runtime'], isA<int>(),
-            reason: '${c['title']} has no runtime — breaks runtime filter');
-        expect(c['year'], isA<int>(),
-            reason: '${c['title']} has no year — breaks year filter');
+      // for. The same contract has to hold for every category, not just
+      // Palme — generator regressions on a single award (e.g. a TMDB
+      // search miss) are the most likely cause of the "Awards filter
+      // returns nothing" bug.
+      for (final cat in AwardCategory.values) {
+        if (cat == AwardCategory.none) continue;
+        final out = buildCandidates(
+          watchlist: const [],
+          includeAwardsList: cat,
+        );
+        expect(out, isNotEmpty, reason: '${cat.name} pool is empty');
+        for (final c in out) {
+          expect(c['genres'], isA<List>());
+          expect((c['genres'] as List), isNotEmpty,
+              reason:
+                  '${cat.name} → ${c['title']} has no genres — breaks genre filter');
+          expect(c['runtime'], isA<int>(),
+              reason:
+                  '${cat.name} → ${c['title']} has no runtime — breaks runtime filter');
+          expect((c['runtime'] as int), greaterThan(0),
+              reason: '${cat.name} → ${c['title']} has runtime=0');
+          expect(c['year'], isA<int>(),
+              reason:
+                  '${cat.name} → ${c['title']} has no year — breaks year filter');
+        }
       }
     });
 
-    test('null includeAwardsList omits the list entirely', () {
+    test('award rows compose with the Drama genre filter '
+        '(award + genre AND-intersection works)', () {
+      // Direct regression for the user-reported "Awards wasnt bringing
+      // anything back" bug. The award splice puts ~250 winners in the
+      // candidate pool with `is_oscar_winner=true`; the Home filter then
+      // intersects on genre. Most Best Picture winners are Drama, so a
+      // Drama filter under Best Picture must keep most of the pool.
       final out = buildCandidates(
         watchlist: const [],
-        includeAwardsList: null,
+        includeAwardsList: AwardCategory.bestPicture,
+      );
+      final dramaWinners = out
+          .where((c) => (c['genres'] as List).contains('Drama'))
+          .toList();
+      expect(dramaWinners.length, greaterThan(50),
+          reason:
+              'Best Picture ∩ Drama should be a thick pool — most BP winners are Drama');
+      // Spot-check a few iconic Best Picture × Drama crossovers survive.
+      final titles = dramaWinners.map((c) => c['title']).toSet();
+      expect(titles, contains('The Godfather'));
+      expect(titles, contains('Schindler\'s List'));
+    });
+
+    test('AwardCategory.none omits the list entirely', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: AwardCategory.none,
       );
       expect(out.where((c) => c['source'] == 'oscar'), isEmpty);
+    });
+
+    test('AwardCategory.any splices the deduped union', () {
+      final out = buildCandidates(
+        watchlist: const [],
+        includeAwardsList: AwardCategory.any,
+      );
+      final spliced = out.where((c) => c['source'] == 'oscar').toList();
+      // Splice walks the union list once and dedups by `movie:$tmdbId`,
+      // so the row count is the count of unique tmdb_ids — which is the
+      // master list itself when generation is healthy.
+      final uniqueUnionIds = kAnyAwardWinners.map((w) => w.tmdbId).toSet();
+      expect(spliced.length, uniqueUnionIds.length,
+          reason: 'any-award splice must equal the union\'s unique-id count');
+      // Splice output itself must also be dedup-clean.
+      final ids = spliced.map((c) => c['tmdb_id']).toSet();
+      expect(ids.length, spliced.length);
+      // Any-award includes winners that are NOT Best Picture (Palme-only,
+      // BAFTA-only, Golden Globe-only) — proves the union is wider than
+      // any single category.
+      expect(spliced.length, greaterThan(kBestPictureWinners.length));
+    });
+
+    test('every AwardCategory has a non-empty pool', () {
+      for (final cat in AwardCategory.values) {
+        if (cat == AwardCategory.none) continue;
+        final list = kAwardWinners[cat] ?? const [];
+        expect(list, isNotEmpty,
+            reason: 'category ${cat.name} must have winners baked in');
+        for (final w in list) {
+          expect(w.tmdbId, greaterThan(0),
+              reason: '${cat.name} → ${w.title} (${w.year}) has no tmdb_id');
+          expect(w.imdbId, isNotEmpty,
+              reason: '${cat.name} → ${w.title} (${w.year}) has no imdb_id');
+        }
+      }
     });
   });
 

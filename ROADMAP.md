@@ -124,7 +124,7 @@ The brain.
 - **Taste profile generation** — per-user + combined top genres, decades, and liked/disliked titles. Two slots (solo vs together) so a partner's solo-horror weekends don't contaminate the shared profile.
 - **Background rescoring** — whenever anyone rates a title, a scheduled CF (every 10 min) regenerates the taste profile and rescores the 50 most recent recs.
 - **Home screen** — Tonight's Pick hero, Upcoming-for-you carousel, scored rec list (120 items, streamed in real time).
-- **Filters panel** — compact, collapsible. Free-form genre multi-select, media type (Movies / TV), runtime bucket (<90 / 90–120 / >2h), year range slider, Oscar-winners-only toggle, "Sort" picker (Top rated / Popularity / Recent / Underseen), and curated source (Criterion). All filters persist per mode.
+- **Filters panel** — compact, collapsible. Free-form genre multi-select, media type (Movies / TV), runtime bucket (<90 / 90–120 / >2h), year range slider, Awards picker (None / Any award / Best Picture / Palme d'Or / BAFTA Best Film / Golden Globe — Drama / Golden Globe — Musical–Comedy), "Sort" picker (Top rated / Popularity / Recent / Underseen), and curated source (A24 / Neon / Ghibli / Searchlight). All filters persist per mode.
 - **Narrow-filter discover** — a fallback ladder keeps the candidate pool healthy even for tight queries like "War, 1970–1989".
 - **Reddit scraper** — weekly (Sunday 03:00 UTC) pull from 7 film-centric subreddits, TMDB cross-referenced, written to `/redditMentions`.
 - **Race-safe refresh** — an epoch counter drops stale fan-outs so a slow older refresh can't overwrite a newer pool.

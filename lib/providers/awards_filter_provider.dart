@@ -4,17 +4,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/oscar_winners.dart';
 import 'mode_provider.dart';
 
-/// Currently-selected awards filter — `null` means "any" (no award gate).
-/// Persisted per mode (`wn_awards_solo/_together`) so a user can keep
-/// Best Picture on for Together night and leave Solo open.
+/// Currently-selected awards filter — defaults to [AwardCategory.none]
+/// (no gate). Persisted per mode (`wn_awards_solo/_together`).
 ///
-/// When active, `recommendations_service.refresh()` splices the
-/// corresponding list from `kAwardWinners` into the candidate pool and
-/// stamps `is_oscar_winner=true` on those rows (the service layer keeps
-/// the Oscar tag name for storage back-compat — see writeCandidateDocs).
+/// `none` short-circuits the splice in `recommendations_service`; `any`
+/// splices the deduped union of every supported award (`kAnyAwardWinners`);
+/// every other value splices the matching category's list. Storage stays
+/// on the legacy `is_oscar_winner` field for back-compat — see gotcha 25.
+///
+/// **Why non-nullable**: the dropdown previously used `null` for "Any",
+/// but Flutter's `PopupMenuButton<T>` treats `value: null` items as menu
+/// dismissal — `onSelected` never fires, so users couldn't switch back.
+/// Modeling "no filter" as a real enum value sidesteps that.
 class ModeAwardsController
-    extends StateNotifier<Map<ViewMode, AwardCategory?>> {
-  ModeAwardsController(this._prefs, Map<ViewMode, AwardCategory?> initial)
+    extends StateNotifier<Map<ViewMode, AwardCategory>> {
+  ModeAwardsController(this._prefs, Map<ViewMode, AwardCategory> initial)
       : super(initial);
   final SharedPreferences _prefs;
 
@@ -28,16 +32,16 @@ class ModeAwardsController
       ? 'wn_oscar_winners_solo'
       : 'wn_oscar_winners_together';
 
-  static AwardCategory? _decode(String? name) {
-    if (name == null) return null;
+  static AwardCategory _decode(String? name) {
+    if (name == null) return AwardCategory.none;
     for (final v in AwardCategory.values) {
       if (v.name == name) return v;
     }
-    return null;
+    return AwardCategory.none;
   }
 
-  static Map<ViewMode, AwardCategory?> readAll(SharedPreferences prefs) {
-    final result = <ViewMode, AwardCategory?>{};
+  static Map<ViewMode, AwardCategory> readAll(SharedPreferences prefs) {
+    final result = <ViewMode, AwardCategory>{};
     for (final mode in ViewMode.values) {
       final stored = prefs.getString(_keyFor(mode));
       if (stored != null) {
@@ -46,15 +50,16 @@ class ModeAwardsController
       }
       // Legacy migration: preserve the previous Oscar-only toggle state.
       final legacy = prefs.getBool(_legacyKeyFor(mode));
-      result[mode] = legacy == true ? AwardCategory.bestPicture : null;
+      result[mode] =
+          legacy == true ? AwardCategory.bestPicture : AwardCategory.none;
     }
     return result;
   }
 
-  Future<void> set(ViewMode mode, AwardCategory? value) async {
+  Future<void> set(ViewMode mode, AwardCategory value) async {
     state = {...state, mode: value};
     final key = _keyFor(mode);
-    if (value == null) {
+    if (value == AwardCategory.none) {
       await _prefs.remove(key);
     } else {
       await _prefs.setString(key, value.name);
@@ -68,26 +73,29 @@ final _awardsPrefsProvider =
     FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
 
 final modeAwardsProvider = StateNotifierProvider<ModeAwardsController,
-    Map<ViewMode, AwardCategory?>>((ref) {
+    Map<ViewMode, AwardCategory>>((ref) {
   final prefs = ref.watch(_awardsPrefsProvider).value;
   if (prefs == null) {
     return ModeAwardsController(
       _UnsetPrefs(),
-      const {ViewMode.solo: null, ViewMode.together: null},
+      const {
+        ViewMode.solo: AwardCategory.none,
+        ViewMode.together: AwardCategory.none,
+      },
     );
   }
   return ModeAwardsController(prefs, ModeAwardsController.readAll(prefs));
 });
 
-/// Award filter resolved to the active view mode. `null` = no gate.
-final awardsFilterProvider = Provider<AwardCategory?>((ref) {
+/// Award filter resolved to the active view mode. [AwardCategory.none] is
+/// the no-gate default.
+final awardsFilterProvider = Provider<AwardCategory>((ref) {
   final mode = ref.watch(viewModeProvider);
   final map = ref.watch(modeAwardsProvider);
-  return map[mode];
+  return map[mode] ?? AwardCategory.none;
 });
 
-/// Sentinel used while SharedPreferences loads on first build — mirrors
-/// the pattern in `oscar_filter_provider.dart`.
+/// Sentinel used while SharedPreferences loads on first build.
 class _UnsetPrefs implements SharedPreferences {
   @override
   Future<bool> setString(String key, String value) async => true;

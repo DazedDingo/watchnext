@@ -29,7 +29,7 @@ void main() {
       final state = ModeAwardsController.readAll(prefs);
       expect(state[ViewMode.solo], AwardCategory.bestPicture,
           reason: 'legacy oscar=true must upgrade to Best Picture');
-      expect(state[ViewMode.together], isNull);
+      expect(state[ViewMode.together], AwardCategory.none);
     });
 
     test('set persists value and clears legacy key', () async {
@@ -48,7 +48,7 @@ void main() {
           reason: 'legacy key must be cleared to avoid double-read');
     });
 
-    test('set(null) clears the key', () async {
+    test('set(none) clears the key', () async {
       SharedPreferences.setMockInitialValues({'wn_awards_solo': 'bestPicture'});
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
@@ -56,18 +56,32 @@ void main() {
         prefs,
         ModeAwardsController.readAll(prefs),
       );
-      await ctrl.set(ViewMode.solo, null);
+      await ctrl.set(ViewMode.solo, AwardCategory.none);
       expect(prefs.getString('wn_awards_solo'), isNull);
     });
 
-    test('unknown stored value decodes as null', () async {
+    test('unknown stored value decodes as none', () async {
       SharedPreferences.setMockInitialValues({
         'wn_awards_solo': 'notARealCategory',
       });
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
       final state = ModeAwardsController.readAll(prefs);
-      expect(state[ViewMode.solo], isNull);
+      expect(state[ViewMode.solo], AwardCategory.none);
+    });
+
+    test('any category persists + decodes', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final ctrl = ModeAwardsController(
+        prefs,
+        ModeAwardsController.readAll(prefs),
+      );
+      await ctrl.set(ViewMode.solo, AwardCategory.any);
+      expect(prefs.getString('wn_awards_solo'), 'any');
+      final reloaded = ModeAwardsController.readAll(prefs);
+      expect(reloaded[ViewMode.solo], AwardCategory.any);
     });
   });
 
@@ -81,7 +95,7 @@ void main() {
       final container = ProviderContainer();
       addTearDown(container.dispose);
       // Let the SharedPreferences future resolve inside the provider.
-      await container.read(modeAwardsProvider.notifier);
+      container.read(modeAwardsProvider.notifier);
       await Future<void>.delayed(Duration.zero);
 
       container.read(viewModeProvider.notifier).set(ViewMode.solo);

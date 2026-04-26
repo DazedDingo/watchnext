@@ -258,14 +258,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Awards filter — strict: only recs with the is_oscar_winner sticky tag
     // survive (the storage field is reused for every award type; see
     // gotcha 25). The specific list spliced into the pool is keyed off
-    // `awards`, so toggling between Best Picture / Palme d'Or / BAFTA
-    // narrows the visible set to just the matching baked list.
-    final awardIds = awards == null
+    // `awards`, so toggling between Best Picture / Palme d'Or / BAFTA /
+    // Golden Globes narrows the visible set to the matching baked list;
+    // `AwardCategory.any` admits every winner across all categories;
+    // `AwardCategory.none` is the no-gate default.
+    final awardIds = awards == AwardCategory.none
         ? null
         : (kAwardWinners[awards] ?? const <AwardWinner>[])
             .map((w) => 'movie:${w.tmdbId}')
             .toSet();
-    final oscarFiltered = awards == null
+    final oscarFiltered = awards == AwardCategory.none
         ? mediaFiltered
         : mediaFiltered
             .where((r) => r.isOscarWinner && awardIds!.contains(r.id))
@@ -599,7 +601,7 @@ class _FiltersPanel extends StatefulWidget {
   final RuntimeBucket? runtime;
   final YearRange yearRange;
   final MediaTypeFilter? mediaType;
-  final AwardCategory? awards;
+  final AwardCategory awards;
   final SortMode sortMode;
   final CuratedSource curatedSource;
   final bool includeWatched;
@@ -608,7 +610,7 @@ class _FiltersPanel extends StatefulWidget {
   final ValueChanged<RuntimeBucket?> onRuntimeSelect;
   final ValueChanged<YearRange> onYearRangeChanged;
   final ValueChanged<MediaTypeFilter?> onMediaTypeSelect;
-  final ValueChanged<AwardCategory?> onAwardsSelect;
+  final ValueChanged<AwardCategory> onAwardsSelect;
   final ValueChanged<SortMode> onSortModeSelect;
   final ValueChanged<CuratedSource> onCuratedSourceSelect;
   final ValueChanged<bool> onIncludeWatchedChanged;
@@ -650,7 +652,7 @@ class _FiltersPanelState extends State<_FiltersPanel> {
     if (widget.runtime != null) n += 1;
     if (widget.yearRange.hasAnyBound) n += 1;
     if (widget.mediaType != null) n += 1;
-    if (widget.awards != null) n += 1;
+    if (widget.awards != AwardCategory.none) n += 1;
     if (widget.sortMode != SortMode.topRated) n += 1;
     if (widget.curatedSource != CuratedSource.none) n += 1;
     // "Include watched" is counted as an active filter when it diverges from
@@ -685,7 +687,7 @@ class _FiltersPanelState extends State<_FiltersPanel> {
     if (widget.curatedSource != CuratedSource.none) {
       parts.add(widget.curatedSource.label);
     }
-    if (widget.awards != null) parts.add(widget.awards!.label);
+    if (widget.awards != AwardCategory.none) parts.add(widget.awards.label);
     if (widget.includeWatched) parts.add('+ watched');
     return parts.isEmpty ? 'None' : parts.join(' · ');
   }
@@ -1165,26 +1167,34 @@ class _CuratedSourceSegment extends StatelessWidget {
 
 // ─── Awards dropdown ──────────────────────────────────────────────────────────
 //
-// Replaces the original Oscar-only switch with a picker. Supports Best Picture,
-// Palme d'Or, and BAFTA Best Film — the underlying baked lists are declared in
-// `utils/oscar_winners.dart`. When an award is selected the control accent-
-// themes itself so "a filter is active" reads at a glance.
+// Picker for the awards filter. Supports Best Picture, Palme d'Or, BAFTA Best
+// Film, Golden Globe Drama, Golden Globe Musical/Comedy — the underlying baked
+// lists live in `utils/oscar_winners.dart`. `None` clears the filter; `Any
+// award` admits the deduped union across all categories. When a category is
+// selected the control accent-themes itself so "a filter is active" reads at
+// a glance.
+//
+// CRITICAL: every menu item MUST have a non-null value. Flutter's
+// `PopupMenuButton<T>` treats `value: null` items as menu dismissal —
+// `onSelected` never fires, so a user who'd picked an award couldn't switch
+// back to "no filter". `AwardCategory.none` exists specifically to model "no
+// filter" as a real enum value the dropdown can round-trip.
 
 class _AwardsDropdown extends StatelessWidget {
-  final AwardCategory? selected;
-  final ValueChanged<AwardCategory?> onSelect;
+  final AwardCategory selected;
+  final ValueChanged<AwardCategory> onSelect;
 
   const _AwardsDropdown({required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    return _FilterDropdownShell<AwardCategory?>(
+    final active = selected != AwardCategory.none;
+    return _FilterDropdownShell<AwardCategory>(
       tooltip: 'Pick an award',
-      activeLabel: selected?.label,
-      placeholder: 'Any',
+      activeLabel: active ? selected.label : null,
+      placeholder: AwardCategory.none.label,
       onSelected: onSelect,
       items: [
-        (value: null, label: 'Any', isSelected: selected == null),
         for (final v in AwardCategory.values)
           (value: v, label: v.label, isSelected: v == selected),
       ],

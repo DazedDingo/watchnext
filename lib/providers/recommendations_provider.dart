@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recommendation.dart';
 import '../services/recommendations_service.dart';
+import '../utils/oscar_winners.dart';
 import 'awards_filter_provider.dart';
 import 'curated_source_provider.dart';
 import 'genre_filter_provider.dart';
@@ -84,7 +85,7 @@ final refreshRecommendationsProvider =
     yearMax: year.maxYear,
     runtime: runtime?.name,
     mediaType: mediaType?.name,
-    awards: awards?.name,
+    awards: awards == AwardCategory.none ? null : awards.name,
     sortMode: sortMode.name,
     curatedSource: curatedSource.name,
     includeWatched: includeWatched,

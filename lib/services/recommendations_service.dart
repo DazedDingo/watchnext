@@ -144,7 +144,7 @@ class RecommendationsService {
     YearRange yearRange = const YearRange.unbounded(),
     RuntimeBucket? runtimeBucket,
     MediaTypeFilter? mediaTypeFilter,
-    AwardCategory? awardsFilter,
+    AwardCategory awardsFilter = AwardCategory.none,
     SortMode sortMode = SortMode.topRated,
     CuratedSource curatedSource = CuratedSource.none,
     bool forceTasteProfile = false,
@@ -164,7 +164,7 @@ class RecommendationsService {
         stateHash == _lastRefreshHash) {
       return false;
     }
-    final oscarOnly = awardsFilter != null;
+    final oscarOnly = awardsFilter != AwardCategory.none;
     // Claim this refresh's epoch up-front. If a newer refresh starts before
     // our TMDB fetches return, `_refreshEpoch` will advance past `myEpoch`
     // and the guards below the TMDB fan-out will bail silently without
@@ -776,7 +776,7 @@ List<Map<String, dynamic>> buildCandidates({
   String discoverCurator = '',
   int tmdbCap = 20,
   int discoverCap = 40,
-  AwardCategory? includeAwardsList,
+  AwardCategory includeAwardsList = AwardCategory.none,
   @Deprecated('Use includeAwardsList. Back-compat shim for tests.')
   bool includeOscarBakedList = false,
 }) {
@@ -787,14 +787,16 @@ List<Map<String, dynamic>> buildCandidates({
   // list as a dedicated candidate source. TMDB's Oscar keyword (210024)
   // is unreliable — most entries are films that won technical/animated
   // categories rather than Best Picture — so the baked list is ground
-  // truth, and the same splicing strategy extends to Palme d'Or / BAFTA.
-  // Every row carries enough metadata (genres, year, runtime, poster,
-  // imdb_id) to survive the client-side filter stack on its own. Placed
-  // first so these rows lead the merge order — if one is also trending,
-  // it keeps the award tag.
-  final awards = includeAwardsList ??
-      (includeOscarBakedList ? AwardCategory.bestPicture : null);
-  if (awards != null) {
+  // truth, and the same splicing strategy extends to Palme d'Or / BAFTA /
+  // Golden Globe. `AwardCategory.any` splices the deduped union across
+  // every supported award. Every row carries enough metadata (genres,
+  // year, runtime, poster, imdb_id) to survive the client-side filter
+  // stack on its own. Placed first so these rows lead the merge order —
+  // if one is also trending, it keeps the award tag.
+  final awards = includeAwardsList != AwardCategory.none
+      ? includeAwardsList
+      : (includeOscarBakedList ? AwardCategory.bestPicture : AwardCategory.none);
+  if (awards != AwardCategory.none) {
     final list = kAwardWinners[awards] ?? const <AwardWinner>[];
     for (final w in list) {
       final key = 'movie:${w.tmdbId}';
