@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:developer' as developer;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/watch_entry.dart';
 import 'tmdb_provider.dart';
@@ -33,6 +37,28 @@ class UpNextEpisode {
   });
 
   String get key => 'tv:$tmdbId';
+
+  Map<String, dynamic> toJson() => {
+        'tmdbId': tmdbId,
+        'showTitle': showTitle,
+        'showPosterPath': showPosterPath,
+        'season': season,
+        'number': number,
+        'episodeName': episodeName,
+        'airDate': airDate.toIso8601String(),
+        'daysUntilAir': daysUntilAir,
+      };
+
+  factory UpNextEpisode.fromJson(Map<String, dynamic> json) => UpNextEpisode(
+        tmdbId: (json['tmdbId'] as num).toInt(),
+        showTitle: json['showTitle'] as String? ?? '',
+        showPosterPath: json['showPosterPath'] as String?,
+        season: (json['season'] as num?)?.toInt() ?? 0,
+        number: (json['number'] as num?)?.toInt() ?? 0,
+        episodeName: json['episodeName'] as String?,
+        airDate: DateTime.parse(json['airDate'] as String),
+        daysUntilAir: (json['daysUntilAir'] as num).toInt(),
+      );
 }
 
 /// How many days into the future to surface upcoming episodes. Tight on
@@ -51,6 +77,45 @@ const int kUpNextRecentDays = 1;
 /// see the soonest-airing.
 const int kUpNextMaxTiles = 3;
 
+/// SharedPreferences key for the disk-backed cache of the most recent
+/// successful Up Next computation. Persists across app launches so the
+/// row renders instantly on cold start instead of waiting on the per-
+/// show TMDB fan-out.
+const String kUpNextCacheKey = 'wn_upnext_cache';
+
+// Disk cache helper — load returns null on absent OR malformed JSON so
+// a corrupted entry (version mismatch, partial write) silently drops
+// instead of crashing the row on cold start.
+class _UpNextDiskCache {
+  static List<UpNextEpisode>? load(SharedPreferences prefs) {
+    final raw = prefs.getString(kUpNextCacheKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return null;
+      return decoded
+          .whereType<Map>()
+          .map((e) => UpNextEpisode.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e) {
+      developer.log('Up Next cache corrupt, dropping: $e', name: 'upnext');
+      return null;
+    }
+  }
+
+  static Future<void> save(
+    SharedPreferences prefs,
+    List<UpNextEpisode> items,
+  ) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await prefs.setString(kUpNextCacheKey, encoded);
+  }
+
+  static Future<void> clear(SharedPreferences prefs) async {
+    await prefs.remove(kUpNextCacheKey);
+  }
+}
+
 /// Resolves the next episode for every TV show the household is
 /// currently mid-watch on, filters to those with an air date inside the
 /// visibility window, and ranks by soonest-airing.
@@ -59,19 +124,29 @@ const int kUpNextMaxTiles = 3;
 /// — the same signal Library → Watching uses. Returns empty when the
 /// household isn't watching anything; the Home row collapses to nothing
 /// in that case so the screen stays the same as today.
-// Deliberately NOT autoDispose: the row used to "pop in" a few seconds
-// after Home opened because navigating away disposed the provider, and
-// the next visit had to re-run the per-show TMDB fan-out from scratch.
-// Keeping the future alive across the session means subsequent Home
-// opens render synchronously from the cached value.
+// Stream-based stale-while-revalidate: yields the disk cache (if any)
+// first so the row paints immediately on cold start, then fans the
+// per-show TMDB calls and yields fresh data. Without this, the FIRST
+// app open after install/relaunch waited 1-2s on the TMDB fan-out and
+// the row visibly "popped in".
 final upNextProvider =
-    FutureProvider<List<UpNextEpisode>>((ref) async {
+    StreamProvider<List<UpNextEpisode>>((ref) async* {
+  final prefs = await SharedPreferences.getInstance();
+  final cached = _UpNextDiskCache.load(prefs);
+  if (cached != null) yield cached;
+
   final entriesAsync = ref.watch(watchEntriesProvider);
   final entries = entriesAsync.value ?? const <WatchEntry>[];
   final inProgressTv = entries
       .where((e) => e.mediaType == 'tv' && e.inProgressStatus == 'watching')
       .toList();
-  if (inProgressTv.isEmpty) return const [];
+  if (inProgressTv.isEmpty) {
+    // No in-progress TV → don't surface stale data from a prior session
+    // (the household may have finished everything they were watching).
+    await _UpNextDiskCache.clear(prefs);
+    yield const [];
+    return;
+  }
 
   final tmdb = ref.watch(tmdbServiceProvider);
   final now = DateTime.now();
@@ -109,9 +184,11 @@ final upNextProvider =
   }).toList();
 
   final results = await Future.wait(fetches);
-  final out = results.whereType<UpNextEpisode>().toList()
+  final fresh = results.whereType<UpNextEpisode>().toList()
     ..sort((a, b) => a.airDate.compareTo(b.airDate));
-  return out.take(kUpNextMaxTiles).toList();
+  final capped = fresh.take(kUpNextMaxTiles).toList();
+  await _UpNextDiskCache.save(prefs, capped);
+  yield capped;
 });
 
 /// Lightweight summary used by Profile → Insights as a "feature health"

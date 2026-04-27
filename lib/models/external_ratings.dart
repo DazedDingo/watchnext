@@ -41,4 +41,14 @@ class ExternalRatings {
       notFound: m['notFound'] == true,
     );
   }
+
+  Map<String, dynamic> toMap() => {
+        'imdbId': imdbId,
+        'imdbRating': imdbRating,
+        'imdbVotes': imdbVotes,
+        'rtRating': rtRating,
+        'metascore': metascore,
+        'fetchedAtMs': fetchedAtMs,
+        'notFound': notFound,
+      };
 }
