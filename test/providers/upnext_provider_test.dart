@@ -325,8 +325,8 @@ void main() {
           reason: 'last emit should be the fresh TMDB result');
     });
 
-    test('empty in-progress list clears the cache', () async {
-      // Seed prefs with a stale cache.
+    test('empty in-progress list overwrites the cache with []', () async {
+      // Seed prefs with a stale cache from a prior session.
       final stale = [
         UpNextEpisode(
           tmdbId: 555,
@@ -345,20 +345,67 @@ void main() {
       final container = _container(client: client, entries: const []);
       addTearDown(container.dispose);
 
-      // Drive the provider; since entries is empty, it should clear the
-      // cache and yield empty.
+      // Drive the provider; since entries is empty (and not null), it
+      // should overwrite the cache with `[]` and yield empty. We
+      // deliberately use save([]) over clear() so that a subsequent
+      // cold start loads `[]` once rather than null, keeping the rest
+      // of the pipeline consistent.
       final out = await container.read(upNextProvider.future);
-      // First emit is the cache, last is the empty fresh state — but
-      // .future on a StreamProvider returns the most-recent value once
-      // resolved. Either way, give the post-yield clear() a tick.
       await Future<void>.delayed(Duration.zero);
 
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString(kUpNextCacheKey), isNull,
-          reason: 'cache should be cleared when no in-progress TV');
-      // Final state from the stream is the empty list, regardless of
-      // intermediate emits.
+      expect(prefs.getString(kUpNextCacheKey), '[]',
+          reason: 'cache should be overwritten with [] when no in-progress TV');
       expect(out, anyOf(isEmpty, hasLength(1)));
+    });
+
+    test('cache stays painted while watchEntries is still loading',
+        () async {
+      // Regression: the first run used to read `entriesAsync.value`,
+      // see null while Firestore was still emitting its first snapshot,
+      // and immediately clear the cache + yield empty. The fix guards
+      // on `entriesAsync.value == null` so the cached yield remains
+      // the visible state until authoritative data lands.
+      final cached = [
+        UpNextEpisode(
+          tmdbId: 100,
+          showTitle: 'Cached Show',
+          season: 1,
+          number: 1,
+          airDate: DateTime(2026, 1, 1),
+          daysUntilAir: 0,
+        ),
+      ];
+      SharedPreferences.setMockInitialValues({
+        kUpNextCacheKey: jsonEncode(cached.map((e) => e.toJson()).toList()),
+      });
+
+      final client = MockClient((_) async => _json({}));
+      // Override watchEntriesProvider with a stream that never emits —
+      // simulating Firestore still loading.
+      final container = ProviderContainer(overrides: [
+        tmdbServiceProvider.overrideWithValue(TmdbService(client: client)),
+        watchEntriesProvider
+            .overrideWith((_) => const Stream<List<WatchEntry>>.empty()),
+      ]);
+      container.listen<AsyncValue<List<UpNextEpisode>>>(
+        upNextProvider,
+        (_, _) {},
+      );
+      addTearDown(container.dispose);
+
+      // Wait one microtask for the prefs read + cache yield.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      final state = container.read(upNextProvider);
+      expect(state.value?.first.tmdbId, 100,
+          reason: 'cache should remain visible while entries is still loading');
+      // Cache must NOT have been overwritten with [] during the loading
+      // window — the original cache JSON should still be there.
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(kUpNextCacheKey), isNotNull);
+      expect(prefs.getString(kUpNextCacheKey), isNot('[]'),
+          reason: 'cache must not be wiped while watchEntries is loading');
     });
 
     test('UpNextEpisode round-trips through JSON', () {

@@ -110,10 +110,6 @@ class _UpNextDiskCache {
     final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
     await prefs.setString(kUpNextCacheKey, encoded);
   }
-
-  static Future<void> clear(SharedPreferences prefs) async {
-    await prefs.remove(kUpNextCacheKey);
-  }
 }
 
 /// Resolves the next episode for every TV show the household is
@@ -135,15 +131,27 @@ final upNextProvider =
   final cached = _UpNextDiskCache.load(prefs);
   if (cached != null) yield cached;
 
+  // Wait for the watchEntries Firestore stream to actually emit before
+  // making any "in-progress" decision. Without this guard, the first
+  // run on cold start raced past `entriesAsync.value == null` and
+  // treated it as "no in-progress shows", which cleared the cache and
+  // yielded an empty list — visibly hiding the cached data we just
+  // painted, before the second re-run lands the real state. Returning
+  // early keeps the cached yield as the stream's last value until
+  // watchEntries lands its first authoritative emit.
   final entriesAsync = ref.watch(watchEntriesProvider);
-  final entries = entriesAsync.value ?? const <WatchEntry>[];
+  if (entriesAsync.value == null) return;
+  final entries = entriesAsync.value!;
   final inProgressTv = entries
       .where((e) => e.mediaType == 'tv' && e.inProgressStatus == 'watching')
       .toList();
   if (inProgressTv.isEmpty) {
-    // No in-progress TV → don't surface stale data from a prior session
-    // (the household may have finished everything they were watching).
-    await _UpNextDiskCache.clear(prefs);
+    // No in-progress TV — overwrite the cache with an empty list so a
+    // subsequent cold start doesn't surface the previous household's
+    // shows. Using save([]) instead of clear() means a future load
+    // yields `[]` once instead of `null`, keeping the rest of the
+    // pipeline consistent.
+    await _UpNextDiskCache.save(prefs, const []);
     yield const [];
     return;
   }
