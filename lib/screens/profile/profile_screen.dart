@@ -14,6 +14,7 @@ import '../../providers/household_provider.dart';
 import '../../providers/mode_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/trakt_provider.dart';
+import '../../providers/up_next_style_provider.dart';
 import '../../providers/upnext_provider.dart';
 import '../../widgets/help_button.dart';
 
@@ -23,6 +24,7 @@ const _profileHelp =
     '• Default mode — Solo ranks recommendations for you alone; Together ranks for both.\n'
     '• Reveal notifications — optional push when a prediction reveal is ready.\n'
     '• Ask AI placement — show the concierge entry as an app-bar icon (default), a floating action button, or hide it completely.\n'
+    '• Up next style — pick how the Home "Up Next" row presents itself: an auto-cycling marquee (default) or a static horizontal strip.\n'
     '• Trakt — link to auto-import history and push ratings.\n'
     '• Stremio addon — mints a private URL you paste into Stremio; your shared watchlist then appears as a catalog inside the Stremio app.\n'
     '• Sign out — clears your session on this device. Your data stays in the household.';
@@ -120,6 +122,7 @@ class ProfileScreen extends ConsumerWidget {
           const _NotificationToggle(),
           const _AccentPicker(),
           const _AskAiPlacementTile(),
+          const _UpNextStyleTile(),
           const Divider(),
 
           // ── Stats ──────────────────────────────────────────────────────
@@ -551,6 +554,35 @@ class _AskAiPlacementTile extends ConsumerWidget {
         itemBuilder: (_) => [
           for (final p in AskAiPlacement.values)
             PopupMenuItem(value: p, child: Text(p.label)),
+        ],
+        icon: const Icon(Icons.arrow_drop_down),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Up next style — controls how the Home "Up Next" row presents itself
+// ---------------------------------------------------------------------------
+
+class _UpNextStyleTile extends ConsumerWidget {
+  const _UpNextStyleTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(upNextStyleProvider);
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.swipe_outlined),
+      title: const Text('Up next style'),
+      subtitle: Text(current.label),
+      trailing: PopupMenuButton<UpNextStyle>(
+        initialValue: current,
+        onSelected: (v) =>
+            ref.read(upNextStyleProvider.notifier).set(v),
+        itemBuilder: (_) => [
+          for (final s in UpNextStyle.values)
+            PopupMenuItem(value: s, child: Text(s.label)),
         ],
         icon: const Icon(Icons.arrow_drop_down),
       ),

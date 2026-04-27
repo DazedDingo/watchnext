@@ -8,6 +8,7 @@ import 'firebase_options.dart';
 import 'providers/ask_ai_placement_provider.dart';
 import 'providers/onboarding_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/up_next_style_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +48,8 @@ void main() async {
       accentProvider.overrideWith((_) => AccentController(prefs)),
       askAiPlacementProvider
           .overrideWith((_) => AskAiPlacementController(prefs)),
+      upNextStyleProvider
+          .overrideWith((_) => UpNextStyleController(prefs)),
       onboardingDoneProvider
           .overrideWith((_) => OnboardingController(prefs)),
     ],

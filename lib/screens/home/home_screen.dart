@@ -24,6 +24,7 @@ import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
 import '../../providers/sort_mode_provider.dart';
 import '../../providers/upcoming_provider.dart';
+import '../../providers/up_next_style_provider.dart';
 import '../../providers/upnext_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/year_filter_provider.dart';
@@ -1916,29 +1917,38 @@ class _SectionLabel extends StatelessWidget {
 /// Renders nothing while loading, on error, or when no in-progress show
 /// has an episode in the visibility window — most days for most
 /// households the row collapses to a SizedBox.shrink() and Home looks
-/// identical to its no-feature shape. Only earns chrome when a tile
-/// actually has something to say.
+/// identical to its no-feature shape. Only earns chrome when there's
+/// something to say.
+///
+/// User-toggleable presentation: a marquee (auto-cycling, default) or a
+/// horizontal pipe-delimited strip. Single-item / empty / a11y
+/// disable-animations all force strip — auto-cycling needs >1 item to
+/// be meaningful and silent animation is a footgun for users who opted
+/// out at the OS level.
 class _UpNextRow extends ConsumerWidget {
   const _UpNextRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(upNextProvider);
+    final style = ref.watch(upNextStyleProvider);
+    final disableAnimations = MediaQuery.of(context).disableAnimations;
     return async.when(
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
       data: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
+        final useStrip = items.length == 1 ||
+            disableAnimations ||
+            style == UpNextStyle.strip;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionLabel('UP NEXT'),
-            ...items.map(
-              (e) => _UpNextTile(
-                episode: e,
-                onTap: () => context.push('/title/tv/${e.tmdbId}'),
-              ),
-            ),
+            if (useStrip)
+              _UpNextStrip(episodes: items)
+            else
+              _UpNextMarquee(episodes: items),
           ],
         );
       },
@@ -1946,11 +1956,121 @@ class _UpNextRow extends ConsumerWidget {
   }
 }
 
-class _UpNextTile extends StatelessWidget {
-  final UpNextEpisode episode;
-  final VoidCallback onTap;
+class _UpNextStrip extends StatelessWidget {
+  final List<UpNextEpisode> episodes;
+  const _UpNextStrip({required this.episodes});
 
-  const _UpNextTile({required this.episode, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          for (var i = 0; i < episodes.length; i++) ...[
+            if (i > 0)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  '|',
+                  style: TextStyle(color: Colors.white24, fontSize: 13),
+                ),
+              ),
+            _UpNextItem(episode: episodes[i]),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _UpNextMarquee extends StatefulWidget {
+  final List<UpNextEpisode> episodes;
+  const _UpNextMarquee({required this.episodes});
+
+  @override
+  State<_UpNextMarquee> createState() => _UpNextMarqueeState();
+}
+
+class _UpNextMarqueeState extends State<_UpNextMarquee> {
+  int _index = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _UpNextMarquee oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Restart cycling when the underlying list changes shape — newly
+    // loaded data should begin from the top rather than mid-cycle on
+    // a stale index.
+    final lengthChanged =
+        oldWidget.episodes.length != widget.episodes.length;
+    final firstIdChanged = oldWidget.episodes.isNotEmpty &&
+        widget.episodes.isNotEmpty &&
+        oldWidget.episodes.first.tmdbId != widget.episodes.first.tmdbId;
+    if (lengthChanged || firstIdChanged) {
+      _index = 0;
+      _timer?.cancel();
+      _startTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    if (widget.episodes.length <= 1) return;
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() {
+        _index = (_index + 1) % widget.episodes.length;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Defensive: parent already routes single-item to strip, but
+    // self-contain so this widget is safe to render on its own.
+    if (widget.episodes.length == 1) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: _UpNextItem(episode: widget.episodes.first),
+        ),
+      );
+    }
+    final ep = widget.episodes[_index];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 240),
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: KeyedSubtree(
+            key: ValueKey(_index),
+            child: _UpNextItem(episode: ep),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UpNextItem extends StatelessWidget {
+  final UpNextEpisode episode;
+  const _UpNextItem({required this.episode});
 
   @override
   Widget build(BuildContext context) {
@@ -1958,50 +2078,34 @@ class _UpNextTile extends StatelessWidget {
     final epLabel =
         'S${episode.season.toString().padLeft(2, '0')}E${episode.number.toString().padLeft(2, '0')}';
     final relative = _relativeAirLabel(episode.daysUntilAir);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: episode.showTitle,
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600),
-                        ),
-                        const TextSpan(text: '  '),
-                        TextSpan(
-                          text: epLabel,
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.white54),
-                        ),
-                      ],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  relative,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: colors.primary,
-                  ),
-                ),
-              ],
-            ),
+    return InkWell(
+      onTap: () => context.push('/title/tv/${episode.tmdbId}'),
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: episode.showTitle,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              const TextSpan(text: '  '),
+              TextSpan(
+                text: epLabel,
+                style:
+                    const TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              const TextSpan(text: '  '),
+              TextSpan(
+                text: '· $relative',
+                style: TextStyle(fontSize: 11, color: colors.primary),
+              ),
+            ],
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
     );
