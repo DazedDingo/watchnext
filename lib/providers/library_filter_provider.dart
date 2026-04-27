@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/watch_entry.dart';
 import '../models/watchlist_item.dart';
 import '../utils/tmdb_genres.dart';
 import 'media_type_filter_provider.dart';
@@ -79,6 +80,94 @@ List<WatchlistItem> applyLibraryFilters({
     }
   });
   return sorted;
+}
+
+/// Sort order for the Library Watched tab. Default `lastWatchedDesc` —
+/// "what did we just finish" reading order. Separate from [LibrarySort]
+/// because the relevant fields and default differ (no addedAt; the
+/// most-recently-watched anchor matters more than save date).
+enum WatchedSort {
+  lastWatchedDesc('Recently watched'),
+  lastWatchedAsc('Oldest watched'),
+  titleAsc('Title (A–Z)'),
+  yearDesc('Year (newest)'),
+  yearAsc('Year (oldest)'),
+  runtimeAsc('Shortest first'),
+  runtimeDesc('Longest first');
+
+  final String label;
+  const WatchedSort(this.label);
+}
+
+/// Library Watched-tab filter state. Session-scoped — same rationale as the
+/// Saved-tab providers above: Library filters answer "what am I looking for
+/// right now"; persisting them across sessions would surprise the user.
+final watchedMediaTypeProvider = StateProvider<MediaTypeFilter?>((_) => null);
+final watchedSortProvider =
+    StateProvider<WatchedSort>((_) => WatchedSort.lastWatchedDesc);
+final watchedGenresProvider = StateProvider<Set<String>>((_) => const {});
+final watchedSearchProvider = StateProvider<String>((_) => '');
+
+/// Pure pipeline applied to the Watched-tab list. Order mirrors
+/// [applyLibraryFilters] exactly so the two tabs read identically: media type
+/// → genre AND-intersection (with cross-taxonomy synonyms via `genreMatches`)
+/// → case-insensitive title substring search → sort. Items without genres
+/// always drop out under an active genre filter (mirrors Saved + Home).
+List<WatchEntry> applyWatchedFilters({
+  required List<WatchEntry> entries,
+  required MediaTypeFilter? mediaType,
+  required Set<String> genres,
+  required String query,
+  required WatchedSort sort,
+}) {
+  var pool = entries;
+  if (mediaType != null) {
+    pool = pool.where((e) => e.mediaType == mediaType.recMediaType).toList();
+  }
+  if (genres.isNotEmpty) {
+    pool = pool
+        .where((e) =>
+            e.genres.isNotEmpty &&
+            genres.every((g) => genreMatches(e.genres, g)))
+        .toList();
+  }
+  final q = query.trim().toLowerCase();
+  if (q.isNotEmpty) {
+    pool = pool.where((e) => e.title.toLowerCase().contains(q)).toList();
+  }
+  final sorted = List<WatchEntry>.from(pool);
+  sorted.sort((a, b) {
+    switch (sort) {
+      case WatchedSort.lastWatchedDesc:
+        return _compareDateNullLast(
+            a.lastWatchedAt, b.lastWatchedAt, descending: true);
+      case WatchedSort.lastWatchedAsc:
+        return _compareDateNullLast(
+            a.lastWatchedAt, b.lastWatchedAt, descending: false);
+      case WatchedSort.titleAsc:
+        return _normalisedTitle(a.title).compareTo(_normalisedTitle(b.title));
+      case WatchedSort.yearDesc:
+        return _compareNullLast(a.year, b.year, descending: true);
+      case WatchedSort.yearAsc:
+        return _compareNullLast(a.year, b.year, descending: false);
+      case WatchedSort.runtimeAsc:
+        return _compareNullLast(a.runtime, b.runtime, descending: false);
+      case WatchedSort.runtimeDesc:
+        return _compareNullLast(a.runtime, b.runtime, descending: true);
+    }
+  });
+  return sorted;
+}
+
+/// DateTime variant of [_compareNullLast]. Manual Trakt imports + non-Trakt
+/// households can produce entries with null `lastWatchedAt` — those pin to
+/// the end regardless of sort direction so an unknown date doesn't masquerade
+/// as oldest/newest.
+int _compareDateNullLast(DateTime? a, DateTime? b, {required bool descending}) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return descending ? b.compareTo(a) : a.compareTo(b);
 }
 
 String _normalisedTitle(String t) {

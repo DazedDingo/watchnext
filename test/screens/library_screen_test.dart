@@ -358,6 +358,162 @@ void main() {
     });
   });
 
+  WatchEntry watchedEntry({
+    required int id,
+    required String title,
+    String mediaType = 'movie',
+    int? year,
+    List<String> genres = const [],
+    DateTime? lastWatchedAt,
+  }) =>
+      WatchEntry(
+        id: WatchEntry.buildId(mediaType, id),
+        mediaType: mediaType,
+        tmdbId: id,
+        title: title,
+        year: year,
+        genres: genres,
+        lastWatchedAt: lastWatchedAt ?? DateTime.utc(2025, 1, 1),
+      );
+
+  Future<void> openWatchedTab(WidgetTester tester) async {
+    await tester.tap(find.text('Watched'));
+    await tester.pumpAndSettle();
+  }
+
+  group('Watched tab — filters', () {
+    testWidgets('default render shows entries (no filters active)',
+        (tester) async {
+      await pumpLibrary(
+        tester,
+        watchlist: const [],
+        entries: [
+          watchedEntry(id: 1, title: 'The Matrix'),
+          watchedEntry(id: 2, title: 'Pulp Fiction'),
+        ],
+      );
+      await openWatchedTab(tester);
+      expect(find.text('The Matrix'), findsOneWidget);
+      expect(find.text('Pulp Fiction'), findsOneWidget);
+      // Filter bar visible.
+      expect(find.text('Recently watched'), findsOneWidget);
+      expect(find.text('Genres'), findsOneWidget);
+    });
+
+    testWidgets('typing in search narrows the list live', (tester) async {
+      await pumpLibrary(
+        tester,
+        watchlist: const [],
+        entries: [
+          watchedEntry(id: 1, title: 'The Matrix'),
+          watchedEntry(id: 2, title: 'Pulp Fiction'),
+          watchedEntry(id: 3, title: 'Inception'),
+        ],
+      );
+      await openWatchedTab(tester);
+
+      await tester.enterText(find.byType(TextField), 'matrix');
+      await tester.pumpAndSettle();
+
+      expect(find.text('The Matrix'), findsOneWidget);
+      expect(find.text('Pulp Fiction'), findsNothing);
+      expect(find.text('Inception'), findsNothing);
+    });
+
+    testWidgets('clearing the search via × restores the full list',
+        (tester) async {
+      await pumpLibrary(
+        tester,
+        watchlist: const [],
+        entries: [
+          watchedEntry(id: 1, title: 'The Matrix'),
+          watchedEntry(id: 2, title: 'Pulp Fiction'),
+        ],
+      );
+      await openWatchedTab(tester);
+
+      await tester.enterText(find.byType(TextField), 'matrix');
+      await tester.pumpAndSettle();
+      expect(find.text('Pulp Fiction'), findsNothing);
+
+      await tester.tap(find.byTooltip('Clear search'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('The Matrix'), findsOneWidget);
+      expect(find.text('Pulp Fiction'), findsOneWidget);
+    });
+
+    testWidgets('switching media type hides non-matching rows',
+        (tester) async {
+      await pumpLibrary(
+        tester,
+        watchlist: const [],
+        entries: [
+          watchedEntry(id: 1, title: 'The Matrix'),
+          watchedEntry(id: 2, title: 'Westworld', mediaType: 'tv'),
+        ],
+      );
+      await openWatchedTab(tester);
+      expect(find.text('Westworld'), findsOneWidget);
+
+      await tester.tap(find.text('Movies'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('The Matrix'), findsOneWidget);
+      expect(find.text('Westworld'), findsNothing);
+    });
+
+    testWidgets('search with no matches surfaces "Clear filters" empty state '
+        'that resets the search', (tester) async {
+      await pumpLibrary(
+        tester,
+        watchlist: const [],
+        entries: [
+          watchedEntry(id: 1, title: 'The Matrix'),
+          watchedEntry(id: 2, title: 'Pulp Fiction'),
+        ],
+      );
+      await openWatchedTab(tester);
+
+      await tester.enterText(find.byType(TextField), 'zzz nothing');
+      await tester.pumpAndSettle();
+
+      expect(find.text('No watched titles match'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Clear filters'),
+          findsOneWidget);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Clear filters'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No watched titles match'), findsNothing);
+      expect(find.text('The Matrix'), findsOneWidget);
+      expect(find.text('Pulp Fiction'), findsOneWidget);
+
+      final tf = tester.widget<TextField>(find.byType(TextField));
+      expect(tf.controller!.text, isEmpty);
+    });
+
+    testWidgets('sort popup label updates when selection changes',
+        (tester) async {
+      await pumpLibrary(
+        tester,
+        watchlist: const [],
+        entries: [
+          watchedEntry(id: 1, title: 'A', year: 2020),
+        ],
+      );
+      await openWatchedTab(tester);
+
+      await tester.tap(find.text('Recently watched'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Year (newest)').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Year (newest)'), findsOneWidget);
+      expect(find.text('Recently watched'), findsNothing);
+    });
+  });
+
   group('Saved tab — watched items hidden', () {
     testWidgets('items the household has watched do not appear in Saved',
         (tester) async {

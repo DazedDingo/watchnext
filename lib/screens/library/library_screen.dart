@@ -614,7 +614,11 @@ class _SavedTile extends ConsumerWidget {
 
 class _NoMatchesEmpty extends StatelessWidget {
   final VoidCallback onClear;
-  const _NoMatchesEmpty({required this.onClear});
+  final String title;
+  const _NoMatchesEmpty({
+    required this.onClear,
+    this.title = 'No saved titles match',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -628,7 +632,7 @@ class _NoMatchesEmpty extends StatelessWidget {
                 size: 48, color: Colors.white38),
             const SizedBox(height: 12),
             Text(
-              'No saved titles match',
+              title,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -696,6 +700,11 @@ class _WatchedTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(watchEntriesProvider);
+    final mediaType = ref.watch(watchedMediaTypeProvider);
+    final sort = ref.watch(watchedSortProvider);
+    final genres = ref.watch(watchedGenresProvider);
+    final query = ref.watch(watchedSearchProvider);
+
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => AsyncErrorView(
@@ -714,12 +723,429 @@ class _WatchedTab extends ConsumerWidget {
                 'Link Trakt from Profile to import what you\'ve watched, or start rating titles.',
           );
         }
-        return ListView.separated(
-          itemCount: watched.length,
-          separatorBuilder: (_, _) => const Divider(height: 0),
-          itemBuilder: (_, i) => _EntryTile(entry: watched[i]),
+
+        final filtered = applyWatchedFilters(
+          entries: watched,
+          mediaType: mediaType,
+          genres: genres,
+          query: query,
+          sort: sort,
+        );
+        final hasActiveFilters =
+            mediaType != null || genres.isNotEmpty || query.trim().isNotEmpty;
+
+        return Column(
+          children: [
+            const _WatchedFilterBar(),
+            if (filtered.isEmpty)
+              Expanded(
+                child: hasActiveFilters
+                    ? _NoMatchesEmpty(
+                        title: 'No watched titles match',
+                        onClear: () => _clearAllWatchedFilters(ref),
+                      )
+                    : const EmptyState(
+                        icon: Icons.history_toggle_off,
+                        title: 'No watch history yet',
+                        subtitle:
+                            'Link Trakt from Profile to import what you\'ve watched.',
+                      ),
+              )
+            else
+              Expanded(
+                child: ListView.separated(
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, _) => const Divider(height: 0),
+                  itemBuilder: (_, i) => _EntryTile(entry: filtered[i]),
+                ),
+              ),
+          ],
         );
       },
+    );
+  }
+}
+
+void _clearAllWatchedFilters(WidgetRef ref) {
+  ref.read(watchedMediaTypeProvider.notifier).state = null;
+  ref.read(watchedGenresProvider.notifier).state = const {};
+  ref.read(watchedSearchProvider.notifier).state = '';
+}
+
+// ─── Watched tab — filter bar ─────────────────────────────────────────────────
+//
+// Mirrors `_SavedFilterBar` so the two tabs read identically. Bound to the
+// `watched*` providers so toggling here doesn't bleed into Saved (or vice
+// versa) — the session-scoped state lives independently per tab.
+
+class _WatchedFilterBar extends ConsumerWidget {
+  const _WatchedFilterBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mediaType = ref.watch(watchedMediaTypeProvider);
+    final sort = ref.watch(watchedSortProvider);
+    final genres = ref.watch(watchedGenresProvider);
+    final cs = Theme.of(context).colorScheme;
+
+    final genreLabel = genres.isEmpty
+        ? null
+        : (genres.length == 1 ? genres.first : 'Genres (${genres.length})');
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: cs.outlineVariant.withValues(alpha: 0.4),
+            width: 0.5,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: _WatchedSearchField(),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: LiquidSegmentedButton<MediaTypeFilter?>(
+              density: LiquidSegmentDensity.compact,
+              selected: mediaType,
+              segments: const [
+                LiquidSegment(value: null, label: 'All'),
+                LiquidSegment(
+                  value: MediaTypeFilter.movie,
+                  label: 'Movies',
+                  icon: Icons.movie_outlined,
+                ),
+                LiquidSegment(
+                  value: MediaTypeFilter.tv,
+                  label: 'TV',
+                  icon: Icons.tv,
+                ),
+              ],
+              onChanged: (v) =>
+                  ref.read(watchedMediaTypeProvider.notifier).state = v,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _WatchedDropdownTrigger(
+                    icon: Icons.theater_comedy_outlined,
+                    activeLabel: genreLabel,
+                    placeholder: 'Genres',
+                    onTap: () => _openGenreSheet(context),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _WatchedSortPopup(
+                    selected: sort,
+                    onSelected: (v) =>
+                        ref.read(watchedSortProvider.notifier).state = v,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openGenreSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _WatchedGenreSheet(),
+    );
+  }
+}
+
+class _WatchedSearchField extends ConsumerStatefulWidget {
+  const _WatchedSearchField();
+
+  @override
+  ConsumerState<_WatchedSearchField> createState() =>
+      _WatchedSearchFieldState();
+}
+
+class _WatchedSearchFieldState extends ConsumerState<_WatchedSearchField> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: ref.read(watchedSearchProvider));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // Same external-reset sync as Saved — without this, the "Clear filters"
+    // button updates the provider but leaves stale text in the field.
+    ref.listen<String>(watchedSearchProvider, (_, next) {
+      if (next != _ctrl.text) {
+        _ctrl.value = TextEditingValue(
+          text: next,
+          selection: TextSelection.collapsed(offset: next.length),
+        );
+      }
+    });
+    return TextField(
+      controller: _ctrl,
+      onChanged: (v) => ref.read(watchedSearchProvider.notifier).state = v,
+      textInputAction: TextInputAction.search,
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'Search watched titles',
+        hintStyle: TextStyle(
+          fontSize: 14,
+          color: cs.onSurface.withValues(alpha: 0.5),
+        ),
+        prefixIcon: const Icon(Icons.search, size: 20),
+        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _ctrl,
+          builder: (_, value, _) {
+            if (value.text.isEmpty) return const SizedBox.shrink();
+            return IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              tooltip: 'Clear search',
+              onPressed: () {
+                _ctrl.clear();
+                ref.read(watchedSearchProvider.notifier).state = '';
+              },
+            );
+          },
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        filled: true,
+        fillColor: cs.surfaceContainerLow,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: cs.outlineVariant.withValues(alpha: 0.35),
+            width: 0.5,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: cs.outlineVariant.withValues(alpha: 0.35),
+            width: 0.5,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: cs.primary, width: 1.2),
+        ),
+      ),
+    );
+  }
+}
+
+class _WatchedDropdownTrigger extends StatelessWidget {
+  final IconData icon;
+  final String? activeLabel;
+  final String placeholder;
+  final VoidCallback onTap;
+
+  const _WatchedDropdownTrigger({
+    required this.icon,
+    required this.activeLabel,
+    required this.placeholder,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final active = activeLabel != null;
+    final borderColor = active ? cs.primary : cs.outline;
+    final textColor = active ? cs.primary : cs.onSurfaceVariant;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: borderColor, width: active ? 1.5 : 1),
+          borderRadius: BorderRadius.circular(8),
+          color: active ? cs.primary.withValues(alpha: 0.08) : null,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: textColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                activeLabel ?? placeholder,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: textColor,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: textColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WatchedSortPopup extends StatelessWidget {
+  final WatchedSort selected;
+  final ValueChanged<WatchedSort> onSelected;
+
+  const _WatchedSortPopup({required this.selected, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDefault = selected == WatchedSort.lastWatchedDesc;
+    final borderColor = isDefault ? cs.outline : cs.primary;
+    final textColor = isDefault ? cs.onSurfaceVariant : cs.primary;
+    return PopupMenuButton<WatchedSort>(
+      tooltip: 'Sort',
+      position: PopupMenuPosition.under,
+      onSelected: (v) {
+        HapticFeedback.selectionClick();
+        onSelected(v);
+      },
+      itemBuilder: (_) => [
+        for (final mode in WatchedSort.values)
+          PopupMenuItem<WatchedSort>(
+            value: mode,
+            child: Row(
+              children: [
+                if (mode == selected)
+                  const Icon(Icons.check, size: 16)
+                else
+                  const SizedBox(width: 16),
+                const SizedBox(width: 8),
+                Text(mode.label),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: borderColor, width: isDefault ? 1 : 1.5),
+          borderRadius: BorderRadius.circular(8),
+          color: isDefault ? null : cs.primary.withValues(alpha: 0.08),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.sort, size: 16, color: textColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                selected.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: textColor,
+                  fontWeight: isDefault ? FontWeight.normal : FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: textColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WatchedGenreSheet extends ConsumerWidget {
+  const _WatchedGenreSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final all = ref.watch(allGenresProvider);
+    final selected = ref.watch(watchedGenresProvider);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Filter by genre',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton(
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () => ref
+                          .read(watchedGenresProvider.notifier)
+                          .state = const {},
+                  child: const Text('Clear all'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final g in all)
+                      FilterChip(
+                        label: Text(g),
+                        selected: selected.contains(g),
+                        onSelected: (v) {
+                          final next = Set<String>.from(selected);
+                          if (v) {
+                            next.add(g);
+                          } else {
+                            next.remove(g);
+                          }
+                          ref.read(watchedGenresProvider.notifier).state =
+                              next;
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
