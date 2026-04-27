@@ -1933,25 +1933,24 @@ class _UpNextRow extends ConsumerWidget {
     final async = ref.watch(upNextProvider);
     final style = ref.watch(upNextStyleProvider);
     final disableAnimations = MediaQuery.of(context).disableAnimations;
-    return async.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (items) {
-        if (items.isEmpty) return const SizedBox.shrink();
-        final useStrip = items.length == 1 ||
-            disableAnimations ||
-            style == UpNextStyle.strip;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionLabel('UP NEXT'),
-            if (useStrip)
-              _UpNextStrip(episodes: items)
-            else
-              _UpNextMarquee(episodes: items),
-          ],
-        );
-      },
+    // Prefer last-known data over the loading placeholder — when the
+    // provider re-runs (e.g. watchEntries stream emits) the row would
+    // otherwise vanish for a tick and "pop" back when the fresh result
+    // lands. `async.value` exposes the previous value during a refresh.
+    final items = async.value;
+    if (items == null || items.isEmpty) return const SizedBox.shrink();
+    final useStrip = items.length == 1 ||
+        disableAnimations ||
+        style == UpNextStyle.strip;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('UP NEXT'),
+        if (useStrip)
+          _UpNextStrip(episodes: items)
+        else
+          _UpNextMarquee(episodes: items),
+      ],
     );
   }
 }

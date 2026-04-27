@@ -59,8 +59,13 @@ const int kUpNextMaxTiles = 3;
 /// — the same signal Library → Watching uses. Returns empty when the
 /// household isn't watching anything; the Home row collapses to nothing
 /// in that case so the screen stays the same as today.
+// Deliberately NOT autoDispose: the row used to "pop in" a few seconds
+// after Home opened because navigating away disposed the provider, and
+// the next visit had to re-run the per-show TMDB fan-out from scratch.
+// Keeping the future alive across the session means subsequent Home
+// opens render synchronously from the cached value.
 final upNextProvider =
-    FutureProvider.autoDispose<List<UpNextEpisode>>((ref) async {
+    FutureProvider<List<UpNextEpisode>>((ref) async {
   final entriesAsync = ref.watch(watchEntriesProvider);
   final entries = entriesAsync.value ?? const <WatchEntry>[];
   final inProgressTv = entries
