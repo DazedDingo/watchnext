@@ -68,13 +68,13 @@ void main() {
       expect(tapped, 2);
     });
 
-    testWidgets('matches the retired NavigationBar 56px height', (tester) async {
+    testWidgets('renders at the documented compact height', (tester) async {
       await tester.pumpWidget(_harness(selectedIndex: 0, onTap: (_) {}));
       await tester.pumpAndSettle();
 
       final bar = tester.getSize(find.byType(LiquidNavBar));
-      // No bottom safe-area in the default test viewport, so the bar height
-      // equals the documented 56px constant.
+      // No bottom safe-area in the default test viewport, so the bar
+      // height equals the public constant.
       expect(bar.height, LiquidNavBar.height);
     });
 

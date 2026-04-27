@@ -75,6 +75,10 @@ final themeDataProvider = Provider<ThemeData>((ref) {
     brightness: Brightness.dark,
     colorScheme: scheme,
     appBarTheme: AppBarTheme(
+      // Slightly tighter than M3's default 56pt — gives every screen a
+      // little more vertical content room without crunching the
+      // wordmark/tabs/toolbar contents.
+      toolbarHeight: 50,
       shape: Border(
         bottom: BorderSide(
           color: scheme.outlineVariant.withValues(alpha: 0.35),

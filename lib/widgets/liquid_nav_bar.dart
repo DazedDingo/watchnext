@@ -23,12 +23,16 @@ class LiquidNavBar extends StatelessWidget {
   final ValueChanged<int> onDestinationSelected;
 
   /// Overall bar height excluding the device's bottom safe-area padding.
-  /// Matches the retired NavigationBar's 56px to avoid shifting page layout.
-  static const double height = 56.0;
+  /// Slightly tighter than the retired M3 NavigationBar (56pt) to give
+  /// content rows a little more vertical room without crunching tap
+  /// targets — 24pt icons + 6pt vertical breathing room each side.
+  static const double height = 50.0;
 
-  /// Blob indicator dimensions.
-  static const double _indicatorWidth = 64.0;
-  static const double _indicatorHeight = 34.0;
+  /// Blob indicator dimensions. Indicator scaled to match the new bar
+  /// height — keeps the blob visually centred with the same ~6pt
+  /// breathing margin top/bottom.
+  static const double _indicatorWidth = 60.0;
+  static const double _indicatorHeight = 32.0;
 
   const LiquidNavBar({
     super.key,
