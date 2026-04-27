@@ -132,13 +132,9 @@ final upNextProvider =
   if (cached != null) yield cached;
 
   // Wait for the watchEntries Firestore stream to actually emit before
-  // making any "in-progress" decision. Without this guard, the first
-  // run on cold start raced past `entriesAsync.value == null` and
-  // treated it as "no in-progress shows", which cleared the cache and
-  // yielded an empty list — visibly hiding the cached data we just
-  // painted, before the second re-run lands the real state. Returning
-  // early keeps the cached yield as the stream's last value until
-  // watchEntries lands its first authoritative emit.
+  // making any "in-progress" decision. Returning early keeps the
+  // cached yield as the stream's last value until watchEntries lands
+  // its first emit.
   final entriesAsync = ref.watch(watchEntriesProvider);
   if (entriesAsync.value == null) return;
   final entries = entriesAsync.value!;
@@ -146,13 +142,18 @@ final upNextProvider =
       .where((e) => e.mediaType == 'tv' && e.inProgressStatus == 'watching')
       .toList();
   if (inProgressTv.isEmpty) {
-    // No in-progress TV — overwrite the cache with an empty list so a
-    // subsequent cold start doesn't surface the previous household's
-    // shows. Using save([]) instead of clear() means a future load
-    // yields `[]` once instead of `null`, keeping the rest of the
-    // pipeline consistent.
-    await _UpNextDiskCache.save(prefs, const []);
-    yield const [];
+    // Empty in-progress is ambiguous on cold start: it can mean
+    // "household has finished everything" OR "Firestore just emitted
+    // its initial empty snapshot before the server payload arrives."
+    // We can't tell them apart at this point. Bias toward keeping the
+    // cached row visible — only yield/save empty when we don't have a
+    // non-empty cache to fall back to. The next watchEntries emit
+    // will (probably) carry the real data and re-trigger the stream
+    // with the non-empty branch, which writes through authoritatively.
+    if (cached == null || cached.isEmpty) {
+      await _UpNextDiskCache.save(prefs, const []);
+      yield const [];
+    }
     return;
   }
 

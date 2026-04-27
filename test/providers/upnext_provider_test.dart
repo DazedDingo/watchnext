@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -325,8 +326,32 @@ void main() {
           reason: 'last emit should be the fresh TMDB result');
     });
 
-    test('empty in-progress list overwrites the cache with []', () async {
-      // Seed prefs with a stale cache from a prior session.
+    test('empty in-progress with no cache yields [] and saves []', () async {
+      // First-time-empty case: cache is empty/null and entries is
+      // empty. We yield [] and save [] so a subsequent cold start
+      // loads `[]` once instead of null (keeps the load semantics
+      // consistent across the pipeline).
+      SharedPreferences.setMockInitialValues(const {});
+      final client = MockClient((_) async => _json({}));
+      final container = _container(client: client, entries: const []);
+      addTearDown(container.dispose);
+
+      final out = await container.read(upNextProvider.future);
+      await Future<void>.delayed(Duration.zero);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(kUpNextCacheKey), '[]');
+      expect(out, isEmpty);
+    });
+
+    test('empty in-progress with non-empty cache keeps the cache intact',
+        () async {
+      // Bias-toward-keeping-cache: empty entries can be a transient
+      // Firestore emit during cold start, so we deliberately do NOT
+      // overwrite a non-empty cache with []. The next watchEntries
+      // emit (probably carrying real data) re-runs the stream and
+      // either confirms via the non-empty branch or stays paused
+      // here — either way the cached row stays visible.
       final stale = [
         UpNextEpisode(
           tmdbId: 555,
@@ -345,18 +370,105 @@ void main() {
       final container = _container(client: client, entries: const []);
       addTearDown(container.dispose);
 
-      // Drive the provider; since entries is empty (and not null), it
-      // should overwrite the cache with `[]` and yield empty. We
-      // deliberately use save([]) over clear() so that a subsequent
-      // cold start loads `[]` once rather than null, keeping the rest
-      // of the pipeline consistent.
-      final out = await container.read(upNextProvider.future);
+      await container.read(upNextProvider.future);
       await Future<void>.delayed(Duration.zero);
 
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString(kUpNextCacheKey), '[]',
-          reason: 'cache should be overwritten with [] when no in-progress TV');
-      expect(out, anyOf(isEmpty, hasLength(1)));
+      final raw = prefs.getString(kUpNextCacheKey);
+      expect(raw, isNot('[]'),
+          reason:
+              'transient empty must not nuke a non-empty cache');
+      expect(raw, contains('555'));
+    });
+
+    test('cache survives a transient empty watchEntries emit on cold start',
+        () async {
+      // Real-world scenario the user kept hitting: Firestore offline
+      // persistence emits an empty snapshot BEFORE the server data
+      // arrives. The provider must not nuke its cached row during that
+      // window — the next emit carries the real shows.
+      final cached = [
+        UpNextEpisode(
+          tmdbId: 100,
+          showTitle: 'Severance',
+          season: 3,
+          number: 4,
+          airDate: DateTime(2026, 1, 1),
+          daysUntilAir: 0,
+        ),
+      ];
+      SharedPreferences.setMockInitialValues({
+        kUpNextCacheKey: jsonEncode(cached.map((e) => e.toJson()).toList()),
+      });
+
+      // Stream: emit empty first (cold-start blip), then real shows.
+      final controller = StreamController<List<WatchEntry>>();
+      final client = MockClient((req) async {
+        if (req.url.path.endsWith('/tv/100')) {
+          return _json({
+            'id': 100,
+            'name': 'Severance',
+            'next_episode_to_air': {
+              'season_number': 3,
+              'episode_number': 4,
+              'air_date': _dateStr(2),
+            },
+          });
+        }
+        return http.Response('unexpected: ${req.url}', 404);
+      });
+
+      final container = ProviderContainer(overrides: [
+        tmdbServiceProvider.overrideWithValue(TmdbService(client: client)),
+        watchEntriesProvider.overrideWith((_) => controller.stream),
+      ]);
+      final emitted = <List<UpNextEpisode>>[];
+      container.listen<AsyncValue<List<UpNextEpisode>>>(
+        upNextProvider,
+        (_, next) {
+          if (next.value != null) emitted.add(next.value!);
+        },
+        fireImmediately: true,
+      );
+      addTearDown(() {
+        controller.close();
+        container.dispose();
+      });
+
+      // First yield should be the cached row (instantly).
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      // Simulate Firestore's transient empty snapshot.
+      controller.add(const []);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      // The bug: row used to flicker to empty here. After the fix, the
+      // cached row remains the visible state.
+      final stateMidEmpty = container.read(upNextProvider);
+      expect(stateMidEmpty.value, isNotEmpty,
+          reason:
+              'cached row must survive a transient empty Firestore emit');
+      expect(stateMidEmpty.value!.first.tmdbId, 100);
+
+      // Cache must NOT have been overwritten with [].
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(kUpNextCacheKey), isNot('[]'),
+          reason:
+              'transient empty must not nuke the on-disk cache');
+
+      // Now the real Firestore emit arrives.
+      controller.add([_watchingTv(100)]);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      final stateAfter = container.read(upNextProvider);
+      expect(stateAfter.value, hasLength(1));
+      expect(stateAfter.value!.first.tmdbId, 100);
+
+      // No emitted state should ever have been empty (which would have
+      // been the visible flicker).
+      expect(emitted.where((e) => e.isEmpty), isEmpty,
+          reason:
+              'row should never visibly flicker through an empty state');
     });
 
     test('cache stays painted while watchEntries is still loading',
