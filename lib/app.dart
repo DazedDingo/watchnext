@@ -32,6 +32,24 @@ import 'widgets/liquid_nav_bar.dart';
 /// Pure redirect rule for the app router. Extracted so it can be unit-tested
 /// without Firebase init. Called on every navigation attempt.
 String? computeRouterRedirect({required bool signedIn, required String loc}) {
+  // Home-screen-widget deep links arrive as `wn://title/{mt}/{tmdbId}`.
+  // Without translation here, GoRouter shows "location not found" on
+  // cold-start tap because Flutter delivers the URI as the initial
+  // route before the home_widget bridge has a chance to surface it.
+  if (loc.startsWith('wn://')) {
+    final uri = Uri.tryParse(loc);
+    if (uri != null && uri.host == 'title' && uri.pathSegments.length >= 2) {
+      final mt = uri.pathSegments[0];
+      final id = uri.pathSegments[1];
+      if ((mt == 'movie' || mt == 'tv') && int.tryParse(id) != null) {
+        if (!signedIn) return '/login';
+        return '/title/$mt/$id';
+      }
+    }
+    // Malformed widget URI — fall back to home (signed-in) or login.
+    return signedIn ? '/home' : '/login';
+  }
+
   final isPublic =
       loc == '/splash' || loc == '/login' || loc.startsWith('/setup');
   if (!signedIn && !isPublic) return '/login';
@@ -43,8 +61,16 @@ final _router = GoRouter(
   initialLocation: '/splash',
   redirect: (_, state) => computeRouterRedirect(
     signedIn: FirebaseAuth.instance.currentUser != null,
-    loc: state.matchedLocation,
+    // `state.uri.toString()` rather than `matchedLocation` — for an
+    // unmatched custom-scheme URI like `wn://title/tv/42`,
+    // `matchedLocation` is empty but `state.uri` carries the raw URI
+    // we want to translate.
+    loc: state.matchedLocation.isEmpty
+        ? state.uri.toString()
+        : state.matchedLocation,
   ),
+  errorBuilder: (_, state) =>
+      _ErrorScreen('Couldn\'t open ${state.uri.toString()}.'),
   routes: [
     GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
     GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),

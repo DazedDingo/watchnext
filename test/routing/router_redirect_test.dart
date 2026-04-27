@@ -67,5 +67,56 @@ void main() {
       expect(computeRouterRedirect(signedIn: false, loc: '/splash'), isNull);
       expect(computeRouterRedirect(signedIn: true, loc: '/splash'), isNull);
     });
+
+    group('home-screen widget deep links (wn:// scheme)', () {
+      // Widget tap PendingIntents fire `wn://title/{mediaType}/{tmdbId}`.
+      // On cold start Flutter forwards the URI as the initial route; the
+      // redirect translates it into a real internal path.
+
+      test('wn://title/tv/{id} → /title/tv/{id} for a signed-in user', () {
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://title/tv/1399'),
+          '/title/tv/1399',
+        );
+      });
+
+      test('wn://title/movie/{id} → /title/movie/{id} for a signed-in user',
+          () {
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://title/movie/42'),
+          '/title/movie/42',
+        );
+      });
+
+      test('wn:// link from an unauth user → /login', () {
+        expect(
+          computeRouterRedirect(signedIn: false, loc: 'wn://title/tv/1399'),
+          '/login',
+        );
+      });
+
+      test('malformed wn:// URI falls back to /home for signed-in users',
+          () {
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://garbage'),
+          '/home',
+        );
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://title/tv'),
+          '/home',
+        );
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://title/film/abc'),
+          '/home',
+        );
+      });
+
+      test('malformed wn:// URI falls back to /login for unauth users', () {
+        expect(
+          computeRouterRedirect(signedIn: false, loc: 'wn://garbage'),
+          '/login',
+        );
+      });
+    });
   });
 }
