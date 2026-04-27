@@ -1955,77 +1955,48 @@ class _UpNextTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final poster = TmdbService.imageUrl(episode.showPosterPath, size: 'w185');
     final epLabel =
         'S${episode.season.toString().padLeft(2, '0')}E${episode.number.toString().padLeft(2, '0')}';
     final relative = _relativeAirLabel(episode.daysUntilAir);
-    final nameSuffix =
-        (episode.episodeName == null || episode.episodeName!.isEmpty)
-            ? ''
-            : ' — ${episode.episodeName}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           child: Padding(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: poster != null
-                      ? Image.network(
-                          poster,
-                          width: 44,
-                          height: 66,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => _posterPlaceholder(),
-                        )
-                      : _posterPlaceholder(),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        episode.showTitle,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$epLabel$nameSuffix',
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.white70),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: episode.showTitle,
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                        const TextSpan(text: '  '),
+                        TextSpan(
+                          text: epLabel,
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    relative,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: colors.primary,
-                    ),
+                Text(
+                  relative,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: colors.primary,
                   ),
                 ),
               ],
@@ -2035,14 +2006,6 @@ class _UpNextTile extends StatelessWidget {
       ),
     );
   }
-
-  Widget _posterPlaceholder() => Container(
-        width: 44,
-        height: 66,
-        color: const Color(0xFF1A1A1A),
-        child: const Icon(Icons.tv_outlined,
-            color: Colors.white24, size: 18),
-      );
 }
 
 String _relativeAirLabel(int daysUntilAir) {
