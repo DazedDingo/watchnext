@@ -34,7 +34,44 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="text/plain"/>
             </intent-filter>
+            <!-- Home-screen widget deep links. wn://title/{mt}/{tmdbId} URIs
+                 set by UpNextWidgetProvider + TonightsPickWidgetProvider on
+                 their RemoteViews PendingIntents land here; the Flutter
+                 home_widget bridge surfaces the Uri via
+                 HomeWidget.widgetClicked / initiallyLaunchedFromHomeWidget
+                 and go_router routes onward. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="wn"/>
+            </intent-filter>
         </activity>
+        <!-- Home-screen widget receivers. Both extend
+             es.antonborri.home_widget.HomeWidgetProvider so they pick up the
+             SharedPreferences payload pushed from
+             lib/services/home_widget_service.dart. exported=true is required
+             on Android 12+ for AppWidgetHosts to bind to the receivers. -->
+        <receiver
+            android:name=".UpNextWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/up_next_widget_info"/>
+        </receiver>
+        <receiver
+            android:name=".TonightsPickWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/tonights_pick_widget_info"/>
+        </receiver>
         <!-- Trakt OAuth callback (Phase 2). flutter_web_auth_2 routes this
              back to the in-flight authentication future via its callback activity. -->
         <activity

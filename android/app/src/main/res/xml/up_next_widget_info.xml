@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    updatePeriodMillis = 43,200,000 ms = 12 hours.
+
+    Android enforces a 30-minute minimum (anything lower is silently raised),
+    so 12h is well above the floor. This re-fires onUpdate on the existing
+    SharedPreferences payload — it does NOT fetch fresh Firestore/TMDB data.
+    Data freshness is driven by HomeWidgetService.pushUpNext() from the
+    Flutter side on AppLifecycleState.resumed. The 12h re-render keeps the
+    widget alive on launchers that aggressively reclaim background processes
+    (Samsung One UI, MIUI) and lets relative-time strings ("Tomorrow",
+    "In 3d") catch up if the app hasn't been opened in a while.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="40dp"
+    android:updatePeriodMillis="43200000"
+    android:initialLayout="@layout/up_next_widget"
+    android:previewImage="@mipmap/ic_launcher"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen" />

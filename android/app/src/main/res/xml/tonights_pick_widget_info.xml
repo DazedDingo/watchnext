@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Same 12h cadence as up_next_widget_info.xml — see that file for rationale.
+    onUpdate re-renders existing prefs; data freshness comes from
+    HomeWidgetService.pushTonightsPick() on the Flutter side.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="100dp"
+    android:updatePeriodMillis="43200000"
+    android:initialLayout="@layout/tonights_pick_widget"
+    android:previewImage="@mipmap/ic_launcher"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen" />

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Widget surface. #1A1A1A matches the gray used in Flutter's
+    _posterPlaceholder so the home-screen surface reads as the same family as
+    the in-app cards. 12dp corner radius mirrors the ListTile / RecCard
+    rounding used throughout Home.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#1A1A1A" />
+    <corners android:radius="12dp" />
+</shape>
