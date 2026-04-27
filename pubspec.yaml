@@ -1,7 +1,7 @@
 name: watchnext
 description: "Shared movie & TV recommender for two-person households."
 publish_to: 'none'
-version: 0.7.4+117
+version: 0.8.0+118
 
 environment:
   sdk: ^3.11.4
@@ -30,6 +30,10 @@ dependencies:
 
   # Deep links (future: invite links)
   app_links: ^6.3.3
+
+  # Android home-screen widgets (Phase: Up Next + Tonight's Pick) — bridge
+  # only; native AppWidgetProviders ship in a separate Android phase.
+  home_widget: ^0.7.0
 
   # Share-to-Save (Phase 4) — receives SEND/text intents from Android share sheet
   receive_sharing_intent: ^1.8.1

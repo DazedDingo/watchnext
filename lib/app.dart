@@ -8,7 +8,9 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'providers/household_provider.dart';
 import 'providers/mode_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/tonights_pick_provider.dart';
 import 'providers/trakt_provider.dart';
+import 'providers/upnext_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/household/setup_screen.dart';
@@ -23,6 +25,7 @@ import 'screens/decide/decide_screen.dart';
 import 'screens/predict/reveal_screen.dart';
 import 'screens/share/share_confirm_sheet.dart';
 import 'screens/title_detail/title_detail_screen.dart';
+import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'widgets/liquid_nav_bar.dart';
 
@@ -141,6 +144,7 @@ class _ErrorScreen extends StatelessWidget {
 
 class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with WidgetsBindingObserver {
   StreamSubscription<List<SharedMediaFile>>? _shareSub;
+  StreamSubscription<Uri>? _widgetTapSub;
 
   @override
   void initState() {
@@ -150,19 +154,25 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
       _maybeSyncTrakt();
       _wireShareListeners();
       _initNotifications();
+      _wireWidgetBridge();
+      _pushWidgets();
     });
   }
 
   @override
   void dispose() {
     _shareSub?.cancel();
+    _widgetTapSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _maybeSyncTrakt();
+    if (state == AppLifecycleState.resumed) {
+      _maybeSyncTrakt();
+      _pushWidgets();
+    }
   }
 
   void _wireShareListeners() {
@@ -204,6 +214,50 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
       );
     } catch (_) {
       // Best-effort — notification failures must not block the app.
+    }
+  }
+
+  void _wireWidgetBridge() {
+    // Cold-start: app launched by tapping a home-screen widget tile.
+    HomeWidgetService.initialLaunchUri().then((uri) {
+      if (uri == null || !mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _routeWidgetUri(uri);
+      });
+    }).catchError((_) {});
+
+    // Warm-tap stream: app already running when user taps the widget.
+    _widgetTapSub = HomeWidgetService.widgetTapStream().listen(
+      (uri) {
+        if (!mounted) return;
+        _routeWidgetUri(uri);
+      },
+      onError: (_) {},
+    );
+  }
+
+  void _routeWidgetUri(Uri u) {
+    // Expected shape: wn://title/{mediaType}/{tmdbId}. Drop anything else
+    // defensively — no point routing on a malformed URI.
+    if (u.host != 'title') return;
+    final segs = u.pathSegments;
+    if (segs.length < 2) return;
+    final mediaType = segs[0];
+    final tmdbId = segs[1];
+    if (mediaType.isEmpty || tmdbId.isEmpty) return;
+    if (mediaType != 'movie' && mediaType != 'tv') return;
+    if (int.tryParse(tmdbId) == null) return;
+    context.go('/title/$mediaType/$tmdbId');
+  }
+
+  Future<void> _pushWidgets() async {
+    try {
+      final upNext = ref.read(upNextProvider).value ?? const <UpNextEpisode>[];
+      final pick = ref.read(tonightsPickProvider).value;
+      await HomeWidgetService.pushUpNext(upNext);
+      await HomeWidgetService.pushTonightsPick(pick);
+    } catch (_) {
+      // Best-effort — a widget push failing must never block the app.
     }
   }
 
