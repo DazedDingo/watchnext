@@ -25,6 +25,7 @@ import '../../providers/reviews_provider.dart';
 import '../../providers/tmdb_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
+import '../../services/home_widget_service.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/async_error.dart';
 import '../../widgets/help_button.dart';
@@ -45,8 +46,20 @@ const _titleDetailHelp =
 class TitleDetailScreen extends ConsumerStatefulWidget {
   final String mediaType; // 'movie' | 'tv'
   final int tmdbId;
+  // Up Next deep links (home-screen widget tap + in-app Up Next row) pass
+  // these so the matching season tile auto-expands and the episode row
+  // scrolls into view — 1-tap access to the per-episode Stremio button.
+  // null on every other entry path (Home rec card, search, etc).
+  final int? initialSeason;
+  final int? initialEpisode;
 
-  const TitleDetailScreen({super.key, required this.mediaType, required this.tmdbId});
+  const TitleDetailScreen({
+    super.key,
+    required this.mediaType,
+    required this.tmdbId,
+    this.initialSeason,
+    this.initialEpisode,
+  });
 
   @override
   ConsumerState<TitleDetailScreen> createState() => _TitleDetailScreenState();
@@ -635,7 +648,15 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                   seasons: ((d['seasons'] as List?) ?? const [])
                       .whereType<Map<String, dynamic>>()
                       .toList(),
-                  initialSeason: watchEntry?.lastSeason,
+                  // Up Next deep link wins over the watch-entry's
+                  // last_season pointer — the user explicitly tapped a
+                  // specific episode and expects to land on that season.
+                  initialSeason:
+                      widget.initialSeason ?? watchEntry?.lastSeason,
+                  scrollToEpisode: widget.initialSeason != null &&
+                          widget.initialEpisode != null
+                      ? (widget.initialSeason!, widget.initialEpisode!)
+                      : null,
                   details: d,
                 )),
               // AI blurb from Phase 7 scoring — shown when available.
@@ -1698,11 +1719,17 @@ class _ReviewCardState extends State<_ReviewCard> {
 /// auto-expands so a returning viewer picks up where they left off. Season
 /// payloads are fetched on demand via `tvSeasonProvider` only when the tile
 /// is expanded — collapsed seasons cost nothing.
-class _SeasonsSection extends ConsumerWidget {
+class _SeasonsSection extends ConsumerStatefulWidget {
   final int tmdbId;
   final String entryId;
   final List<Map<String, dynamic>> seasons;
   final int? initialSeason;
+  // Up Next deep link target — when set, the matching `_EpisodeRow` is
+  // assigned a GlobalKey and `Scrollable.ensureVisible` fires once after
+  // the season payload resolves. Tuple is `(season, episode)`; null on
+  // every non-Up-Next entry path so behaviour matches today's "no scroll"
+  // default for normal navigation.
+  final (int, int)? scrollToEpisode;
   final Map<String, dynamic> details;
 
   const _SeasonsSection({
@@ -1711,12 +1738,33 @@ class _SeasonsSection extends ConsumerWidget {
     required this.seasons,
     required this.details,
     this.initialSeason,
+    this.scrollToEpisode,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (seasons.isEmpty) return const SizedBox.shrink();
-    final visible = seasons
+  ConsumerState<_SeasonsSection> createState() => _SeasonsSectionState();
+}
+
+class _SeasonsSectionState extends ConsumerState<_SeasonsSection> {
+  // GlobalKey assigned to the deep-linked `_EpisodeRow`. We hold it on the
+  // section so a single key survives across `_SeasonBody` rebuilds — passing
+  // a fresh GlobalKey on each build would defeat ensureVisible's lookup.
+  final GlobalKey _scrollTargetKey = GlobalKey(debugLabel: 'upNextEpisode');
+  // Latches once we've fired the scroll so subsequent rebuilds (e.g. when
+  // the user toggles watched on a different episode and the Episode stream
+  // refreshes) don't yank the viewport back. Scoped to this screen instance
+  // — popping + re-pushing the route gets a fresh state and a fresh scroll.
+  bool _scrolledToEpisode = false;
+
+  void _markScrolled() {
+    if (_scrolledToEpisode) return;
+    _scrolledToEpisode = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.seasons.isEmpty) return const SizedBox.shrink();
+    final visible = widget.seasons
         .where((s) => ((s['episode_count'] as num?)?.toInt() ?? 0) > 0)
         .toList()
       ..sort((a, b) =>
@@ -1724,12 +1772,14 @@ class _SeasonsSection extends ConsumerWidget {
               .compareTo((b['season_number'] as num?)?.toInt() ?? 0));
     if (visible.isEmpty) return const SizedBox.shrink();
 
-    final autoExpand = initialSeason ??
+    final autoExpand = widget.initialSeason ??
         visible.firstWhere(
           (s) => ((s['season_number'] as num?)?.toInt() ?? 0) > 0,
           orElse: () => visible.first,
         )['season_number'] as int? ??
         1;
+
+    final scrollTarget = widget.scrollToEpisode;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
@@ -1745,12 +1795,23 @@ class _SeasonsSection extends ConsumerWidget {
           ),
           for (final s in visible)
             _SeasonTile(
-              tmdbId: tmdbId,
-              entryId: entryId,
+              tmdbId: widget.tmdbId,
+              entryId: widget.entryId,
               season: s,
-              parentDetails: details,
+              parentDetails: widget.details,
               initiallyExpanded:
                   ((s['season_number'] as num?)?.toInt() ?? 0) == autoExpand,
+              // Only the season tile that contains the deep-linked episode
+              // gets the scroll machinery — every other tile still cheaply
+              // renders its `_SeasonBody` lazily on expansion.
+              scrollTargetEpisode: (scrollTarget != null &&
+                      ((s['season_number'] as num?)?.toInt() ?? 0) ==
+                          scrollTarget.$1)
+                  ? scrollTarget.$2
+                  : null,
+              scrollTargetKey: _scrollTargetKey,
+              alreadyScrolled: _scrolledToEpisode,
+              onScrolled: _markScrolled,
             ),
         ],
       ),
@@ -1764,6 +1825,13 @@ class _SeasonTile extends ConsumerStatefulWidget {
   final Map<String, dynamic> season;
   final Map<String, dynamic> parentDetails;
   final bool initiallyExpanded;
+  // Up Next deep-link plumbing — non-null on the single tile that owns the
+  // target episode. The body uses these to attach the GlobalKey to the
+  // matching `_EpisodeRow` and trigger one ensureVisible after fetch.
+  final int? scrollTargetEpisode;
+  final GlobalKey? scrollTargetKey;
+  final bool alreadyScrolled;
+  final VoidCallback? onScrolled;
 
   const _SeasonTile({
     required this.tmdbId,
@@ -1771,6 +1839,10 @@ class _SeasonTile extends ConsumerStatefulWidget {
     required this.season,
     required this.parentDetails,
     required this.initiallyExpanded,
+    this.scrollTargetEpisode,
+    this.scrollTargetKey,
+    this.alreadyScrolled = false,
+    this.onScrolled,
   });
 
   @override
@@ -1818,32 +1890,53 @@ class _SeasonTileState extends ConsumerState<_SeasonTile> {
           entryId: widget.entryId,
           seasonNumber: number,
           parentDetails: widget.parentDetails,
+          scrollTargetEpisode: widget.scrollTargetEpisode,
+          scrollTargetKey: widget.scrollTargetKey,
+          alreadyScrolled: widget.alreadyScrolled,
+          onScrolled: widget.onScrolled,
         )] : const [],
       ),
     );
   }
 }
 
-class _SeasonBody extends ConsumerWidget {
+class _SeasonBody extends ConsumerStatefulWidget {
   final int tmdbId;
   final String entryId;
   final int seasonNumber;
   final Map<String, dynamic> parentDetails;
+  // Up Next deep-link plumbing — when `scrollTargetEpisode` is non-null and
+  // matches a row in the resolved season payload, we attach `scrollTargetKey`
+  // to that row and fire `Scrollable.ensureVisible` once.
+  final int? scrollTargetEpisode;
+  final GlobalKey? scrollTargetKey;
+  final bool alreadyScrolled;
+  final VoidCallback? onScrolled;
 
   const _SeasonBody({
     required this.tmdbId,
     required this.entryId,
     required this.seasonNumber,
     required this.parentDetails,
+    this.scrollTargetEpisode,
+    this.scrollTargetKey,
+    this.alreadyScrolled = false,
+    this.onScrolled,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final seasonAsync = ref.watch(tvSeasonProvider((tmdbId, seasonNumber)));
+  ConsumerState<_SeasonBody> createState() => _SeasonBodyState();
+}
+
+class _SeasonBodyState extends ConsumerState<_SeasonBody> {
+  @override
+  Widget build(BuildContext context) {
+    final seasonAsync = ref
+        .watch(tvSeasonProvider((widget.tmdbId, widget.seasonNumber)));
     final householdId = ref.watch(householdIdProvider).value;
     final storedAsync = householdId == null
         ? const AsyncValue<List<Episode>>.data([])
-        : ref.watch(episodesProvider((householdId, entryId)));
+        : ref.watch(episodesProvider((householdId, widget.entryId)));
     final ratings = ref.watch(ratingsProvider).value ?? const <Rating>[];
     final uid = ref.watch(authStateProvider).value?.uid;
 
@@ -1874,23 +1967,57 @@ class _SeasonBody extends ConsumerWidget {
         }
         final stored = storedAsync.value ?? const <Episode>[];
         final byKey = <String, Episode>{for (final e in stored) e.id: e};
+
+        // Schedule the auto-scroll once per screen instance, after the
+        // season payload has produced laid-out rows. The parent's
+        // `_scrolledToEpisode` flag (forwarded as `alreadyScrolled`)
+        // guards against re-firing on subsequent rebuilds (e.g. when a
+        // per-episode mark-watched write streams back through
+        // `episodesProvider`).
+        final target = widget.scrollTargetEpisode;
+        final key = widget.scrollTargetKey;
+        if (target != null && key != null && !widget.alreadyScrolled) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final ctx = key.currentContext;
+            if (ctx == null) return;
+            HomeWidgetService.logEntry(
+                'auto-scrolling to S${widget.seasonNumber}E$target');
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.2,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+            );
+            widget.onScrolled?.call();
+          });
+        }
+
         return Column(
           children: [
             for (final ep in episodes)
-              _EpisodeRow(
-                episode: ep,
-                stored: byKey[Episode.buildId(
-                  (ep['season_number'] as num?)?.toInt() ?? seasonNumber,
-                  (ep['episode_number'] as num?)?.toInt() ?? 0,
-                )],
-                ratings: ratings,
-                entryId: entryId,
-                tmdbId: tmdbId,
-                uid: uid,
-                householdId: householdId,
-                parentDetails: parentDetails,
-                showImdbId: _imdbIdForShow(parentDetails),
-              ),
+              () {
+                final epNumber =
+                    (ep['episode_number'] as num?)?.toInt() ?? 0;
+                final isTarget = target != null && epNumber == target;
+                return _EpisodeRow(
+                  key: isTarget ? key : null,
+                  episode: ep,
+                  stored: byKey[Episode.buildId(
+                    (ep['season_number'] as num?)?.toInt() ??
+                        widget.seasonNumber,
+                    epNumber,
+                  )],
+                  ratings: ratings,
+                  entryId: widget.entryId,
+                  tmdbId: widget.tmdbId,
+                  uid: uid,
+                  householdId: householdId,
+                  parentDetails: widget.parentDetails,
+                  showImdbId: _imdbIdForShow(widget.parentDetails),
+                  highlight: isTarget,
+                );
+              }(),
           ],
         );
       },
@@ -1921,8 +2048,14 @@ class _EpisodeRow extends ConsumerStatefulWidget {
   final String? householdId;
   final Map<String, dynamic> parentDetails;
   final String? showImdbId;
+  // Up Next deep-link target — when true, the row is wrapped in an
+  // `AnimatedContainer` that briefly tints with the primary accent so the
+  // user can see what was navigated to. Fades back to transparent after
+  // 800ms. Default false on every other row.
+  final bool highlight;
 
   const _EpisodeRow({
+    super.key,
     required this.episode,
     required this.stored,
     required this.ratings,
@@ -1932,6 +2065,7 @@ class _EpisodeRow extends ConsumerStatefulWidget {
     required this.householdId,
     required this.parentDetails,
     required this.showImdbId,
+    this.highlight = false,
   });
 
   @override
@@ -1941,6 +2075,22 @@ class _EpisodeRow extends ConsumerStatefulWidget {
 class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
   bool _busy = false;
   bool _expanded = false;
+  // Drives the brief background-flash on the deep-linked row. Starts true
+  // when `highlight=true` and flips false 800ms later so the AnimatedContainer
+  // fades back to transparent.
+  bool _flash = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.highlight) {
+      _flash = true;
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (!mounted) return;
+        setState(() => _flash = false);
+      });
+    }
+  }
 
   static final ButtonStyle _episodeLinkStyle = TextButton.styleFrom(
     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1994,7 +2144,16 @@ class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
       return (id != null && id.isNotEmpty) ? id : null;
     });
 
-    return Padding(
+    // Brief tint on the deep-linked row so the user can see what was
+    // navigated to. _flash flips false 800ms after initState so the
+    // AnimatedContainer (220ms) fades back to transparent.
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      decoration: BoxDecoration(
+        color: _flash ? colors.primary.withValues(alpha: 0.12) : null,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2106,6 +2265,7 @@ class _EpisodeRowState extends ConsumerState<_EpisodeRow> {
             ),
           ],
         ],
+      ),
       ),
     );
   }

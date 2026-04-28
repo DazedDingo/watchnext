@@ -175,7 +175,12 @@ Uri pickWidgetUri(TonightsPick p) => _pickUri(p);
 String relativeWhenLabel(int daysUntilAir) => _relativeWhen(daysUntilAir);
 String upNextEpisodeLabel(UpNextEpisode e) => _episodeLabel(e);
 
-Uri _episodeUri(UpNextEpisode e) => Uri.parse('wn://title/tv/${e.tmdbId}');
+// Includes season + episode so the widget tap deep-links to the specific
+// episode's row in the TV title detail screen, not just the show landing.
+// The Kotlin side stores this as the per-row click PendingIntent's data URI
+// without modification.
+Uri _episodeUri(UpNextEpisode e) => Uri.parse(
+    'wn://title/tv/${e.tmdbId}?season=${e.season}&episode=${e.number}');
 
 Uri _pickUri(TonightsPick p) =>
     Uri.parse('wn://title/${p.mediaType}/${p.tmdbId}');

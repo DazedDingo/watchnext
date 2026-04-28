@@ -2078,7 +2078,11 @@ class _UpNextItem extends StatelessWidget {
         'S${episode.season.toString().padLeft(2, '0')}E${episode.number.toString().padLeft(2, '0')}';
     final relative = _relativeAirLabel(episode.daysUntilAir);
     return InkWell(
-      onTap: () => context.push('/title/tv/${episode.tmdbId}'),
+      // Forward season + episode so the detail screen auto-expands the
+      // matching season + scrolls the episode row into view — same 1-tap
+      // behaviour as the home-screen Up Next widget.
+      onTap: () => context.push(
+          '/title/tv/${episode.tmdbId}?season=${episode.season}&episode=${episode.number}'),
       borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),

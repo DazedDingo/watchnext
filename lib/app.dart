@@ -43,7 +43,18 @@ String? computeRouterRedirect({required bool signedIn, required String loc}) {
       final id = uri.pathSegments[1];
       if ((mt == 'movie' || mt == 'tv') && int.tryParse(id) != null) {
         if (!signedIn) return '/login';
-        return '/title/$mt/$id';
+        // Forward only season + episode query params — strip anything else
+        // defensively so arbitrary widget URI params can't leak into the
+        // internal route.
+        final qs = <String, String>{};
+        final season = uri.queryParameters['season'];
+        final episode = uri.queryParameters['episode'];
+        if (season != null) qs['season'] = season;
+        if (episode != null) qs['episode'] = episode;
+        final qsString = qs.isEmpty
+            ? ''
+            : '?${qs.entries.map((e) => '${e.key}=${e.value}').join('&')}';
+        return '/title/$mt/$id$qsString';
       }
     }
     // Malformed widget URI — fall back to home (signed-in) or login.
@@ -85,9 +96,18 @@ final _router = GoRouter(
       builder: (_, state) {
         final tmdbId = int.tryParse(state.pathParameters['tmdbId'] ?? '');
         if (tmdbId == null) return const _ErrorScreen('Invalid title link.');
+        // Optional season+episode params come from Up Next deep links
+        // (widget tap or in-app row) so the screen can auto-expand the
+        // matching season + scroll the episode row into view.
+        final initialSeason =
+            int.tryParse(state.uri.queryParameters['season'] ?? '');
+        final initialEpisode =
+            int.tryParse(state.uri.queryParameters['episode'] ?? '');
         return TitleDetailScreen(
           mediaType: state.pathParameters['mediaType']!,
           tmdbId: tmdbId,
+          initialSeason: initialSeason,
+          initialEpisode: initialEpisode,
         );
       },
     ),
@@ -233,7 +253,17 @@ class _WatchNextAppState extends ConsumerState<WatchNextApp>
       HomeWidgetService.logEntry('non-numeric tmdbId $tmdbId');
       return;
     }
-    HomeWidgetService.logEntry('navigating → /title/$mediaType/$tmdbId');
+    // Forward season + episode params from the widget URI so the title
+    // detail screen can auto-expand the matching season tile + scroll the
+    // episode row into view. Movies never carry these — only TV episode
+    // taps from the Up Next widget.
+    final season = u.queryParameters['season'];
+    final episode = u.queryParameters['episode'];
+    final qs = (season != null && episode != null)
+        ? '?season=$season&episode=$episode'
+        : '';
+    HomeWidgetService.logEntry(
+        'navigating → /title/$mediaType/$tmdbId$qs');
     // Use the global router instead of `context.go` — the routing must work
     // when the nav shell isn't mounted (e.g. user is on title detail or
     // login when the warm tap arrives).
@@ -246,7 +276,7 @@ class _WatchNextAppState extends ConsumerState<WatchNextApp>
     // go-then-push pattern lands the user on title detail with /home
     // sitting underneath so back / system-back returns them home.
     _router.go('/home');
-    _router.push('/title/$mediaType/$tmdbId');
+    _router.push('/title/$mediaType/$tmdbId$qs');
   }
 
   Future<void> _pushWidgets() async {

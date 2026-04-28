@@ -37,29 +37,32 @@ TonightsPick _pick({
 
 void main() {
   group('episodeWidgetUri', () {
-    test('builds wn://title/tv/<tmdbId> for an episode', () {
+    test('builds wn://title/tv/<tmdbId>?season=&episode= for an episode', () {
       expect(
-        episodeWidgetUri(_ep(tmdbId: 1399)).toString(),
-        'wn://title/tv/1399',
+        episodeWidgetUri(_ep(tmdbId: 1399, season: 3, number: 4)).toString(),
+        'wn://title/tv/1399?season=3&episode=4',
       );
     });
 
     test('different tmdbId yields different URI', () {
       expect(
-        episodeWidgetUri(_ep(tmdbId: 100)).toString(),
-        'wn://title/tv/100',
+        episodeWidgetUri(_ep(tmdbId: 100, season: 1, number: 1)).toString(),
+        'wn://title/tv/100?season=1&episode=1',
       );
       expect(
-        episodeWidgetUri(_ep(tmdbId: 200)).toString(),
-        'wn://title/tv/200',
+        episodeWidgetUri(_ep(tmdbId: 200, season: 2, number: 5)).toString(),
+        'wn://title/tv/200?season=2&episode=5',
       );
     });
 
     test('always uses media type "tv" (Up Next is TV-only)', () {
       // Sanity-check the contract — an UpNextEpisode is always a TV episode.
-      final uri = episodeWidgetUri(_ep(tmdbId: 42));
+      final uri =
+          episodeWidgetUri(_ep(tmdbId: 42, season: 2, number: 7));
       expect(uri.host, 'title');
       expect(uri.pathSegments, ['tv', '42']);
+      expect(uri.queryParameters['season'], '2');
+      expect(uri.queryParameters['episode'], '7');
     });
   });
 

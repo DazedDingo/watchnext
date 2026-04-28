@@ -118,6 +118,32 @@ void main() {
         );
       });
 
+      test('wn://title/tv/{id}?season=3&episode=4 preserves season + episode',
+          () {
+        expect(
+          computeRouterRedirect(
+              signedIn: true, loc: 'wn://title/tv/1399?season=3&episode=4'),
+          '/title/tv/1399?season=3&episode=4',
+        );
+      });
+
+      test('non-season/episode query params are stripped', () {
+        expect(
+          computeRouterRedirect(
+              signedIn: true,
+              loc: 'wn://title/tv/1399?season=3&episode=4&foo=bar'),
+          '/title/tv/1399?season=3&episode=4',
+        );
+      });
+
+      test('wn://title/tv/{id} without query params still translates plainly',
+          () {
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://title/tv/1399'),
+          '/title/tv/1399',
+        );
+      });
+
       test('wn://refresh resolves to /home for signed-in users', () {
         // Refresh tile fires `wn://refresh` — the bridge handles the
         // re-fetch logic in Dart; the redirect just needs to land the
