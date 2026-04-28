@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="128" alt="WatchNext app icon"/>
+</p>
+
 # WatchNext
 
 **A shared movie & TV companion for two-person households.**
