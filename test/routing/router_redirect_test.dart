@@ -117,6 +117,21 @@ void main() {
           '/login',
         );
       });
+
+      test('wn://refresh resolves to /home for signed-in users', () {
+        // Refresh tile fires `wn://refresh` — the bridge handles the
+        // re-fetch logic in Dart; the redirect just needs to land the
+        // user somewhere valid (defence in depth in case Flutter's
+        // engine routes the URI before the bridge has a chance to).
+        expect(
+          computeRouterRedirect(signedIn: true, loc: 'wn://refresh'),
+          '/home',
+        );
+        expect(
+          computeRouterRedirect(signedIn: false, loc: 'wn://refresh'),
+          '/login',
+        );
+      });
     });
   });
 }

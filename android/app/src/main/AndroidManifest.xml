@@ -22,6 +22,17 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Don't let Flutter's engine auto-route intent.data as the
+                 initial GoRouter location. Our home_widget bridge reads
+                 the URI via its own method channel
+                 (initiallyLaunchedFromHomeWidget) and routes through Dart;
+                 leaving auto-deeplinking on caused widget refresh taps to
+                 surface as "Couldn't open wn://refresh" because the engine
+                 was beating the bridge to the punch. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
+              />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

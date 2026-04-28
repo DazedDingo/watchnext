@@ -155,6 +155,14 @@ class _WatchNextAppState extends ConsumerState<WatchNextApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initWidgetRouting();
+    // Eager push: on first launch (and any subsequent provider change),
+    // mirror the latest values into home_widget prefs. Without this the
+    // widget shows its empty state until the user happens to background +
+    // foreground the app — which is what was happening when freshly added
+    // widgets reported "Open WatchNext to refresh".
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pushWidgets());
+    ref.listenManual(upNextProvider, (_, _) => _pushWidgets());
+    ref.listenManual(tonightsPickProvider, (_, _) => _pushWidgets());
   }
 
   @override
