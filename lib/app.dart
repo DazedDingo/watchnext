@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -263,16 +264,44 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
   }
 
   void _routeWidgetUri(Uri u) {
+    developer.log('_routeWidgetUri host=${u.host} segs=${u.pathSegments}',
+        name: 'wn-widget');
+    // Refresh button — no navigation, just trigger a re-fetch of widget
+    // data. Providers get invalidated; the next AppLifecycleState.resumed
+    // tick or scheduled push will write fresh values to home_widget prefs.
+    if (u.host == 'refresh') {
+      developer.log('refresh tile tapped', name: 'wn-widget');
+      ref.invalidate(upNextProvider);
+      ref.invalidate(tonightsPickProvider);
+      // Slight delay so the providers have time to re-resolve before we
+      // push their new values out to the widget.
+      Future.delayed(const Duration(seconds: 2), _pushWidgets);
+      return;
+    }
     // Expected shape: wn://title/{mediaType}/{tmdbId}. Drop anything else
     // defensively — no point routing on a malformed URI.
-    if (u.host != 'title') return;
+    if (u.host != 'title') {
+      developer.log('unrecognised host, ignoring', name: 'wn-widget');
+      return;
+    }
     final segs = u.pathSegments;
-    if (segs.length < 2) return;
+    if (segs.length < 2) {
+      developer.log('not enough path segments', name: 'wn-widget');
+      return;
+    }
     final mediaType = segs[0];
     final tmdbId = segs[1];
     if (mediaType.isEmpty || tmdbId.isEmpty) return;
-    if (mediaType != 'movie' && mediaType != 'tv') return;
-    if (int.tryParse(tmdbId) == null) return;
+    if (mediaType != 'movie' && mediaType != 'tv') {
+      developer.log('unsupported mediaType $mediaType', name: 'wn-widget');
+      return;
+    }
+    if (int.tryParse(tmdbId) == null) {
+      developer.log('non-numeric tmdbId $tmdbId', name: 'wn-widget');
+      return;
+    }
+    developer.log('navigating → /title/$mediaType/$tmdbId',
+        name: 'wn-widget');
     context.go('/title/$mediaType/$tmdbId');
   }
 

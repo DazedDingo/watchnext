@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
@@ -27,9 +28,20 @@ class UpNextWidgetProvider : HomeWidgetProvider() {
         widgetData: SharedPreferences
     ) {
         val count = widgetData.getInt("up_next_count", 0)
+        Log.d("WnWidget", "UpNextWidget.onUpdate count=$count ids=${appWidgetIds.size}")
 
         for (id in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.up_next_widget)
+
+            // Refresh tile — same PendingIntent shape every render so the
+            // launcher's icon cache doesn't drift. Bridge intercepts
+            // wn://refresh and invalidates providers + re-pushes data.
+            val refreshIntent = HomeWidgetLaunchIntent.getActivity(
+                context,
+                MainActivity::class.java,
+                Uri.parse("wn://refresh")
+            )
+            views.setOnClickPendingIntent(R.id.up_next_refresh, refreshIntent)
 
             if (count <= 0) {
                 views.setViewVisibility(R.id.up_next_empty, View.VISIBLE)
@@ -82,6 +94,7 @@ class UpNextWidgetProvider : HomeWidgetProvider() {
         views.setTextViewText(whenId, whenText.orEmpty())
 
         if (!uri.isNullOrEmpty()) {
+            Log.d("WnWidget", "UpNextWidget.bindRow[$index] uri=$uri")
             val pendingIntent = HomeWidgetLaunchIntent.getActivity(
                 context,
                 MainActivity::class.java,

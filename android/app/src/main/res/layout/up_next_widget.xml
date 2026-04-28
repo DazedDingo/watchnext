@@ -12,16 +12,41 @@
     android:padding="12dp"
     android:background="@drawable/widget_background">
 
-    <TextView
-        android:id="@+id/up_next_header"
-        android:layout_width="wrap_content"
+    <!-- Header row: section label + refresh tile. The refresh TextView
+         carries its own click PendingIntent (wn://refresh) which the
+         Flutter bridge invalidates the providers on, then re-pushes
+         widget data. Slightly bigger tap target via padding. -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="UP NEXT"
-        android:textColor="#8AFFFFFF"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.12"
-        android:layout_marginBottom="6dp" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="6dp">
+
+        <TextView
+            android:id="@+id/up_next_header"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="UP NEXT"
+            android:textColor="#8AFFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.12" />
+
+        <TextView
+            android:id="@+id/up_next_refresh"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="↻"
+            android:textColor="#A0FFFFFF"
+            android:textSize="16sp"
+            android:paddingStart="10dp"
+            android:paddingEnd="2dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
 
     <!-- Row 0 -->
     <LinearLayout

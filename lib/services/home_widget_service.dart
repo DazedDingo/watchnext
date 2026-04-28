@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:home_widget/home_widget.dart';
 
@@ -110,7 +111,11 @@ class HomeWidgetService {
   static Stream<Uri> widgetTapStream() {
     return HomeWidget.widgetClicked
         .where((u) => u != null && u.toString().isNotEmpty)
-        .cast<Uri>();
+        .cast<Uri>()
+        .map((u) {
+      developer.log('warm tap → $u', name: 'wn-widget');
+      return u;
+    });
   }
 
   /// Cold-start helper — returns the URI the widget tap launched the app
@@ -118,9 +123,14 @@ class HomeWidgetService {
   static Future<Uri?> initialLaunchUri() async {
     try {
       final uri = await HomeWidget.initiallyLaunchedFromHomeWidget();
+      developer.log(
+        'initialLaunchUri raw=${uri ?? "null"}',
+        name: 'wn-widget',
+      );
       if (uri == null || uri.toString().isEmpty) return null;
       return uri;
-    } catch (_) {
+    } catch (e) {
+      developer.log('initialLaunchUri error: $e', name: 'wn-widget');
       return null;
     }
   }

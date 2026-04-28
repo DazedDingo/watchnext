@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
@@ -51,9 +52,21 @@ class TonightsPickWidgetProvider : HomeWidgetProvider() {
         val updatedAt = if (widgetData.contains("tp_updated_at"))
             widgetData.getLong("tp_updated_at", 0L) else 0L
 
+        Log.d("WnWidget", "TonightsPickWidget.onUpdate title=$title score=$score uri=$uri ids=${appWidgetIds.size}")
+
         for (id in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.tonights_pick_widget)
             val empty = title.isNullOrEmpty()
+
+            // Refresh tile — same intent shape every render. Bridge
+            // intercepts wn://refresh, invalidates providers, re-pushes
+            // widget data after a short delay.
+            val refreshIntent = HomeWidgetLaunchIntent.getActivity(
+                context,
+                MainActivity::class.java,
+                Uri.parse("wn://refresh")
+            )
+            views.setOnClickPendingIntent(R.id.tp_refresh, refreshIntent)
 
             if (empty) {
                 views.setViewVisibility(R.id.tp_empty, View.VISIBLE)
