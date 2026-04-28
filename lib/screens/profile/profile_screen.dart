@@ -17,6 +17,7 @@ import '../../providers/trakt_provider.dart';
 import '../../providers/up_next_style_provider.dart';
 import '../../providers/upnext_provider.dart';
 import '../../widgets/help_button.dart';
+import 'widget_diagnostics_sheet.dart';
 
 const _profileHelp =
     'Account, household invite, preferences, and integrations all live here.\n\n'
@@ -167,6 +168,18 @@ class ProfileScreen extends ConsumerWidget {
           // ── Stremio ───────────────────────────────────────────────────
           const _SectionHeader('Stremio'),
           const _StremioSection(),
+          const Divider(),
+
+          // ── Diagnostics ───────────────────────────────────────────────
+          const _SectionHeader('Diagnostics'),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Widget bridge log'),
+            subtitle: const Text('Recent widget-tap activity for debugging'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => WidgetDiagnosticsSheet.show(context),
+          ),
           const Divider(),
 
           // ── Help ──────────────────────────────────────────────────────

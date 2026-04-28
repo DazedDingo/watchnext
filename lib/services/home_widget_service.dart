@@ -26,6 +26,15 @@ class HomeWidgetService {
 
   static bool _appGroupSet = false;
 
+  // In-memory ring buffer of widget-bridge breadcrumbs. Drives the in-app
+  // diagnostics sheet — the user has no `adb logcat` access on the phone, so
+  // we keep a small newest-first buffer of the same `developer.log` lines for
+  // copy-paste debugging. No persistence; survives navigation but not
+  // app-kill (deliberate — we don't want stale diagnostics from yesterday).
+  static const _maxLogs = 100;
+  static final List<({DateTime at, String message})> _logBuffer =
+      <({DateTime at, String message})>[];
+
   static Future<void> _ensureAppGroup() async {
     if (_appGroupSet) return;
     try {
@@ -113,7 +122,7 @@ class HomeWidgetService {
         .where((u) => u != null && u.toString().isNotEmpty)
         .cast<Uri>()
         .map((u) {
-      developer.log('warm tap → $u', name: 'wn-widget');
+      _logEntry('warm tap → $u');
       return u;
     });
   }
@@ -123,16 +132,39 @@ class HomeWidgetService {
   static Future<Uri?> initialLaunchUri() async {
     try {
       final uri = await HomeWidget.initiallyLaunchedFromHomeWidget();
-      developer.log(
-        'initialLaunchUri raw=${uri ?? "null"}',
-        name: 'wn-widget',
-      );
+      _logEntry('initialLaunchUri raw=${uri ?? "null"}');
       if (uri == null || uri.toString().isEmpty) return null;
       return uri;
     } catch (e) {
-      developer.log('initialLaunchUri error: $e', name: 'wn-widget');
+      _logEntry('initialLaunchUri error: $e');
       return null;
     }
+  }
+
+  /// Append a breadcrumb to the in-memory buffer AND emit it via
+  /// `developer.log` so logcat / VS Code's log viewer still show it. Public
+  /// so callers outside this file (e.g. the router-side handler in app.dart)
+  /// can route their breadcrumbs through the same buffer.
+  ///
+  /// Keep messages free of user-identifying data — only widget URIs +
+  /// decision steps. The buffer is copied verbatim into clipboard for
+  /// debugging shares.
+  static void logEntry(String msg) => _logEntry(msg);
+
+  static void _logEntry(String msg) {
+    _logBuffer.insert(0, (at: DateTime.now(), message: msg));
+    if (_logBuffer.length > _maxLogs) {
+      _logBuffer.removeRange(_maxLogs, _logBuffer.length);
+    }
+    developer.log(msg, name: 'wn-widget');
+  }
+
+  /// Defensive copy of the buffer in newest-first order. Tuples carry just
+  /// `at` (timestamp) + `message` (the same string emitted to
+  /// `developer.log`); intentionally lean so the diagnostics UI doesn't
+  /// couple to internal log machinery.
+  static List<({DateTime at, String message})> recentLogs() {
+    return List<({DateTime at, String message})>.unmodifiable(_logBuffer);
   }
 }
 

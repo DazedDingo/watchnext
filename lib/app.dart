@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:developer' as developer;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -135,11 +134,117 @@ final _router = GoRouter(
   ],
 );
 
-class WatchNextApp extends ConsumerWidget {
+class WatchNextApp extends ConsumerStatefulWidget {
   const WatchNextApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<WatchNextApp> createState() => _WatchNextAppState();
+}
+
+// Hoisted out of the bottom-nav shell so the home-screen-widget bridge stays
+// alive for the app's entire lifetime. Title detail / login / splash live
+// OUTSIDE the shell, so subscribing inside `_ScaffoldWithNavBarState` would
+// drop warm taps from those screens (the shell unmounts and cancels the
+// stream subscription).
+class _WatchNextAppState extends ConsumerState<WatchNextApp>
+    with WidgetsBindingObserver {
+  StreamSubscription<Uri>? _widgetTapSub;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initWidgetRouting();
+  }
+
+  @override
+  void dispose() {
+    _widgetTapSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _pushWidgets();
+    }
+  }
+
+  void _initWidgetRouting() {
+    // Cold-start: app launched by tapping a home-screen widget tile.
+    HomeWidgetService.initialLaunchUri().then((uri) {
+      if (uri == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleWidgetUri(uri);
+      });
+    }).catchError((_) {});
+
+    // Warm-tap stream: app already running when user taps the widget. The
+    // subscription lives for the app's lifetime, not just while the nav
+    // shell is mounted, so taps from title detail / login / splash route
+    // correctly.
+    _widgetTapSub = HomeWidgetService.widgetTapStream().listen(
+      _handleWidgetUri,
+      onError: (_) {},
+    );
+  }
+
+  void _handleWidgetUri(Uri u) {
+    HomeWidgetService.logEntry(
+        '_handleWidgetUri host=${u.host} segs=${u.pathSegments}');
+    // Refresh button — no navigation, just trigger a re-fetch of widget
+    // data. Providers get invalidated; the next AppLifecycleState.resumed
+    // tick or scheduled push will write fresh values to home_widget prefs.
+    if (u.host == 'refresh') {
+      HomeWidgetService.logEntry('refresh tile tapped');
+      ref.invalidate(upNextProvider);
+      ref.invalidate(tonightsPickProvider);
+      // Slight delay so the providers have time to re-resolve before we
+      // push their new values out to the widget.
+      Future.delayed(const Duration(seconds: 2), _pushWidgets);
+      return;
+    }
+    if (u.host != 'title') {
+      HomeWidgetService.logEntry('unrecognised host, ignoring');
+      return;
+    }
+    final segs = u.pathSegments;
+    if (segs.length < 2) {
+      HomeWidgetService.logEntry('not enough path segments');
+      return;
+    }
+    final mediaType = segs[0];
+    final tmdbId = segs[1];
+    if (mediaType.isEmpty || tmdbId.isEmpty) return;
+    if (mediaType != 'movie' && mediaType != 'tv') {
+      HomeWidgetService.logEntry('unsupported mediaType $mediaType');
+      return;
+    }
+    if (int.tryParse(tmdbId) == null) {
+      HomeWidgetService.logEntry('non-numeric tmdbId $tmdbId');
+      return;
+    }
+    HomeWidgetService.logEntry('navigating → /title/$mediaType/$tmdbId');
+    // Use the global router instead of `context.go` — the routing must work
+    // when the nav shell isn't mounted (e.g. user is on title detail or
+    // login when the warm tap arrives).
+    _router.go('/title/$mediaType/$tmdbId');
+  }
+
+  Future<void> _pushWidgets() async {
+    try {
+      final upNext = ref.read(upNextProvider).value ?? const <UpNextEpisode>[];
+      final pick = ref.read(tonightsPickProvider).value;
+      await HomeWidgetService.pushUpNext(upNext);
+      await HomeWidgetService.pushTonightsPick(pick);
+    } catch (_) {
+      // Best-effort — a widget push failing must never block the app.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = ref.watch(themeDataProvider);
     return MaterialApp.router(
       title: 'WatchNext',
@@ -169,37 +274,28 @@ class _ErrorScreen extends StatelessWidget {
       );
 }
 
-class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with WidgetsBindingObserver {
+// Share-intent + notification setup legitimately needs the auth-shell
+// context (snackbar, household lookup, route push from a deep tile), so they
+// stay scoped to the bottom-nav shell. The widget bridge moved up to
+// `_WatchNextAppState` because warm taps must route even when the shell is
+// unmounted (title detail / login / splash live outside it).
+class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> {
   StreamSubscription<List<SharedMediaFile>>? _shareSub;
-  StreamSubscription<Uri>? _widgetTapSub;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeSyncTrakt();
       _wireShareListeners();
       _initNotifications();
-      _wireWidgetBridge();
-      _pushWidgets();
     });
   }
 
   @override
   void dispose() {
     _shareSub?.cancel();
-    _widgetTapSub?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _maybeSyncTrakt();
-      _pushWidgets();
-    }
   }
 
   void _wireShareListeners() {
@@ -241,78 +337,6 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> with Wi
       );
     } catch (_) {
       // Best-effort — notification failures must not block the app.
-    }
-  }
-
-  void _wireWidgetBridge() {
-    // Cold-start: app launched by tapping a home-screen widget tile.
-    HomeWidgetService.initialLaunchUri().then((uri) {
-      if (uri == null || !mounted) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _routeWidgetUri(uri);
-      });
-    }).catchError((_) {});
-
-    // Warm-tap stream: app already running when user taps the widget.
-    _widgetTapSub = HomeWidgetService.widgetTapStream().listen(
-      (uri) {
-        if (!mounted) return;
-        _routeWidgetUri(uri);
-      },
-      onError: (_) {},
-    );
-  }
-
-  void _routeWidgetUri(Uri u) {
-    developer.log('_routeWidgetUri host=${u.host} segs=${u.pathSegments}',
-        name: 'wn-widget');
-    // Refresh button — no navigation, just trigger a re-fetch of widget
-    // data. Providers get invalidated; the next AppLifecycleState.resumed
-    // tick or scheduled push will write fresh values to home_widget prefs.
-    if (u.host == 'refresh') {
-      developer.log('refresh tile tapped', name: 'wn-widget');
-      ref.invalidate(upNextProvider);
-      ref.invalidate(tonightsPickProvider);
-      // Slight delay so the providers have time to re-resolve before we
-      // push their new values out to the widget.
-      Future.delayed(const Duration(seconds: 2), _pushWidgets);
-      return;
-    }
-    // Expected shape: wn://title/{mediaType}/{tmdbId}. Drop anything else
-    // defensively — no point routing on a malformed URI.
-    if (u.host != 'title') {
-      developer.log('unrecognised host, ignoring', name: 'wn-widget');
-      return;
-    }
-    final segs = u.pathSegments;
-    if (segs.length < 2) {
-      developer.log('not enough path segments', name: 'wn-widget');
-      return;
-    }
-    final mediaType = segs[0];
-    final tmdbId = segs[1];
-    if (mediaType.isEmpty || tmdbId.isEmpty) return;
-    if (mediaType != 'movie' && mediaType != 'tv') {
-      developer.log('unsupported mediaType $mediaType', name: 'wn-widget');
-      return;
-    }
-    if (int.tryParse(tmdbId) == null) {
-      developer.log('non-numeric tmdbId $tmdbId', name: 'wn-widget');
-      return;
-    }
-    developer.log('navigating → /title/$mediaType/$tmdbId',
-        name: 'wn-widget');
-    context.go('/title/$mediaType/$tmdbId');
-  }
-
-  Future<void> _pushWidgets() async {
-    try {
-      final upNext = ref.read(upNextProvider).value ?? const <UpNextEpisode>[];
-      final pick = ref.read(tonightsPickProvider).value;
-      await HomeWidgetService.pushUpNext(upNext);
-      await HomeWidgetService.pushTonightsPick(pick);
-    } catch (_) {
-      // Best-effort — a widget push failing must never block the app.
     }
   }
 
