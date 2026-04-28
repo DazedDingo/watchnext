@@ -237,7 +237,16 @@ class _WatchNextAppState extends ConsumerState<WatchNextApp>
     // Use the global router instead of `context.go` — the routing must work
     // when the nav shell isn't mounted (e.g. user is on title detail or
     // login when the warm tap arrives).
-    _router.go('/title/$mediaType/$tmdbId');
+    //
+    // go('/home') first, then push('/title/...') so the back stack is
+    // [/home, /title/...]. `/title/:mt/:id` is a top-level route OUTSIDE
+    // the bottom-nav shell — using `_router.go` alone would replace the
+    // entire stack with the title screen, leaving no back target and
+    // no nav bar (which is the "stuck on that screen" symptom). The
+    // go-then-push pattern lands the user on title detail with /home
+    // sitting underneath so back / system-back returns them home.
+    _router.go('/home');
+    _router.push('/title/$mediaType/$tmdbId');
   }
 
   Future<void> _pushWidgets() async {
