@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchnext/providers/auth_provider.dart';
 import 'package:watchnext/providers/media_type_filter_provider.dart';
 import 'package:watchnext/providers/mode_provider.dart';
@@ -66,6 +67,18 @@ String _futureDateStr(int daysFromToday) {
 }
 
 void main() {
+  setUp(() async {
+    // Reset the on-disk cache between tests. setMockInitialValues by
+    // itself isn't enough — once `getInstance()` is called, the
+    // SharedPreferences singleton caches values in memory and ignores
+    // subsequent setMockInitialValues calls (per CLAUDE.md gotcha 11).
+    // reload() forces the cached singleton to re-read from the mock
+    // backing, picking up the empty store.
+    SharedPreferences.setMockInitialValues(const {});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+  });
+
   group('upcomingForYouProvider — All (filter null)', () {
     test('fans out to /discover/movie + /discover/tv and merges results',
         () async {
@@ -310,6 +323,101 @@ void main() {
     });
   });
 
+  group('upcomingForYouProvider — disk cache', () {
+    test('yields disk cache first, then fresh', () async {
+      // Seed prefs for the All-filter slot with a stale entry.
+      final cached = [
+        UpcomingTitle(
+          tmdbId: 999,
+          title: 'Cached Movie',
+          mediaType: 'movie',
+          releaseDate: DateTime(2026, 1, 1),
+          genres: const [],
+          matchScore: 50,
+        ),
+      ];
+      SharedPreferences.setMockInitialValues({
+        'wn_upcoming_cache_all':
+            jsonEncode(cached.map((e) => e.toJson()).toList()),
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+
+      final client = MockClient((req) async {
+        if (req.url.path.endsWith('/discover/movie')) {
+          return _json({
+            'results': [
+              {
+                'id': 100,
+                'title': 'Fresh Movie',
+                'release_date': _futureDateStr(7),
+                'genre_ids': const <int>[],
+              },
+            ],
+          });
+        }
+        if (req.url.path.endsWith('/discover/tv')) {
+          return _json({'results': const []});
+        }
+        return http.Response('unexpected: ${req.url}', 404);
+      });
+      final container = _container(client: client, mediaType: null);
+      final emitted = <List<UpcomingTitle>>[];
+      container.listen<AsyncValue<List<UpcomingTitle>>>(
+        upcomingForYouProvider,
+        (_, next) {
+          if (next.value != null) emitted.add(next.value!);
+        },
+        fireImmediately: true,
+      );
+      addTearDown(container.dispose);
+
+      // Wait for both emits.
+      await container.read(upcomingForYouProvider.future);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(emitted.length, greaterThanOrEqualTo(2),
+          reason: 'expected at least cached + fresh emits');
+      expect(emitted.first.first.tmdbId, 999,
+          reason: 'first emit should be the disk cache');
+      expect(emitted.last.first.tmdbId, 100,
+          reason: 'last emit should be the fresh TMDB result');
+    });
+
+    test('empty fresh result does NOT clobber a non-empty cache', () async {
+      // Seed cache.
+      final cached = [
+        UpcomingTitle(
+          tmdbId: 555,
+          title: 'Cached',
+          mediaType: 'movie',
+          releaseDate: DateTime(2026, 1, 1),
+          genres: const [],
+          matchScore: 30,
+        ),
+      ];
+      SharedPreferences.setMockInitialValues({
+        'wn_upcoming_cache_all':
+            jsonEncode(cached.map((e) => e.toJson()).toList()),
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+
+      // TMDB returns empty (network blip / transient empty response).
+      final client = MockClient((_) async => _json({'results': const []}));
+      final container = _container(client: client, mediaType: null);
+      addTearDown(container.dispose);
+      await container.read(upcomingForYouProvider.future);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      // Cache must still hold the old value — defensive against a
+      // single empty TMDB run wiping the visible row.
+      final raw = prefs.getString('wn_upcoming_cache_all');
+      expect(raw, isNotNull);
+      expect(raw, contains('555'));
+    });
+  });
+
   group('upcomingForYouProvider — taste-overlap re-rank', () {
     test('orders TV results by genre-overlap against the taste profile',
         () async {
@@ -349,6 +457,11 @@ void main() {
         },
       );
       addTearDown(container.dispose);
+      // Stream.value(tasteProfile) emits on the next microtask, so the
+      // upcoming provider would synchronously read `.value == null`
+      // and score everything at zero (preserving input order). Force
+      // the taste-profile stream to resolve first.
+      await container.read(tasteProfileProvider.future);
       final out = await container.read(upcomingForYouProvider.future);
       expect(out.map((e) => e.tmdbId).toList(), [2, 1]);
     });

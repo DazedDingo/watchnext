@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:developer' as developer;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/tmdb_genres.dart';
 import 'auth_provider.dart';
@@ -31,6 +35,78 @@ class UpcomingTitle {
   });
 
   String get key => '$mediaType:$tmdbId';
+
+  Map<String, dynamic> toJson() => {
+        'mediaType': mediaType,
+        'tmdbId': tmdbId,
+        'title': title,
+        'posterPath': posterPath,
+        'releaseDate': releaseDate?.toIso8601String(),
+        'genres': genres,
+        'matchScore': matchScore,
+      };
+
+  factory UpcomingTitle.fromJson(Map<String, dynamic> json) => UpcomingTitle(
+        mediaType: json['mediaType'] as String? ?? 'movie',
+        tmdbId: (json['tmdbId'] as num).toInt(),
+        title: json['title'] as String? ?? '',
+        posterPath: json['posterPath'] as String?,
+        releaseDate: (json['releaseDate'] is String &&
+                (json['releaseDate'] as String).isNotEmpty)
+            ? DateTime.tryParse(json['releaseDate'] as String)
+            : null,
+        genres: (json['genres'] as List?)
+                ?.whereType<String>()
+                .toList() ??
+            const <String>[],
+        matchScore: (json['matchScore'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// SharedPreferences key for the disk-backed cache. Stored verbatim as a
+/// JSON list of `UpcomingTitle.toJson()` payloads, keyed by the active
+/// media-type filter so swapping Movies/TV/All doesn't pollute the
+/// other slot's cached row.
+String _upcomingCacheKey(MediaTypeFilter? mediaType) {
+  switch (mediaType) {
+    case MediaTypeFilter.movie:
+      return 'wn_upcoming_cache_movie';
+    case MediaTypeFilter.tv:
+      return 'wn_upcoming_cache_tv';
+    case null:
+      return 'wn_upcoming_cache_all';
+  }
+}
+
+class _UpcomingDiskCache {
+  static List<UpcomingTitle>? load(
+    SharedPreferences prefs,
+    MediaTypeFilter? mediaType,
+  ) {
+    final raw = prefs.getString(_upcomingCacheKey(mediaType));
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return null;
+      return decoded
+          .whereType<Map>()
+          .map((e) =>
+              UpcomingTitle.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e) {
+      developer.log('Upcoming cache corrupt, dropping: $e', name: 'upcoming');
+      return null;
+    }
+  }
+
+  static Future<void> save(
+    SharedPreferences prefs,
+    MediaTypeFilter? mediaType,
+    List<UpcomingTitle> items,
+  ) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await prefs.setString(_upcomingCacheKey(mediaType), encoded);
+  }
 }
 
 /// Forward-looking window in days for both movie and TV discover queries.
@@ -71,13 +147,24 @@ const int kUpcomingLookbackDays = 7;
 /// tripped through the Phase 7 scoring CF — Upcoming rotates frequently
 /// and Claude scores are expensive; cheap genre-weight match is enough
 /// signal for a "what's coming?" surface.
+// Stale-while-revalidate StreamProvider — yields the disk cache (if any)
+// first so the row paints instantly, then runs the TMDB discover calls
+// and yields fresh data. NOT autoDispose: the row was flashing in and
+// out on Home as the provider got disposed every time the user navigated
+// away and back, OR when any watched dependency (mode, mediaType,
+// watchedKeys, taste profile) emitted. With this shape, the cached
+// yield keeps the row visible during every re-run.
 final upcomingForYouProvider =
-    FutureProvider.autoDispose<List<UpcomingTitle>>((ref) async {
+    StreamProvider<List<UpcomingTitle>>((ref) async* {
+  final mediaType = ref.watch(mediaTypeFilterProvider);
+  final prefs = await SharedPreferences.getInstance();
+  final cached = _UpcomingDiskCache.load(prefs, mediaType);
+  if (cached != null) yield cached;
+
   final tmdb = ref.watch(tmdbServiceProvider);
   final profile = ref.watch(tasteProfileProvider).value;
   final watchedKeys = ref.watch(watchedKeysProvider);
   final mode = ref.watch(viewModeProvider);
-  final mediaType = ref.watch(mediaTypeFilterProvider);
   final uid = ref.watch(currentUidProvider);
 
   final genreWeights = _resolveGenreWeights(profile, uid: uid, mode: mode);
@@ -144,7 +231,15 @@ final upcomingForYouProvider =
     return ar.compareTo(br);
   });
 
-  return out.take(20).toList();
+  final fresh = out.take(20).toList();
+  // Only persist non-empty fresh results — an empty fresh list usually
+  // means TMDB returned no candidates this run (network blip, transient
+  // empty response). Keeping the previous cache intact lets the row stay
+  // visible on the next cold start instead of going blank.
+  if (fresh.isNotEmpty) {
+    await _UpcomingDiskCache.save(prefs, mediaType, fresh);
+  }
+  yield fresh;
 });
 
 String _fmt(DateTime d) =>

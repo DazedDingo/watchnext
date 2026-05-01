@@ -2095,35 +2095,35 @@ class _UpcomingForYouRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(upcomingForYouProvider);
-    return async.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (items) {
-        if (items.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionLabel('UPCOMING FOR YOU'),
-            SizedBox(
-              height: 230,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final t = items[i];
-                  return _UpcomingCard(
-                    item: t,
-                    onTap: () =>
-                        context.push('/title/${t.mediaType}/${t.tmdbId}'),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
+    // `async.value` exposes the previous successful emit while a fresh
+    // run is in flight — without this the row used to "flash in and out"
+    // every time a watched dependency (mode / mediaType / watchedKeys /
+    // taste profile) re-emitted, because `async.when(loading: …)` reset
+    // the visible state to SizedBox.shrink for each tick.
+    final items = async.value;
+    if (items == null || items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('UPCOMING FOR YOU'),
+        SizedBox(
+          height: 230,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final t = items[i];
+              return _UpcomingCard(
+                item: t,
+                onTap: () =>
+                    context.push('/title/${t.mediaType}/${t.tmdbId}'),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
