@@ -9,11 +9,6 @@ const _destinations = [
     label: 'Home',
   ),
   LiquidNavDestination(
-    icon: Icons.explore_outlined,
-    selectedIcon: Icons.explore,
-    label: 'Discover',
-  ),
-  LiquidNavDestination(
     icon: Icons.video_library_outlined,
     selectedIcon: Icons.video_library,
     label: 'Library',
@@ -51,7 +46,6 @@ void main() {
 
       // Home is selected → filled home + outlined for the rest.
       expect(find.byIcon(Icons.home), findsOneWidget);
-      expect(find.byIcon(Icons.explore_outlined), findsOneWidget);
       expect(find.byIcon(Icons.video_library_outlined), findsOneWidget);
       expect(find.byIcon(Icons.person_outline), findsOneWidget);
       expect(find.byIcon(Icons.home_outlined), findsNothing);
@@ -65,7 +59,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.video_library_outlined));
-      expect(tapped, 2);
+      expect(tapped, 1);
     });
 
     testWidgets('renders at the documented compact height', (tester) async {
@@ -85,7 +79,7 @@ void main() {
 
       // Verifies that selecting a different index renders the new filled
       // icon — the AnimatedPositioned under the hood handles the slide.
-      await tester.pumpWidget(_harness(selectedIndex: 3, onTap: (_) {}));
+      await tester.pumpWidget(_harness(selectedIndex: 2, onTap: (_) {}));
       await tester.pumpAndSettle();
 
       expect(find.byIcon(Icons.person), findsOneWidget);

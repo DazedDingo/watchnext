@@ -122,6 +122,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               controller: _searchCtrl,
               onChanged: _onSearchChanged,
               textInputAction: TextInputAction.search,
+              // Discover is now reached via the Home search-entry pill — the
+              // user has already telegraphed "I want to type a query", so
+              // pop the keyboard immediately. Defaults to focused on cold
+              // navigation; subsequent in-app pushes of /discover also
+              // refocus, which is the desired behaviour.
+              autofocus: true,
               decoration: InputDecoration(
                 hintText: 'Search movies & TV',
                 prefixIcon: const Icon(Icons.search),

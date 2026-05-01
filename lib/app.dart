@@ -409,34 +409,37 @@ class _ScaffoldWithNavBarState extends ConsumerState<ScaffoldWithNavBar> {
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
     int selectedIndex = 0;
-    if (location.startsWith('/discover')) selectedIndex = 1;
+    // /discover lost its bottom-nav slot — it's now reached via the Home
+    // search-entry pill. The route still exists; we just don't highlight
+    // any nav destination while the user is on it (Home stays selected
+    // since /discover is conceptually a search modal opened from Home).
     if (location.startsWith('/library') ||
         location.startsWith('/watchlist') ||
         location.startsWith('/history')) {
-      selectedIndex = 2;
+      selectedIndex = 1;
     }
     // Stats now lives under Profile as a nested route (/profile/stats); the
     // Profile tab stays highlighted while the user is inside Stats.
     if (location.startsWith('/profile') || location.startsWith('/stats')) {
-      selectedIndex = 3;
+      selectedIndex = 2;
     }
 
     return Scaffold(
       body: widget.child,
-      // 56px icon-only bar — 4 destinations. Stats was folded into Profile
-      // (see CLAUDE.md gotcha "Library tab"). LiquidNavBar keeps the same
-      // footprint as the retired M3 NavigationBar but renders a gradient
-      // accent "blob" indicator with a soft glow that slides between tabs.
+      // 56px icon-only bar — 3 destinations. Discover was folded into the
+      // Home search-entry pill (tapping Home's search bar pushes /discover
+      // with autofocus). Stats lives under Profile. LiquidNavBar keeps the
+      // same footprint as the retired M3 NavigationBar but renders a
+      // gradient accent "blob" indicator that slides between tabs.
       bottomNavigationBar: LiquidNavBar(
         selectedIndex: selectedIndex,
         destinations: const [
           LiquidNavDestination(icon: Icons.home_outlined, selectedIcon: Icons.home, label: 'Home'),
-          LiquidNavDestination(icon: Icons.explore_outlined, selectedIcon: Icons.explore, label: 'Discover'),
           LiquidNavDestination(icon: Icons.video_library_outlined, selectedIcon: Icons.video_library, label: 'Library'),
           LiquidNavDestination(icon: Icons.person_outline, selectedIcon: Icons.person, label: 'Profile'),
         ],
         onDestinationSelected: (i) {
-          const routes = ['/home', '/discover', '/library', '/profile'];
+          const routes = ['/home', '/library', '/profile'];
           context.go(routes[i]);
         },
       ),

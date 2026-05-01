@@ -41,6 +41,7 @@ import '../../widgets/genre_sheet.dart';
 import '../../widgets/help_button.dart';
 import '../../widgets/liquid_segmented_button.dart';
 import '../../widgets/mode_toggle.dart';
+import '../../widgets/search_entry_button.dart';
 import '../../widgets/watchnext_logo.dart';
 import '../../widgets/year_range_slider.dart';
 
@@ -50,7 +51,7 @@ const _homeHelp =
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
     '• Filters — tap to expand. Genres (multi-select), runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), and awards (Best Picture, Palme d\'Or, BAFTA Best Film) live here. The header summarises what\'s active.\n'
-    '• Search — type to narrow to titles containing your query.\n'
+    '• Search — tap the search bar to open Discover (TMDB-wide search across movies, TV, cast, and keywords; trending + browse-by-genre rows when the query is empty).\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
     '• Ask AI — chat with the concierge for a bespoke recommendation. Default placement is the sparkle icon in the app bar; switch to a floating button or hide it entirely from Profile → Preferences → Ask AI placement.\n'
@@ -66,10 +67,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   // IDs dismissed via "Not tonight" — local per-session, not persisted.
   final _dismissed = <String>{};
-
-  // Live search query. Local per-session; cleared on screen rebuild.
-  final _searchCtrl = TextEditingController();
-  String _search = '';
 
   // One-shot: kick off a backfill of `imdb_id` on existing rec docs as soon
   // as Home loads. Without this, the row-level IMDb chip only populates
@@ -99,7 +96,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void dispose() {
     _alreadyFreshTimer?.cancel();
-    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -289,20 +285,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((r) => r.curator == curatedSource.name)
             .toList();
 
-    // Search filter — trimmed case-insensitive substring on title.
-    final q = _search.trim().toLowerCase();
-    final searchFiltered = q.isEmpty
-        ? curatorFiltered
-        : curatorFiltered
-            .where((r) => r.title.toLowerCase().contains(q))
-            .toList();
+    // Search lives on Discover now (`SearchEntryButton` pushes /discover); the
+    // old local substring filter over `curatorFiltered` couldn't find titles
+    // outside the rec pool, so it was a misleading affordance.
 
     // Watched filter — default excludes anything the household (Together) or
     // current user (Solo) has already watched. User can flip the toggle in the
     // filter panel to bring them back.
     final filtered = includeWatched
-        ? searchFiltered
-        : searchFiltered.where((r) => !watchedKeys.contains(r.id)).toList();
+        ? curatorFiltered
+        : curatorFiltered.where((r) => !watchedKeys.contains(r.id)).toList();
 
     // Animation soft cap — trending TV + top-rated TV are heavily anime-
     // weighted on TMDB and there's no server-side exclude, so the list
@@ -474,10 +466,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 _fireRefresh();
               },
             ),
-            _SearchField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _search = v),
-            ),
+            const SearchEntryButton(),
             const _UpNextRow(),
             if (tonightsPick != null) ...[
               const _SectionLabel("TONIGHT'S PICK"),
@@ -1339,46 +1328,6 @@ class _FilterSwitchRow extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Search field ─────────────────────────────────────────────────────────────
-
-class _SearchField extends StatelessWidget {
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-
-  const _SearchField({required this.controller, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      child: TextField(
-        controller: controller,
-        onChanged: onChanged,
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: 'Search titles…',
-          prefixIcon: const Icon(Icons.search, size: 20),
-          suffixIcon: controller.text.isEmpty
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  },
-                ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         ),
       ),
     );
