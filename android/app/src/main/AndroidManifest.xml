@@ -33,10 +33,13 @@
               android:name="flutter_deeplinking_enabled"
               android:value="false"
               />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
+            <!-- Note: the MAIN+LAUNCHER intent-filter has moved off MainActivity
+                 and onto activity-alias entries (LauncherClassic / LauncherVivid /
+                 LauncherMinimal / LauncherClapper) so users can pick their
+                 launcher icon from Profile → Preferences → App icon. The
+                 native AppIconSwitcher (MainActivity.kt) toggles which alias
+                 is enabled. Each alias targets MainActivity, so once the user
+                 launches the app the runtime is identical regardless of icon. -->
             <!-- Share-to-Save (Phase 4). Accept plain text / URLs from the
                  Android share sheet so users can forward IMDb, Letterboxd,
                  TMDB, and generic links into WatchNext. -->
@@ -58,6 +61,64 @@
                 <data android:scheme="wn"/>
             </intent-filter>
         </activity>
+        <!-- ─── Launcher icon variants (activity-alias switcher) ────────────
+             Exactly one alias is enabled at a time. AppIconSwitcher (Kotlin)
+             flips them via PackageManager.setComponentEnabledSetting; the
+             Flutter side talks to it through the `wn/app_icon` MethodChannel.
+             LauncherClassic is enabled by default (matches the original
+             icon that shipped pre-v0.9.4). -->
+        <activity-alias
+            android:name=".LauncherClassic"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher"
+            android:label="WatchNext"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherVivid"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_vivid"
+            android:roundIcon="@mipmap/ic_launcher_vivid"
+            android:label="WatchNext"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherMinimal"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_minimal"
+            android:roundIcon="@mipmap/ic_launcher_minimal"
+            android:label="WatchNext"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherClapper"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_clapper"
+            android:roundIcon="@mipmap/ic_launcher_clapper"
+            android:label="WatchNext"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Home-screen widget receivers. Both extend
              es.antonborri.home_widget.HomeWidgetProvider so they pick up the
              SharedPreferences payload pushed from

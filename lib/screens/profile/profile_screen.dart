@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../providers/app_icon_provider.dart';
 import '../../providers/ask_ai_placement_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/household_provider.dart';
@@ -16,6 +17,7 @@ import '../../providers/theme_provider.dart';
 import '../../providers/trakt_provider.dart';
 import '../../providers/up_next_style_provider.dart';
 import '../../providers/upnext_provider.dart';
+import '../../services/app_icon_service.dart';
 import '../../widgets/help_button.dart';
 import 'widget_diagnostics_sheet.dart';
 
@@ -26,6 +28,7 @@ const _profileHelp =
     '• Reveal notifications — optional push when a prediction reveal is ready.\n'
     '• Ask AI placement — show the concierge entry as an app-bar icon (default), a floating action button, or hide it completely.\n'
     '• Up next style — pick how the Home "Up Next" row presents itself: an auto-cycling marquee (default) or a static horizontal strip.\n'
+    '• App icon — pick which launcher icon represents WatchNext on your home screen. Classic (the original), Vivid (high-contrast film reel), Minimal (clean play button), or Clapperboard.\n'
     '• Trakt — link to auto-import history and push ratings.\n'
     '• Stremio addon — mints a private URL you paste into Stremio; your shared watchlist then appears as a catalog inside the Stremio app.\n'
     '• Sign out — clears your session on this device. Your data stays in the household.';
@@ -124,6 +127,7 @@ class ProfileScreen extends ConsumerWidget {
           const _AccentPicker(),
           const _AskAiPlacementTile(),
           const _UpNextStyleTile(),
+          const _AppIconTile(),
           const Divider(),
 
           // ── Stats ──────────────────────────────────────────────────────
@@ -598,6 +602,164 @@ class _UpNextStyleTile extends ConsumerWidget {
             PopupMenuItem(value: s, child: Text(s.label)),
         ],
         icon: const Icon(Icons.arrow_drop_down),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App icon picker — switches the Android launcher icon via activity-alias.
+// The native swap may take a moment to reflect on the home screen; some
+// launchers cache and require a manual refresh, hence the snackbar warning.
+// ---------------------------------------------------------------------------
+
+class _AppIconTile extends ConsumerWidget {
+  const _AppIconTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(appIconControllerProvider);
+    return ListTile(
+      dense: true,
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.asset(
+          current.assetPath,
+          width: 28,
+          height: 28,
+          fit: BoxFit.cover,
+        ),
+      ),
+      title: const Text('App icon'),
+      subtitle: Text(current.label),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _AppIconPickerSheet.show(context),
+    );
+  }
+}
+
+class _AppIconPickerSheet extends ConsumerWidget {
+  const _AppIconPickerSheet();
+
+  static Future<void> show(BuildContext context) => showModalBottomSheet(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (_) => const _AppIconPickerSheet(),
+      );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(appIconControllerProvider);
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Choose your app icon',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Android may take a moment to refresh your home screen — '
+              'a few launchers need a manual icon refresh after the swap.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            for (final option in AppIconOption.values)
+              _IconOptionRow(
+                option: option,
+                selected: option == current,
+                onTap: () async {
+                  if (option == current) {
+                    Navigator.of(context).pop();
+                    return;
+                  }
+                  await ref
+                      .read(appIconControllerProvider.notifier)
+                      .set(option);
+                  if (!context.mounted) return;
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(
+                      'Switched to ${option.label}. '
+                      "If your home screen doesn't refresh, "
+                      'remove and re-add the icon manually.',
+                    ),
+                    duration: const Duration(seconds: 4),
+                  ));
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IconOptionRow extends StatelessWidget {
+  final AppIconOption option;
+  final bool selected;
+  final VoidCallback onTap;
+  const _IconOptionRow({
+    required this.option,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected
+            ? scheme.primary.withValues(alpha: 0.10)
+            : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    option.assetPath,
+                    width: 56,
+                    height: 56,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(option.label,
+                          style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: 2),
+                      Text(
+                        option.description,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  Icon(Icons.check_circle, color: scheme.primary, size: 22),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

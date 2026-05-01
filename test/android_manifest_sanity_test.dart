@@ -74,19 +74,76 @@ void main() {
     });
   });
 
-  group('AndroidManifest — launcher activity sanity', () {
-    test('exactly one MAIN/LAUNCHER activity (drift guard)', () {
-      // A drift bug could add a second LAUNCHER activity (eg. when copy-
-      // pasting a callback activity stanza), which makes Android show two
-      // icons in the launcher.
+  group('AndroidManifest — launcher icon switcher', () {
+    // Four `<activity-alias>` entries (Classic / Vivid / Minimal / Clapper)
+    // back the in-app launcher-icon picker. The native AppIconSwitcher
+    // toggles which is enabled. Invariant: exactly one is enabled at any
+    // time, otherwise the user either sees zero icons (no aliases enabled)
+    // or duplicates (two aliases enabled).
+    test('exactly four LAUNCHER aliases — one per icon variant', () {
       final m = _manifest();
       final mainCount =
           'android.intent.action.MAIN'.allMatches(m).length;
       final launcherCount =
           'android.intent.category.LAUNCHER'.allMatches(m).length;
-      expect(mainCount, 1, reason: 'exactly one MAIN intent allowed.');
-      expect(launcherCount, 1,
-          reason: 'two LAUNCHER intents = two icons in the launcher.');
+      expect(mainCount, 4,
+          reason: 'four MAIN intents — one per launcher-icon alias '
+              '(Classic, Vivid, Minimal, Clapper).');
+      expect(launcherCount, 4,
+          reason: 'four LAUNCHER intents — one per alias.');
+    });
+
+    test('every variant alias is declared by name', () {
+      final m = _manifest();
+      for (final alias in const [
+        'LauncherClassic',
+        'LauncherVivid',
+        'LauncherMinimal',
+        'LauncherClapper',
+      ]) {
+        expect(m.contains('android:name=".$alias"'), isTrue,
+            reason: '$alias missing — the AppIconSwitcher targets four '
+                'aliases by name, dropping one breaks setAlias().');
+      }
+    });
+
+    test('exactly one alias starts enabled (Classic)', () {
+      // If zero aliases are enabled, the launcher loses the app icon. If
+      // two are enabled, the launcher shows two icons. Manifest must ship
+      // with Classic on, the rest off — runtime swaps preserve the
+      // invariant.
+      final m = _manifest();
+      final enabledTrue = 'android:enabled="true"'.allMatches(m).length;
+      final enabledFalse = 'android:enabled="false"'.allMatches(m).length;
+      expect(enabledTrue, 1,
+          reason: 'exactly one alias may declare enabled="true" at install '
+              'time (Classic).');
+      expect(enabledFalse, 3,
+          reason: 'three aliases must declare enabled="false" so the '
+              'native switcher is the only path to enable them.');
+    });
+
+    test('every alias targets MainActivity', () {
+      final m = _manifest();
+      final targetCount =
+          'android:targetActivity=".MainActivity"'.allMatches(m).length;
+      expect(targetCount, 4,
+          reason: 'all four aliases must point at MainActivity — '
+              'targeting elsewhere would launch a different entrypoint.');
+    });
+
+    test('MainActivity itself no longer carries the LAUNCHER filter', () {
+      // The LAUNCHER filter has moved off MainActivity and onto the four
+      // activity-aliases. If a future edit reintroduces it on MainActivity,
+      // we'd ship five launcher icons — four from aliases, one from the
+      // activity itself.
+      final m = _manifest();
+      final mainStart = m.indexOf('<activity\n            android:name=".MainActivity"');
+      final mainEnd = m.indexOf('</activity>', mainStart);
+      final mainBlock = m.substring(mainStart, mainEnd);
+      expect(mainBlock.contains('android.intent.category.LAUNCHER'), isFalse,
+          reason: 'MainActivity must NOT carry LAUNCHER — the aliases '
+              'own that responsibility for the icon-switcher feature.');
     });
   });
 }
