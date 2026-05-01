@@ -45,7 +45,7 @@ extension AppIconOptionX on AppIconOption {
           'Solid violet square with a clean white play triangle. Modern and flat.',
         AppIconOption.clapper => 'Director\'s clapperboard slate with a gold WN.',
         AppIconOption.cream =>
-          'Classic\'s navy + gold reel with cream perforated strips and cream-filled reel holes.',
+          'The original Classic reel with the top and bottom film bars recoloured cream.',
       };
 }
 
