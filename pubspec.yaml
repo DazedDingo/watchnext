@@ -1,7 +1,7 @@
 name: watchnext
 description: "Shared movie & TV recommender for two-person households."
 publish_to: 'none'
-version: 0.9.1+129
+version: 0.9.2+130
 
 environment:
   sdk: ^3.11.4

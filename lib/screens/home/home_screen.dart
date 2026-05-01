@@ -50,8 +50,8 @@ const _homeHelp =
     '• Up next — appears above Tonight\'s Pick when an in-progress show has a new episode airing in the next week. Hidden whenever there\'s nothing scheduled.\n'
     '• Tonight\'s Pick — the top scored title. Tap "Let\'s watch this" to open it, or "Not tonight" to skip for this session.\n'
     '• Recommended for you — the rest of the ranked list. Tap any to see details.\n'
-    '• Filters — tap to expand. Genres (multi-select), runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), and awards (Best Picture, Palme d\'Or, BAFTA Best Film) live here. The header summarises what\'s active.\n'
-    '• Search — tap the search bar to open Discover (TMDB-wide search across movies, TV, cast, and keywords; trending + browse-by-genre rows when the query is empty).\n'
+    '• Search — the bar at the top of Home opens Discover for a TMDB-wide search across movies, TV, cast, and keywords (trending + browse-by-genre rows when the query is empty). Search ignores the filters below — those only narrow the recommendations on this screen.\n'
+    '• Filter recommendations — tap to expand. Genres (multi-select), runtime bucket, year range, sort mode (Top-rated / Popularity / Recent / Underseen), curated source (A24, Neon, Studio Ghibli, Searchlight), and awards (Best Picture, Palme d\'Or, BAFTA Best Film) live here. The header summarises what\'s active and applies only to the rec list below.\n'
     '• Solo / Together toggle — top-right. Solo ranks for you alone; Together ranks for the household.\n'
     '• Pull down to refresh — regenerates recommendations from your watchlist + trending + Reddit buzz + filtered discover.\n'
     '• Ask AI — chat with the concierge for a bespoke recommendation. Default placement is the sparkle icon in the app bar; switch to a floating button or hide it entirely from Profile → Preferences → Ask AI placement.\n'
@@ -388,8 +388,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 32),
           children: [
+            // Search lives at the very top of the body so it reads as a
+            // doorway OUT of Home (to /discover, the full-catalog search
+            // surface) — not as another knob in the filter pipeline below.
+            // The divider beneath it visually anchors the boundary: above =
+            // search, below = the recommendations the filters apply to.
+            const SearchEntryButton(),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Divider(height: 1),
+            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
               child: Row(
                 children: [
                   if (mode == ViewMode.together) ...[
@@ -466,7 +476,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 _fireRefresh();
               },
             ),
-            const SearchEntryButton(),
             const _UpNextRow(),
             if (tonightsPick != null) ...[
               const _SectionLabel("TONIGHT'S PICK"),
@@ -727,7 +736,10 @@ class _FiltersPanelState extends State<_FiltersPanel> {
                     ),
                     const SizedBox(width: 8),
                     const Text(
-                      'Filters',
+                      // Scope is explicit in the label so users don't read
+                      // these as applying to the search bar above (search
+                      // hits the full TMDB catalog and ignores filters).
+                      'Filter recommendations',
                       style: TextStyle(fontWeight: FontWeight.w500),
                     ),
                     if (active > 0) ...[
