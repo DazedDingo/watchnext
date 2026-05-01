@@ -75,22 +75,22 @@ void main() {
   });
 
   group('AndroidManifest — launcher icon switcher', () {
-    // Four `<activity-alias>` entries (Classic / Vivid / Minimal / Clapper)
-    // back the in-app launcher-icon picker. The native AppIconSwitcher
+    // Five `<activity-alias>` entries (Classic / Vivid / Minimal / Clapper /
+    // Cream) back the in-app launcher-icon picker. The native AppIconSwitcher
     // toggles which is enabled. Invariant: exactly one is enabled at any
     // time, otherwise the user either sees zero icons (no aliases enabled)
     // or duplicates (two aliases enabled).
-    test('exactly four LAUNCHER aliases — one per icon variant', () {
+    test('exactly five LAUNCHER aliases — one per icon variant', () {
       final m = _manifest();
       final mainCount =
           'android.intent.action.MAIN'.allMatches(m).length;
       final launcherCount =
           'android.intent.category.LAUNCHER'.allMatches(m).length;
-      expect(mainCount, 4,
-          reason: 'four MAIN intents — one per launcher-icon alias '
-              '(Classic, Vivid, Minimal, Clapper).');
-      expect(launcherCount, 4,
-          reason: 'four LAUNCHER intents — one per alias.');
+      expect(mainCount, 5,
+          reason: 'five MAIN intents — one per launcher-icon alias '
+              '(Classic, Vivid, Minimal, Clapper, Cream).');
+      expect(launcherCount, 5,
+          reason: 'five LAUNCHER intents — one per alias.');
     });
 
     test('every variant alias is declared by name', () {
@@ -100,9 +100,10 @@ void main() {
         'LauncherVivid',
         'LauncherMinimal',
         'LauncherClapper',
+        'LauncherCream',
       ]) {
         expect(m.contains('android:name=".$alias"'), isTrue,
-            reason: '$alias missing — the AppIconSwitcher targets four '
+            reason: '$alias missing — the AppIconSwitcher targets five '
                 'aliases by name, dropping one breaks setAlias().');
       }
     });
@@ -118,8 +119,8 @@ void main() {
       expect(enabledTrue, 1,
           reason: 'exactly one alias may declare enabled="true" at install '
               'time (Classic).');
-      expect(enabledFalse, 3,
-          reason: 'three aliases must declare enabled="false" so the '
+      expect(enabledFalse, 4,
+          reason: 'four aliases must declare enabled="false" so the '
               'native switcher is the only path to enable them.');
     });
 
@@ -127,8 +128,8 @@ void main() {
       final m = _manifest();
       final targetCount =
           'android:targetActivity=".MainActivity"'.allMatches(m).length;
-      expect(targetCount, 4,
-          reason: 'all four aliases must point at MainActivity — '
+      expect(targetCount, 5,
+          reason: 'all five aliases must point at MainActivity — '
               'targeting elsewhere would launch a different entrypoint.');
     });
 

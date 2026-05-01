@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 /// Profile → Preferences → App icon. Each maps to an `<activity-alias>`
 /// in `AndroidManifest.xml`; the native [AppIconSwitcher] toggles which
 /// is enabled.
-enum AppIconOption { classic, vivid, minimal, clapper }
+enum AppIconOption { classic, vivid, minimal, clapper, cream }
 
 extension AppIconOptionX on AppIconOption {
   /// Matches the alias's short name on the native side
@@ -15,6 +15,7 @@ extension AppIconOptionX on AppIconOption {
         AppIconOption.vivid => 'Vivid',
         AppIconOption.minimal => 'Minimal',
         AppIconOption.clapper => 'Clapper',
+        AppIconOption.cream => 'Cream',
       };
 
   /// Path to the 512×512 preview shipped under `assets/icons/` so the
@@ -24,6 +25,7 @@ extension AppIconOptionX on AppIconOption {
         AppIconOption.vivid => 'assets/icons/ic_launcher_vivid.png',
         AppIconOption.minimal => 'assets/icons/ic_launcher_minimal.png',
         AppIconOption.clapper => 'assets/icons/ic_launcher_clapper.png',
+        AppIconOption.cream => 'assets/icons/ic_launcher_cream.png',
       };
 
   String get label => switch (this) {
@@ -31,6 +33,7 @@ extension AppIconOptionX on AppIconOption {
         AppIconOption.vivid => 'Vivid',
         AppIconOption.minimal => 'Minimal',
         AppIconOption.clapper => 'Clapperboard',
+        AppIconOption.cream => 'Cream',
       };
 
   String get description => switch (this) {
@@ -41,6 +44,8 @@ extension AppIconOptionX on AppIconOption {
         AppIconOption.minimal =>
           'Solid violet square with a clean white play triangle. Modern and flat.',
         AppIconOption.clapper => 'Director\'s clapperboard slate with a gold WN.',
+        AppIconOption.cream =>
+          'Classic\'s navy + gold reel with cream perforated strips and cream-filled reel holes.',
       };
 }
 

@@ -11,6 +11,7 @@ void main() {
       expect(AppIconOption.vivid.nativeKey, 'Vivid');
       expect(AppIconOption.minimal.nativeKey, 'Minimal');
       expect(AppIconOption.clapper.nativeKey, 'Clapper');
+      expect(AppIconOption.cream.nativeKey, 'Cream');
     });
 
     test('every option points at an existing asset path', () {
@@ -25,6 +26,7 @@ void main() {
       expect(appIconOptionFromName('vivid'), AppIconOption.vivid);
       expect(appIconOptionFromName('minimal'), AppIconOption.minimal);
       expect(appIconOptionFromName('clapper'), AppIconOption.clapper);
+      expect(appIconOptionFromName('cream'), AppIconOption.cream);
       expect(appIconOptionFromName(null), AppIconOption.classic);
       expect(appIconOptionFromName('garbage'), AppIconOption.classic);
     });
@@ -34,6 +36,7 @@ void main() {
       expect(appIconOptionFromNativeKey('Vivid'), AppIconOption.vivid);
       expect(appIconOptionFromNativeKey('Minimal'), AppIconOption.minimal);
       expect(appIconOptionFromNativeKey('Clapper'), AppIconOption.clapper);
+      expect(appIconOptionFromNativeKey('Cream'), AppIconOption.cream);
       // Defensive: anything else collapses to Classic so the picker is never
       // stuck rendering an "unknown" state.
       expect(appIconOptionFromNativeKey(null), AppIconOption.classic);

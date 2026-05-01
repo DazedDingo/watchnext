@@ -119,6 +119,19 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity-alias>
+        <activity-alias
+            android:name=".LauncherCream"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_cream"
+            android:roundIcon="@mipmap/ic_launcher_cream"
+            android:label="WatchNext"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Home-screen widget receivers. Both extend
              es.antonborri.home_widget.HomeWidgetProvider so they pick up the
              SharedPreferences payload pushed from

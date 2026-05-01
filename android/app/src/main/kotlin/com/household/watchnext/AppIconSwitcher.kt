@@ -26,6 +26,7 @@ class AppIconSwitcher(private val activity: Activity) {
         Alias(short = "Vivid", className = "$pkg.LauncherVivid"),
         Alias(short = "Minimal", className = "$pkg.LauncherMinimal"),
         Alias(short = "Clapper", className = "$pkg.LauncherClapper"),
+        Alias(short = "Cream", className = "$pkg.LauncherCream"),
     )
 
     /** Returns the short name (e.g. "Classic") of whichever alias is currently enabled.

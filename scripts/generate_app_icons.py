@@ -1,4 +1,4 @@
-"""Generate three alternative WatchNext launcher icons.
+"""Generate four alternative WatchNext launcher icons.
 
 Originals at `mipmap-*/ic_launcher.png` are NOT touched (the user wants
 "Classic" preserved as one option).
@@ -7,6 +7,8 @@ Outputs per density:
   ic_launcher_vivid.png    — high-contrast film reel (fixes black-on-black)
   ic_launcher_minimal.png  — solid accent + clean play triangle
   ic_launcher_clapper.png  — clapperboard slate
+  ic_launcher_cream.png    — Classic base, cream perforated strips + cream
+                             reel holes (visual sibling to Classic)
 
 Plus 512px previews under `assets/icons/` so the in-app settings picker
 can render them without poking native resources.
@@ -268,6 +270,111 @@ def render_clapper(size: int = 1024) -> Image.Image:
     return out
 
 
+# ════════════════════════════ Cream ══════════════════════════════════════
+def render_cream(size: int = 1024) -> Image.Image:
+    """Classic's dark navy + gold reel, but with cream perforated strips
+    and cream-filled reel holes. The cream replaces every dark element
+    that was hard to read on the original badge."""
+    BG_TOP = (16, 22, 42)
+    BG_BOTTOM = (8, 10, 22)
+    CREAM = (240, 226, 188)
+    CREAM_HI = (252, 244, 215)
+    CREAM_SHADOW = (190, 170, 130)
+    GOLD = (250, 196, 80)
+    GOLD_HI = (255, 220, 120)
+    GOLD_LO = (170, 110, 30)
+    HUB = (220, 60, 56)
+    HUB_HI = (255, 140, 130)
+
+    bg = radial_bg(size, BG_TOP, BG_BOTTOM).convert("RGBA")
+    d = ImageDraw.Draw(bg, "RGBA")
+
+    # Cream film strips with dark sprocket cut-outs (perforated)
+    strip_h = int(size * 0.155)
+    for y_top in (0, size - strip_h):
+        d.rectangle((0, y_top, size, y_top + strip_h), fill=CREAM)
+        # subtle cream-shadow line on the inward edge of each strip
+        if y_top == 0:
+            d.rectangle(
+                (0, y_top + strip_h - max(2, int(size * 0.005)),
+                 size, y_top + strip_h),
+                fill=CREAM_SHADOW,
+            )
+        else:
+            d.rectangle(
+                (0, y_top, size, y_top + max(2, int(size * 0.005))),
+                fill=CREAM_SHADOW,
+            )
+        # sprocket holes — dark cut-outs through the cream strip
+        n = 8
+        hole_w = int(size * 0.085)
+        hole_h = int(strip_h * 0.30)
+        inset_y = int(strip_h * 0.13)
+        pad = (size - n * hole_w) / (n + 1)
+        # use the average bg color near the strip so the cut-out reads as "see-through"
+        cutout = (BG_TOP[0], BG_TOP[1], BG_TOP[2], 255)
+        for i in range(n):
+            x = int(pad + i * (hole_w + pad))
+            for row_y in (y_top + inset_y, y_top + strip_h - inset_y - hole_h):
+                d.rounded_rectangle(
+                    (x, row_y, x + hole_w, row_y + hole_h),
+                    radius=hole_h // 3, fill=cutout,
+                )
+
+    # Central reel — same composition as Vivid (Classic's family) but with
+    # CREAM-filled drilled holes instead of dark ones.
+    cx = cy = size // 2
+    R = int(size * 0.34)
+    soft_glow(bg, cx, cy, int(R * 1.18), GOLD, alpha=80)
+    d.ellipse((cx - R, cy - R, cx + R, cy + R), fill=GOLD,
+              outline=GOLD_LO, width=int(R * 0.10))
+    inner = int(R * 0.86)
+    d.ellipse((cx - inner, cy - inner, cx + inner, cy + inner),
+              outline=GOLD_HI, width=max(2, int(R * 0.025)))
+
+    n_holes = 6
+    hr = int(R * 0.18)
+    orbit = int(R * 0.55)
+    for i in range(n_holes):
+        a = 2 * math.pi * i / n_holes - math.pi / 2
+        x = cx + int(orbit * math.cos(a))
+        y = cy + int(orbit * math.sin(a))
+        # cream fill with a thin gold-shadow rim so it reads as a hole, not a dot
+        d.ellipse((x - hr, y - hr, x + hr, y + hr),
+                  fill=CREAM, outline=GOLD_LO,
+                  width=max(2, int(R * 0.022)))
+        # inner ring shading for depth
+        d.ellipse((x - hr + 5, y - hr + 5, x + hr - 5, y + hr - 5),
+                  outline=CREAM_SHADOW,
+                  width=max(1, int(R * 0.012)))
+
+    # Hub: dark ring + red spindle + glossy highlight
+    hub_r = int(R * 0.28)
+    d.ellipse((cx - hub_r, cy - hub_r, cx + hub_r, cy + hub_r),
+              fill=(20, 18, 30, 255), outline=GOLD_LO,
+              width=max(2, int(R * 0.025)))
+    sp_r = int(R * 0.14)
+    d.ellipse((cx - sp_r, cy - sp_r, cx + sp_r, cy + sp_r), fill=HUB)
+    sh_r = int(sp_r * 0.45)
+    d.ellipse((cx - sh_r - 3, cy - sh_r - 6,
+               cx - sh_r + sh_r + 3, cy - sh_r + sh_r),
+              fill=(*HUB_HI, 230))
+
+    # Tiny play triangle baked into the spindle (matches Vivid for family
+    # consistency with the iconography).
+    s = int(R * 0.085)
+    d.polygon(
+        [(cx - s + 2, cy - int(s * 1.05)),
+         (cx - s + 2, cy + int(s * 1.05)),
+         (cx + int(s * 1.25), cy)],
+        fill=(255, 248, 230, 255),
+    )
+
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(bg, (0, 0), round_mask(size))
+    return out
+
+
 # ════════════════════════════ writers ═════════════════════════════════════
 def write_mipmaps(master: Image.Image, name: str) -> None:
     for density, px in MIPMAPS.items():
@@ -281,6 +388,7 @@ def main() -> None:
         ("ic_launcher_vivid", render_vivid()),
         ("ic_launcher_minimal", render_minimal()),
         ("ic_launcher_clapper", render_clapper()),
+        ("ic_launcher_cream", render_cream()),
     ]
     for name, master in variants:
         write_mipmaps(master, name)
