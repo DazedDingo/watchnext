@@ -19,6 +19,7 @@ import '../../providers/onboarding_provider.dart';
 import '../onboarding/onboarding_screen.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
+import '../../providers/not_interested_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/recommendations_provider.dart';
 import '../../providers/runtime_filter_provider.dart';
@@ -175,6 +176,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final includeWatched = ref.watch(includeWatchedProvider);
     final askAiPlacement = ref.watch(askAiPlacementProvider);
     final watchedKeys = ref.watch(watchedKeysProvider);
+    final notInterestedKeys = ref.watch(notInterestedKeysProvider);
     final uid = ref.watch(authStateProvider).value?.uid;
     final effectiveUid = mode == ViewMode.solo ? uid : null;
 
@@ -292,9 +294,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Watched filter — default excludes anything the household (Together) or
     // current user (Solo) has already watched. User can flip the toggle in the
     // filter panel to bring them back.
-    final filtered = includeWatched
+    final watchedFiltered = includeWatched
         ? curatorFiltered
         : curatorFiltered.where((r) => !watchedKeys.contains(r.id)).toList();
+
+    // "Not interested" filter — always applied, regardless of includeWatched.
+    // Recovery is via Library → Hidden, not a Home toggle, so the dismissal
+    // sticks until the user explicitly unmarks it.
+    final filtered = notInterestedKeys.isEmpty
+        ? watchedFiltered
+        : watchedFiltered
+            .where((r) => !notInterestedKeys.contains(r.id))
+            .toList();
 
     // Animation soft cap — trending TV + top-rated TV are heavily anime-
     // weighted on TMDB and there's no server-side exclude, so the list

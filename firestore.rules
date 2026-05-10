@@ -32,6 +32,7 @@ service cloud.firestore {
       }
       match /ratings/{ratingId}        { allow read, write: if isMember(householdId); }
       match /watchlist/{itemId}        { allow read, write: if isMember(householdId); }
+      match /notInterested/{itemId}    { allow read, write: if isMember(householdId); }
       match /predictions/{predictionId}{ allow read, write: if isMember(householdId); }
       match /recommendations/{recId}   { allow read, write: if isMember(householdId); }
       match /decisionHistory/{id}      { allow read, write: if isMember(householdId); }

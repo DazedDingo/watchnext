@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchnext/providers/auth_provider.dart';
 import 'package:watchnext/providers/media_type_filter_provider.dart';
 import 'package:watchnext/providers/mode_provider.dart';
+import 'package:watchnext/providers/not_interested_provider.dart';
 import 'package:watchnext/providers/stats_provider.dart';
 import 'package:watchnext/providers/tmdb_provider.dart';
 import 'package:watchnext/providers/upcoming_provider.dart';
@@ -39,6 +40,7 @@ ProviderContainer _container({
         .overrideWith((_) => _FixedModeController(ViewMode.together)),
     mediaTypeFilterProvider.overrideWithValue(mediaType),
     watchedKeysProvider.overrideWithValue(watchedKeys),
+    notInterestedKeysProvider.overrideWithValue(const <String>{}),
     tasteProfileProvider.overrideWith((_) => Stream.value(tasteProfile)),
     currentUidProvider.overrideWithValue(null),
   ]);

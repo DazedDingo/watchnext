@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/rating.dart';
 import '../models/watch_entry.dart';
 import 'mode_provider.dart';
+import 'not_interested_provider.dart';
 import 'ratings_provider.dart';
 import 'watch_entries_provider.dart';
 
@@ -57,6 +58,7 @@ final rewatchForYouProvider = Provider.autoDispose<List<RewatchTitle>>((ref) {
   final entries = ref.watch(watchEntriesProvider).value ?? const <WatchEntry>[];
   final mode = ref.watch(viewModeProvider);
   final uid = FirebaseAuth.instance.currentUser?.uid;
+  final notInterestedKeys = ref.watch(notInterestedKeysProvider);
 
   if (ratings.isEmpty || entries.isEmpty) return const [];
 
@@ -94,6 +96,10 @@ final rewatchForYouProvider = Provider.autoDispose<List<RewatchTitle>>((ref) {
     final last = watchEntry.lastWatchedAt;
     if (last == null) continue;
     if (last.isAfter(staleCutoff)) continue;
+    if (notInterestedKeys.contains(
+        '${watchEntry.mediaType}:${watchEntry.tmdbId}')) {
+      continue;
+    }
     out.add(RewatchTitle(
       mediaType: watchEntry.mediaType,
       tmdbId: watchEntry.tmdbId,

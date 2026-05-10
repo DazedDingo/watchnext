@@ -8,6 +8,7 @@ import '../utils/tmdb_genres.dart';
 import 'auth_provider.dart';
 import 'media_type_filter_provider.dart';
 import 'mode_provider.dart';
+import 'not_interested_provider.dart';
 import 'stats_provider.dart';
 import 'tmdb_provider.dart';
 import 'watch_entries_provider.dart';
@@ -164,6 +165,7 @@ final upcomingForYouProvider =
   final tmdb = ref.watch(tmdbServiceProvider);
   final profile = ref.watch(tasteProfileProvider).value;
   final watchedKeys = ref.watch(watchedKeysProvider);
+  final notInterestedKeys = ref.watch(notInterestedKeysProvider);
   final mode = ref.watch(viewModeProvider);
   final uid = ref.watch(currentUidProvider);
 
@@ -191,6 +193,7 @@ final upcomingForYouProvider =
       final t = _rowToTitle(row, 'movie', genreWeights);
       if (t == null) continue;
       if (watchedKeys.contains(t.key)) continue;
+      if (notInterestedKeys.contains(t.key)) continue;
       // Defence against TMDB returning rows whose `release_date` somehow
       // sneaks past the server-side filter (community-edited primary
       // dates, theatrical re-releases). Strict floor: within the
@@ -214,7 +217,10 @@ final upcomingForYouProvider =
       final t = _rowToTitle(row, 'tv', genreWeights);
       if (t == null) continue;
       // No watchedKeys filter — returning shows the household already
-      // follows are what makes "new seasons" valuable here.
+      // follows are what makes "new seasons" valuable here. The NI filter
+      // still applies, though: if the user explicitly hid the show, a new
+      // season shouldn't drag it back into the carousel.
+      if (notInterestedKeys.contains(t.key)) continue;
       out.add(t);
     }
   }

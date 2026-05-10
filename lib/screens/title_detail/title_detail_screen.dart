@@ -18,6 +18,7 @@ import '../../providers/external_ratings_provider.dart';
 import '../../providers/household_provider.dart';
 import '../../providers/include_watched_provider.dart';
 import '../../providers/mode_provider.dart';
+import '../../providers/not_interested_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/prediction_provider.dart';
 import '../../providers/recommendations_provider.dart';
@@ -363,6 +364,74 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
     );
   }
 
+  /// Toggle "Not interested" for this title. Mode-aware:
+  ///   - Solo  → solo-scoped dismissal (only this user stops seeing it)
+  ///   - Together → shared dismissal (both partners stop seeing it)
+  ///
+  /// On unmark we clear BOTH scopes for this user so a single tap recovers
+  /// regardless of which scope marked it — the user shouldn't have to know
+  /// or remember whether the title was hidden solo or shared.
+  Future<void> _toggleNotInterested(Map<String, dynamic> d) async {
+    final hh = ref.read(householdIdProvider).value;
+    final uid = ref.read(authStateProvider).value?.uid;
+    if (hh == null || uid == null) return;
+    final svc = ref.read(notInterestedServiceProvider);
+    final mode = ref.read(viewModeProvider);
+    final wasNI = ref.read(isNotInterestedProvider((
+      mediaType: widget.mediaType,
+      tmdbId: widget.tmdbId,
+    )));
+    final title =
+        (d['title'] ?? d['name'] ?? 'Untitled') as String;
+    final posterPath = d['poster_path'] as String?;
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (wasNI) {
+      await svc.unmarkAllScopes(
+        householdId: hh,
+        mediaType: widget.mediaType,
+        tmdbId: widget.tmdbId,
+        uid: uid,
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text('"$title" will appear in recommendations again.'),
+        duration: const Duration(seconds: 2),
+      ));
+      return;
+    }
+
+    final scope = mode == ViewMode.solo ? 'solo' : 'shared';
+    await svc.mark(
+      householdId: hh,
+      mediaType: widget.mediaType,
+      tmdbId: widget.tmdbId,
+      title: title,
+      posterPath: posterPath,
+      markedByUid: uid,
+      scope: scope,
+      ownerUid: scope == 'solo' ? uid : null,
+    );
+    if (!mounted) return;
+    final scopeLabel = scope == 'solo' ? 'just you' : 'both partners';
+    messenger.showSnackBar(SnackBar(
+      content: Text(
+        'Marked "$title" not interested ($scopeLabel won\'t see it).',
+      ),
+      duration: const Duration(seconds: 4),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () => svc.unmark(
+          householdId: hh,
+          mediaType: widget.mediaType,
+          tmdbId: widget.tmdbId,
+          scope: scope,
+          ownerUid: scope == 'solo' ? uid : null,
+        ),
+      ),
+    ));
+  }
+
   Future<void> _openRatingSheet(Map<String, dynamic> d) async {
     final saved = await RatingSheet.show(
       context,
@@ -603,6 +672,10 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                 canPredict: canPredict,
                 canReveal: canReveal,
                 hasImdb: _imdbIdFor(d) != null,
+                isNotInterested: ref.watch(isNotInterestedProvider((
+                  mediaType: widget.mediaType,
+                  tmdbId: widget.tmdbId,
+                ))),
                 onWatchlistTap: () => _openScopeSheet(
                   d,
                   currentShared: sharedEntry,
@@ -619,6 +692,7 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
                     context.push('/reveal/${widget.mediaType}/${widget.tmdbId}'),
                 onStremio: () => _openInStremio(d),
                 onImdb: () => _openOnImdb(d),
+                onToggleNotInterested: () => _toggleNotInterested(d),
               )),
               if (overview != null && overview.isNotEmpty)
                 _dimmable(Padding(
@@ -858,6 +932,7 @@ class _ActionRow extends StatelessWidget {
   final bool canPredict;
   final bool canReveal;
   final bool hasImdb;
+  final bool isNotInterested;
   final VoidCallback onWatchlistTap;
   final ValueChanged<_WatchStatus> onWatchStatus;
   final VoidCallback onRate;
@@ -865,6 +940,7 @@ class _ActionRow extends StatelessWidget {
   final VoidCallback onReveal;
   final VoidCallback onStremio;
   final VoidCallback onImdb;
+  final VoidCallback onToggleNotInterested;
 
   const _ActionRow({
     required this.mediaType,
@@ -876,6 +952,7 @@ class _ActionRow extends StatelessWidget {
     required this.canPredict,
     required this.canReveal,
     required this.hasImdb,
+    required this.isNotInterested,
     required this.onWatchlistTap,
     required this.onWatchStatus,
     required this.onRate,
@@ -883,6 +960,7 @@ class _ActionRow extends StatelessWidget {
     required this.onReveal,
     required this.onStremio,
     required this.onImdb,
+    required this.onToggleNotInterested,
   });
 
   String get _watchlistLabel => switch ((onShared, onSolo)) {
@@ -979,13 +1057,17 @@ class _ActionRow extends StatelessWidget {
             label: 'Rate',
             onPressed: onRate,
           ),
-          if (canPredict || canReveal)
-            _PredictOverflowMenu(
-              canPredict: canPredict,
-              canReveal: canReveal,
-              onPredict: onPredict,
-              onReveal: onReveal,
-            ),
+          // Always render — the "Not interested" toggle gives the menu a
+          // permanent reason to exist, on top of the gated Predict / Reveal
+          // entries it shipped with.
+          _MoreActionsMenu(
+            canPredict: canPredict,
+            canReveal: canReveal,
+            isNotInterested: isNotInterested,
+            onPredict: onPredict,
+            onReveal: onReveal,
+            onToggleNotInterested: onToggleNotInterested,
+          ),
           if (hasImdb) ...[
             _ExternalLinkButton(
               icon: Icons.play_circle_outline,
@@ -1014,30 +1096,35 @@ class _ActionRow extends StatelessWidget {
 /// Keeping them reachable without eating primary real estate. A small accent
 /// dot draws attention when a Reveal is actually waiting (both members have
 /// predicted + rated), which is the only state that actively wants the user.
-class _PredictOverflowMenu extends StatelessWidget {
+class _MoreActionsMenu extends StatelessWidget {
   final bool canPredict;
   final bool canReveal;
+  final bool isNotInterested;
   final VoidCallback onPredict;
   final VoidCallback onReveal;
+  final VoidCallback onToggleNotInterested;
 
-  const _PredictOverflowMenu({
+  const _MoreActionsMenu({
     required this.canPredict,
     required this.canReveal,
+    required this.isNotInterested,
     required this.onPredict,
     required this.onReveal,
+    required this.onToggleNotInterested,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return PopupMenuButton<String>(
-      tooltip: 'Prediction game',
+      tooltip: 'More actions',
       padding: EdgeInsets.zero,
       offset: const Offset(0, 36),
       icon: Stack(
         clipBehavior: Clip.none,
         children: [
           const Icon(Icons.more_horiz, size: 20),
+          // Reveal-ready dot is the only state worth pulling the user in.
           if (canReveal)
             Positioned(
               right: -2,
@@ -1076,10 +1163,26 @@ class _PredictOverflowMenu extends StatelessWidget {
               ],
             ),
           ),
+        PopupMenuItem(
+          value: 'not_interested',
+          child: Row(
+            children: [
+              Icon(
+                isNotInterested
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+                size: 18,
+              ),
+              const SizedBox(width: 12),
+              Text(isNotInterested ? 'Interested again' : 'Not interested'),
+            ],
+          ),
+        ),
       ],
       onSelected: (v) {
         if (v == 'predict') onPredict();
         if (v == 'reveal') onReveal();
+        if (v == 'not_interested') onToggleNotInterested();
       },
     );
   }

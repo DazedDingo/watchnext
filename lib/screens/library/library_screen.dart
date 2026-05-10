@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/episode.dart';
+import '../../models/not_interested_item.dart';
 import '../../models/watch_entry.dart';
 import '../../models/watchlist_item.dart';
 import '../../providers/auth_provider.dart';
@@ -13,6 +14,7 @@ import '../../providers/household_provider.dart';
 import '../../providers/library_filter_provider.dart';
 import '../../providers/media_type_filter_provider.dart';
 import '../../providers/mode_provider.dart';
+import '../../providers/not_interested_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/watch_entries_provider.dart';
 import '../../providers/watchlist_provider.dart';
@@ -25,12 +27,13 @@ import '../../widgets/mode_toggle.dart';
 import '../rating/rating_sheet.dart';
 
 const _libraryHelp =
-    'Everything the household has saved or watched, in four tabs.\n\n'
+    'Everything the household has saved, watched, or hidden, in five tabs.\n\n'
     '• Saved — shared watchlist (Together) or shared + your solo saves (Solo). '
     'Swipe left to remove. Tap to open the title.\n'
     '• Watching — TV in progress (from Trakt activity or "Watching" set on a title).\n'
     '• Watched — finished titles and movies, with the average household rating when rated.\n'
-    '• Unrated — titles and episodes waiting on a star rating. Tap the star to rate.\n\n'
+    '• Unrated — titles and episodes waiting on a star rating. Tap the star to rate.\n'
+    '• Hidden — titles you marked "Not interested". Swipe left to bring back into recommendations.\n\n'
     'Link Trakt in Profile to auto-populate Watching, Watched, and Unrated.';
 
 class LibraryScreen extends ConsumerWidget {
@@ -39,7 +42,7 @@ class LibraryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Library'),
@@ -58,6 +61,7 @@ class LibraryScreen extends ConsumerWidget {
               Tab(text: 'Watching'),
               Tab(text: 'Watched'),
               Tab(text: 'Unrated'),
+              Tab(text: 'Hidden'),
             ],
           ),
         ),
@@ -67,6 +71,7 @@ class LibraryScreen extends ConsumerWidget {
             _WatchingTab(),
             _WatchedTab(),
             _UnratedTab(),
+            _HiddenTab(),
           ],
         ),
       ),
@@ -1524,6 +1529,146 @@ class _RateAllSheetState extends ConsumerState<_RateAllSheet> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Hidden ("Not interested" list) ───────────────────────────────────────────
+
+/// Displays everything the household has dismissed via "Not interested".
+/// Solo mode shows shared dismissals + this user's solo dismissals; Together
+/// mode shows shared dismissals only (your partner's solo dismissals are
+/// theirs to manage). Swipe-left to bring a title back into recommendations
+/// — the same single-tap recovery the title-detail toggle uses, mapped to
+/// `unmarkAllScopes` so the user doesn't need to know which scope hid it.
+class _HiddenTab extends ConsumerWidget {
+  const _HiddenTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(notInterestedProvider);
+    final visible = ref.watch(visibleNotInterestedProvider);
+    final mode = ref.watch(viewModeProvider);
+    final householdId = ref.watch(householdIdProvider).value ?? '';
+    final uid = ref.watch(authStateProvider).value?.uid;
+
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => AsyncErrorView(
+        error: e,
+        onRetry: () => ref.invalidate(notInterestedProvider),
+      ),
+      data: (_) {
+        if (visible.isEmpty) {
+          return EmptyState(
+            icon: Icons.visibility_off_outlined,
+            title: 'Nothing hidden yet',
+            subtitle: mode == ViewMode.solo
+                ? 'Mark "Not interested" on a title to hide it from your '
+                    'recommendations. Hidden titles will appear here.'
+                : 'Mark "Not interested" together to hide a title from '
+                    'recommendations for both of you.',
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: visible.length,
+          itemBuilder: (ctx, i) => _HiddenTile(
+            item: visible[i],
+            onUnhide: (uid == null || householdId.isEmpty)
+                ? null
+                : () async {
+                    HapticFeedback.selectionClick();
+                    await ref
+                        .read(notInterestedServiceProvider)
+                        .unmarkAllScopes(
+                          householdId: householdId,
+                          mediaType: visible[i].mediaType,
+                          tmdbId: visible[i].tmdbId,
+                          uid: uid,
+                        );
+                  },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HiddenTile extends StatelessWidget {
+  final NotInterestedItem item;
+  final Future<void> Function()? onUnhide;
+  const _HiddenTile({required this.item, required this.onUnhide});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final scopeLabel = item.scope == 'shared' ? 'shared' : 'solo';
+    final poster = item.posterPath == null
+        ? null
+        : TmdbService.imageUrl(item.posterPath, size: 'w92');
+
+    return Dismissible(
+      key: ValueKey('hidden-${item.id}'),
+      direction:
+          onUnhide == null ? DismissDirection.none : DismissDirection.endToStart,
+      background: Container(
+        color: scheme.primary.withValues(alpha: 0.85),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.visibility, color: scheme.onPrimary),
+            const SizedBox(width: 6),
+            Text(
+              'Bring back',
+              style: TextStyle(
+                color: scheme.onPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      onDismissed: (_) => onUnhide?.call(),
+      child: ListTile(
+        onTap: () => context
+            .push('/title/${item.mediaType}/${item.tmdbId}'),
+        leading: poster == null
+            ? Container(
+                width: 40,
+                height: 60,
+                color: scheme.surfaceContainerHighest,
+                alignment: Alignment.center,
+                child: Icon(Icons.movie, color: scheme.onSurfaceVariant),
+              )
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.network(
+                  poster,
+                  width: 40,
+                  height: 60,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(
+                    width: 40,
+                    height: 60,
+                    color: scheme.surfaceContainerHighest,
+                  ),
+                ),
+              ),
+        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+          '${item.mediaType == 'movie' ? 'Movie' : 'TV'} · hidden $scopeLabel',
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+        ),
+        trailing: Icon(
+          Icons.swipe_left,
+          size: 18,
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+        ),
       ),
     );
   }
