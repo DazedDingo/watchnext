@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,6 +15,16 @@ final notInterestedServiceProvider =
 /// Raw stream of every NI doc in the household — shared + every member's
 /// solo. Screens that need just the keys to filter against use
 /// [notInterestedKeysProvider] instead.
+///
+/// Errors are caught and converted to an empty list so a missing
+/// Firestore-rules deploy on the new `/notInterested/{itemId}` row
+/// doesn't surface as a permission-denied banner on Home / title detail
+/// (those surfaces only need the FILTER set; an empty filter is the
+/// honest fallback when reads fail). The error is still logged via
+/// `dart:developer` so the rules-deployment requirement is visible in
+/// console. The Library → Hidden tab DOES surface the error explicitly
+/// via `AsyncErrorView` — that's the right place to learn "I can't
+/// read this collection right now."
 final notInterestedProvider =
     StreamProvider<List<NotInterestedItem>>((ref) async* {
   final householdId = ref.watch(householdIdProvider).value;
@@ -20,11 +32,31 @@ final notInterestedProvider =
     yield const [];
     return;
   }
-  yield* FirebaseFirestore.instance
+  // Yield an empty list FIRST so downstream filter providers transition
+  // out of `loading` immediately. If the snapshots stream subsequently
+  // errors (e.g. Firestore rules for /notInterested haven't been
+  // deployed yet — this row is new in v0.9.7), the catch swallows it
+  // and the empty list remains the last emitted value. Recommendation
+  // surfaces (Home / Upcoming / Rewatch) keep working with an empty
+  // filter, which is the correct degrade — the alternative is a
+  // permission-denied error banner on every screen.
+  yield const [];
+  final stream = FirebaseFirestore.instance
       .collection('households/$householdId/notInterested')
       .orderBy('marked_at', descending: true)
       .snapshots()
       .map((s) => s.docs.map(NotInterestedItem.fromDoc).toList());
+  try {
+    yield* stream;
+  } catch (e, st) {
+    developer.log(
+      'notInterestedProvider stream error (deploy `firestore:rules`?): $e',
+      name: 'wn.notInterested',
+      error: e,
+      stackTrace: st,
+    );
+    // Generator ends; the empty list yielded above stays the last value.
+  }
 });
 
 /// Items the *current user* would see in the Library "Hidden" tab —
