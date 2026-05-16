@@ -37,6 +37,7 @@ export {
 export { fetchExternalRatings } from "./externalRatings";
 export { updateTonightsPickDaily } from "./tonightsPick";
 export { notifyNextEpisodeDaily } from "./notifyNextEpisode";
+export { refreshUpNextWidgetEvery6Hours } from "./refreshUpNextWidget";
 
 const GITHUB_PAT = defineSecret("GITHUB_PAT");
 

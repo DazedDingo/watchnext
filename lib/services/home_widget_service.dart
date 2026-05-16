@@ -82,6 +82,44 @@ class HomeWidgetService {
     );
   }
 
+  /// Write an Up Next payload that arrived as a flat FCM `data` map (from
+  /// the `refreshUpNextWidget` Cloud Function) straight into home_widget
+  /// SharedPreferences and trigger the AppWidget update.
+  ///
+  /// Designed to run from the background FCM isolate — does NOT touch
+  /// Riverpod, Firestore, or any app state. The payload is the same flat
+  /// key shape the AppWidgetProvider already reads, so this is essentially
+  /// a copy-keys-and-go. Empty-string values from the server are treated
+  /// as "clear this slot" — FCM data maps can't carry null, so the server
+  /// encodes absence as `""`.
+  static Future<void> pushUpNextFromFcmPayload(
+      Map<String, dynamic> data) async {
+    await _ensureAppGroup();
+    final countStr = (data['up_next_count'] as String?) ?? '0';
+    final count = int.tryParse(countStr) ?? 0;
+    await HomeWidget.saveWidgetData<int>('up_next_count', count);
+    for (var i = 0; i < kUpNextMaxTiles; i++) {
+      for (final suffix in const [
+        'title',
+        'episode_label',
+        'when',
+        'uri',
+      ]) {
+        final key = 'up_next_${i}_$suffix';
+        final raw = data[key] as String?;
+        // Server sends "" to mean "clear" — write null so the Kotlin side's
+        // `getString(...)` returns null and the row hides cleanly.
+        final value = (raw == null || raw.isEmpty) ? null : raw;
+        await HomeWidget.saveWidgetData<String>(key, value);
+      }
+    }
+    await HomeWidget.updateWidget(
+      name: upNextWidgetName,
+      androidName: upNextWidgetName,
+    );
+    _logEntry('refresh_widget FCM applied, count=$count');
+  }
+
   /// Push the current Tonight's Pick. null clears all fields so the
   /// AppWidgetProvider falls back to its empty state ("Open WatchNext to
   /// refresh").

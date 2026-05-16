@@ -3,6 +3,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'home_widget_service.dart';
+
 /// Wraps Firebase Messaging setup for Phase 10.
 ///
 /// Responsibilities:
@@ -43,13 +45,17 @@ class NotificationService {
 
     // 4a. Foreground message: show a snack + navigate on tap.
     FirebaseMessaging.onMessage.listen((msg) {
-      if (!context.mounted) return;
       final data = msg.data;
       switch (data['type']) {
         case 'reveal_ready':
-          _showRevealSnack(context, data);
+          if (context.mounted) _showRevealSnack(context, data);
         case 'next_episode_today':
-          _showNextEpisodeSnack(context, data);
+          if (context.mounted) _showNextEpisodeSnack(context, data);
+        case 'refresh_widget':
+          // Silent — apply directly to home_widget prefs. The bg handler
+          // in main.dart owns the same path when the app isn't running.
+          HomeWidgetService.pushUpNextFromFcmPayload(
+              data.cast<String, dynamic>());
       }
     });
 
