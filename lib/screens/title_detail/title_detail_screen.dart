@@ -540,7 +540,13 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
         appBar: AppBar(
           leading: IconButton(
               icon: const Icon(Icons.arrow_back),
-              onPressed: () => context.pop()),
+              // Cold-start from a home-screen widget tap lands here with
+              // an empty back stack ([/title/...] only), so a bare
+              // `context.pop()` is a no-op and the user feels "locked"
+              // on the screen. Fall back to /home whenever pop can't
+              // unwind — guarantees an escape regardless of entry path.
+              onPressed: () =>
+                  context.canPop() ? context.pop() : context.go('/home')),
           title: Text(_title ?? 'Title'),
           actions: const [
             HelpButton(title: 'Title details', body: _titleDetailHelp)
@@ -603,7 +609,10 @@ class _TitleDetailScreenState extends ConsumerState<TitleDetailScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
+        leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () =>
+                context.canPop() ? context.pop() : context.go('/home')),
         title: Text(_title ?? (widget.mediaType == 'movie' ? 'Movie' : 'TV Show')),
         actions: const [HelpButton(title: 'Title details', body: _titleDetailHelp)],
       ),

@@ -314,11 +314,50 @@ class ScaffoldWithNavBar extends ConsumerStatefulWidget {
 class _ErrorScreen extends StatelessWidget {
   final String message;
   const _ErrorScreen(this.message);
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(),
-        body: Center(child: Text(message)),
-      );
+  Widget build(BuildContext context) {
+    // Important: an `AppBar()` with no `leading` auto-implies a back arrow
+    // ONLY when Navigator.canPop() returns true. Cold-start widget taps
+    // land here with an empty back stack — no back arrow gets drawn and
+    // the user has no way out except killing the app. Always render an
+    // explicit home leading + a Go home button in the body so the screen
+    // is never a dead-end regardless of how the user landed here.
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.home_outlined),
+          tooltip: 'Go home',
+          onPressed: () => context.go('/home'),
+        ),
+        title: const Text('Something went wrong'),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline,
+                  size: 48, color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                icon: const Icon(Icons.home_outlined),
+                label: const Text('Go home'),
+                onPressed: () => context.go('/home'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // Share-intent + notification setup legitimately needs the auth-shell
