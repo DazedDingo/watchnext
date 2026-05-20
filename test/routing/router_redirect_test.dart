@@ -160,4 +160,66 @@ void main() {
       });
     });
   });
+
+  group('pickRouterLoc', () {
+    test('wn:// URI always uses the raw URI string regardless of matchedLocation', () {
+      // GoRouter parses "title" as host and "/tv/42" as path on a custom
+      // scheme — matchedLocation ends up populated with the path-only
+      // portion, which is useless to the wn://-handler. Always feed the
+      // raw URI through so the redirect can translate it.
+      expect(
+        pickRouterLoc(
+          uri: Uri.parse('wn://title/tv/42'),
+          matchedLocation: '/tv/42',
+        ),
+        'wn://title/tv/42',
+      );
+      expect(
+        pickRouterLoc(
+          uri: Uri.parse('wn://title/tv/42?season=3&episode=4'),
+          matchedLocation: '/tv/42',
+        ),
+        'wn://title/tv/42?season=3&episode=4',
+      );
+      // Refresh tile fires `wn://refresh` — same handling.
+      expect(
+        pickRouterLoc(
+          uri: Uri.parse('wn://refresh'),
+          matchedLocation: '',
+        ),
+        'wn://refresh',
+      );
+    });
+
+    test('normal /path routes use matchedLocation when populated', () {
+      expect(
+        pickRouterLoc(
+          uri: Uri.parse('/home'),
+          matchedLocation: '/home',
+        ),
+        '/home',
+      );
+      expect(
+        pickRouterLoc(
+          uri: Uri.parse('/title/tv/42?season=3'),
+          matchedLocation: '/title/tv/42',
+        ),
+        '/title/tv/42',
+      );
+    });
+
+    test('falls back to the raw URI when matchedLocation is empty', () {
+      // Edge case for paths that GoRouter never matched against any
+      // configured route — preserve the historical behaviour so the
+      // redirect (which often returns a clean fallback like /home or
+      // /login) still sees the user's actual destination string.
+      expect(
+        pickRouterLoc(
+          uri: Uri.parse('/unknown-path'),
+          matchedLocation: '',
+        ),
+        '/unknown-path',
+      );
+    });
+  });
 }

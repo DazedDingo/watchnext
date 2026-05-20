@@ -29,6 +29,24 @@ import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'widgets/liquid_nav_bar.dart';
 
+/// Pick the `loc` string fed to [computeRouterRedirect].
+///
+/// Custom-scheme URIs like `wn://title/tv/42` are tricky: GoRouter parses
+/// `"title"` as the URI HOST and `"/tv/42"` as the path, so
+/// `state.matchedLocation` ends up `"/tv/42"` — non-empty and useless for
+/// our wn://-handler in [computeRouterRedirect]. Always feed the raw URI
+/// string when the scheme is `wn://`, regardless of what GoRouter put in
+/// `matchedLocation`. Normal `/path` routes keep the old behaviour:
+/// prefer `matchedLocation` when present (after pattern matching), fall
+/// back to the raw URI for unmatched paths.
+///
+/// Extracted so a regression test can lock the wn:// case directly.
+String pickRouterLoc({required Uri uri, required String matchedLocation}) {
+  if (uri.scheme == 'wn') return uri.toString();
+  if (matchedLocation.isEmpty) return uri.toString();
+  return matchedLocation;
+}
+
 /// Pure redirect rule for the app router. Extracted so it can be unit-tested
 /// without Firebase init. Called on every navigation attempt.
 String? computeRouterRedirect({required bool signedIn, required String loc}) {
@@ -72,13 +90,10 @@ final _router = GoRouter(
   initialLocation: '/splash',
   redirect: (_, state) => computeRouterRedirect(
     signedIn: FirebaseAuth.instance.currentUser != null,
-    // `state.uri.toString()` rather than `matchedLocation` — for an
-    // unmatched custom-scheme URI like `wn://title/tv/42`,
-    // `matchedLocation` is empty but `state.uri` carries the raw URI
-    // we want to translate.
-    loc: state.matchedLocation.isEmpty
-        ? state.uri.toString()
-        : state.matchedLocation,
+    loc: pickRouterLoc(
+      uri: state.uri,
+      matchedLocation: state.matchedLocation,
+    ),
   ),
   errorBuilder: (_, state) =>
       _ErrorScreen('Couldn\'t open ${state.uri.toString()}.'),
