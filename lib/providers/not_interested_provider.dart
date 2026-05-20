@@ -35,28 +35,30 @@ final notInterestedProvider =
   // Yield an empty list FIRST so downstream filter providers transition
   // out of `loading` immediately. If the snapshots stream subsequently
   // errors (e.g. Firestore rules for /notInterested haven't been
-  // deployed yet — this row is new in v0.9.7), the catch swallows it
-  // and the empty list remains the last emitted value. Recommendation
-  // surfaces (Home / Upcoming / Rewatch) keep working with an empty
-  // filter, which is the correct degrade — the alternative is a
-  // permission-denied error banner on every screen.
+  // deployed yet — this row is new in v0.9.7), `.handleError` swaps the
+  // error event for a log line and drops it, so the empty list stays as
+  // the last value and recommendation surfaces keep working.
+  //
+  // NB: `try { yield* stream; } catch (...)` in `async*` does NOT catch
+  // stream-error events — the error still propagates to the consumer's
+  // AsyncValue. Use `.handleError` on the stream itself. (The prior
+  // try/catch was a bug — see commit 687c5ff for why it didn't work.)
   yield const [];
-  final stream = FirebaseFirestore.instance
+  yield* FirebaseFirestore.instance
       .collection('households/$householdId/notInterested')
       .orderBy('marked_at', descending: true)
       .snapshots()
+      .handleError((Object e, StackTrace st) {
+        developer.log(
+          'notInterestedProvider stream error (deploy `firestore:rules`?): $e',
+          name: 'wn.notInterested',
+          error: e,
+          stackTrace: st,
+        );
+        // Returning normally from handleError drops the error event;
+        // the consumer never sees it.
+      })
       .map((s) => s.docs.map(NotInterestedItem.fromDoc).toList());
-  try {
-    yield* stream;
-  } catch (e, st) {
-    developer.log(
-      'notInterestedProvider stream error (deploy `firestore:rules`?): $e',
-      name: 'wn.notInterested',
-      error: e,
-      stackTrace: st,
-    );
-    // Generator ends; the empty list yielded above stays the last value.
-  }
 });
 
 /// Items the *current user* would see in the Library "Hidden" tab —
